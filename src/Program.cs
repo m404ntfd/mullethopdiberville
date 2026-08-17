@@ -1669,6 +1669,36 @@ internal sealed class KioskForm : Form
             }, 160);
           };
 
+          const repairProviderLogo = () => {
+            const logo = document.querySelector('div.headings > img');
+            if (!logo || logo.dataset.mulletHopLogoRepaired === '1') return;
+
+            logo.dataset.mulletHopLogoRepaired = '1';
+            const showFallback = () => {
+              const holder = logo.parentElement;
+              if (!holder) return;
+              logo.remove();
+              if (holder.querySelector('#mullet-hop-provider-logo-fallback')) return;
+              const fallback = document.createElement('div');
+              fallback.id = 'mullet-hop-provider-logo-fallback';
+              fallback.textContent = 'MULLET HOP';
+              holder.insertBefore(fallback, holder.firstChild);
+            };
+
+            if (!kioskLogoSource) {
+              showFallback();
+              return;
+            }
+
+            logo.id = 'mullet-hop-provider-logo';
+            logo.alt = 'Mullet Hop fish logo';
+            logo.removeAttribute('width');
+            logo.removeAttribute('height');
+            logo.removeAttribute('srcset');
+            logo.addEventListener('error', showFallback, { once: true });
+            logo.src = kioskLogoSource;
+          };
+
           const applyWaiverTheme = () => {
             if (!document.body) return;
             if (location.hostname.toLowerCase() !== 'mullet.lilypadpos.app' ||
@@ -1860,6 +1890,22 @@ internal sealed class KioskForm : Form
                 touch-action: none;
               }
               body.mullet-hop-waiver-themed img { max-width: 100%; }
+              #mullet-hop-provider-logo {
+                display: block !important;
+                width: min(150px, 42vw) !important;
+                height: 150px !important;
+                max-height: 150px !important;
+                margin: 0 auto 14px !important;
+                object-fit: contain !important;
+              }
+              #mullet-hop-provider-logo-fallback {
+                margin: 0 auto 14px;
+                text-align: center;
+                color: #0877bd;
+                font: 800 clamp(32px, 5vw, 52px)/1 'Open Sans', Arial, sans-serif;
+                letter-spacing: -1px;
+                -webkit-text-stroke: 1px #101820;
+              }
               body.mullet-hop-waiver-themed hr {
                 height: 3px;
                 margin: 24px 0;
@@ -2119,6 +2165,7 @@ internal sealed class KioskForm : Form
             }
 
             document.body.classList.add('mullet-hop-waiver-themed');
+            repairProviderLogo();
             const main = document.getElementById('divMain') ||
                          document.querySelector('body > form') ||
                          document.querySelector("form[action*='waiver']") ||
