@@ -215,6 +215,7 @@ internal sealed class KioskForm : Form
     private bool _browserReady;
     private bool _hotKeyRegistered;
     private bool _showingThankYouPage;
+    private bool _showingClosedPage;
     private string? _pendingSwitchEmail;
     private string? _pendingSwitchChoice;
     private string? _lastWaiverEmail;
@@ -276,8 +277,11 @@ internal sealed class KioskForm : Form
         _retryTimer.Tick += (_, _) =>
         {
             _retryTimer.Stop();
-            if (_browserReady && !_isResetting)
+            if (_browserReady && !_isResetting && !_settings.StationClosed)
+            {
+                _showingClosedPage = false;
                 _webView.CoreWebView2.Navigate(_settings.StartUrl);
+            }
         };
 
         Shown += async (_, _) =>
@@ -355,7 +359,10 @@ internal sealed class KioskForm : Form
             _browserReady = true;
             _lastActivityUtc = DateTime.UtcNow;
             _idleTimer.Start();
-            _webView.CoreWebView2.Navigate(_settings.StartUrl);
+            if (_settings.StationClosed)
+                ShowStationClosedPage(connectionError: false);
+            else
+                _webView.CoreWebView2.Navigate(_settings.StartUrl);
             _webView.Focus();
             KioskLog.Write("Kiosk started.");
         }
@@ -379,7 +386,7 @@ internal sealed class KioskForm : Form
         browserSettings.IsPinchZoomEnabled = false;
         browserSettings.IsSwipeNavigationEnabled = false;
         browserSettings.AreHostObjectsAllowed = false;
-        browserSettings.IsBuiltInErrorPageEnabled = true;
+        browserSettings.IsBuiltInErrorPageEnabled = false;
 
         core.Profile.IsPasswordAutosaveEnabled = false;
         core.Profile.IsGeneralAutofillEnabled = false;
@@ -414,7 +421,7 @@ internal sealed class KioskForm : Form
         MarkActivity();
         _retryTimer.Stop();
 
-        if (IsInternalThankYouUri(e.Uri))
+        if (IsInternalKioskPageUri(e.Uri))
             return;
 
         if (IsAllowedUri(e.Uri))
@@ -436,13 +443,13 @@ internal sealed class KioskForm : Form
     {
         MarkActivity();
 
-        if (_showingThankYouPage)
+        if (_showingThankYouPage || _showingClosedPage)
             return;
 
-        if (!e.IsSuccess)
+        if (!e.IsSuccess || e.HttpStatusCode >= 400)
         {
-            ShowBanner("Connection problem — the waiver page will retry automatically.", false);
-            _retryTimer.Start();
+            KioskLog.Write($"Waiver navigation failed: {e.WebErrorStatus}; HTTP {e.HttpStatusCode}.");
+            ShowStationClosedPage(connectionError: true);
             return;
         }
 
@@ -541,7 +548,7 @@ internal sealed class KioskForm : Form
 
     private void IdleTimer_Tick(object? sender, EventArgs e)
     {
-        if (!_browserReady || _promptOpen || _isResetting || _completionTimer.Enabled)
+        if (!_browserReady || _promptOpen || _isResetting || _completionTimer.Enabled || _showingClosedPage)
             return;
 
         var idleFor = DateTime.UtcNow - _lastActivityUtc;
@@ -568,9 +575,9 @@ internal sealed class KioskForm : Form
             uri.AbsolutePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
-    private bool IsInternalThankYouUri(string? value)
+    private bool IsInternalKioskPageUri(string? value)
     {
-        if (!_showingThankYouPage || string.IsNullOrWhiteSpace(value))
+        if ((!_showingThankYouPage && !_showingClosedPage) || string.IsNullOrWhiteSpace(value))
             return false;
 
         return string.Equals(value, "about:blank", StringComparison.OrdinalIgnoreCase) ||
@@ -591,10 +598,12 @@ internal sealed class KioskForm : Form
 
     private void ShowThankYouPage(bool staffPreview, DateTime? scheduleTimeOverride)
     {
-        if (!_browserReady || _isResetting || (_showingThankYouPage && !staffPreview))
+        if (!_browserReady || _isResetting || _settings.StationClosed ||
+            (_showingThankYouPage && !staffPreview))
             return;
 
         _showingThankYouPage = true;
+        _showingClosedPage = false;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
@@ -627,14 +636,18 @@ internal sealed class KioskForm : Form
         {
             await _webView.CoreWebView2.Profile.ClearBrowsingDataAsync();
             _showingThankYouPage = false;
-            _webView.CoreWebView2.Navigate(_settings.StartUrl);
+            _showingClosedPage = false;
+            if (_settings.StationClosed)
+                ShowStationClosedPage(connectionError: false);
+            else
+                _webView.CoreWebView2.Navigate(_settings.StartUrl);
             _lastActivityUtc = DateTime.UtcNow;
             KioskLog.Write("Waiver reset: " + reason + ".");
         }
         catch (Exception ex)
         {
             KioskLog.Write("Reset error: " + ex.GetType().Name + " - " + ex.Message);
-            _retryTimer.Start();
+            ShowStationClosedPage(connectionError: !_settings.StationClosed);
         }
         finally
         {
@@ -666,6 +679,7 @@ internal sealed class KioskForm : Form
         {
             await _webView.CoreWebView2.Profile.ClearBrowsingDataAsync();
             _showingThankYouPage = false;
+            _showingClosedPage = false;
             _webView.CoreWebView2.Navigate(_settings.StartUrl);
             _lastActivityUtc = DateTime.UtcNow;
             KioskLog.Write("Restarting the waiver with the alternate guest option.");
@@ -716,6 +730,217 @@ internal sealed class KioskForm : Form
         catch (Exception ex)
         {
             KioskLog.Write("Waiver context restore error: " + ex.GetType().Name + " - " + ex.Message);
+        }
+    }
+
+    private void ShowStationClosedPage(bool connectionError)
+    {
+        if (!_browserReady)
+            return;
+
+        _showingThankYouPage = false;
+        _showingClosedPage = true;
+        _completionTimer.Stop();
+        _retryTimer.Stop();
+        HideBanner();
+        _webView.CoreWebView2.NavigateToString(BuildStationClosedHtml(connectionError));
+
+        if (connectionError && !_settings.StationClosed)
+            _retryTimer.Start();
+
+        KioskLog.Write(connectionError
+            ? "The branded connection-closed page was displayed; the waiver site will be retried automatically."
+            : "The staff-controlled waiver station closed page was displayed.");
+    }
+
+    private static string BuildStationClosedHtml(bool connectionError)
+    {
+        var logoDataUrl = GetApplicationLogoDataUrl();
+        var logoMarkup = string.IsNullOrWhiteSpace(logoDataUrl)
+            ? "<div class=\"logo-fallback\">MULLET HOP</div>"
+            : $"<img class=\"fish-logo\" src=\"{logoDataUrl}\" alt=\"Mullet Hop fish logo\">";
+        var statusMarkup = connectionError
+            ? """
+                <section class="message connection-message">
+                  <span class="message-label">CONNECTION ISSUE</span>
+                  <p>The application cannot reach the waiver website or does not have an internet connection.</p>
+                  <small>The kiosk will keep trying to reconnect automatically.</small>
+                </section>
+                """
+            : """
+                <section class="message closed-message">
+                  <span class="message-label">STATION CLOSED</span>
+                  <p>This waiver station is currently closed.</p>
+                </section>
+                """;
+
+        return $$"""
+            <!doctype html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Waiver Station Closed | Mullet Hop</title>
+              <style>
+                :root {
+                  --lime: #76c442;
+                  --aqua: #00a4d6;
+                  --blue: #0877bd;
+                  --purple: #75449a;
+                  --orange: #f58220;
+                  --ink: #101820;
+                  --paper: #ffffff;
+                }
+                * { box-sizing: border-box; }
+                html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+                body {
+                  font-family: 'Open Sans', 'Segoe UI', Arial, sans-serif;
+                  color: var(--ink);
+                  background:
+                    radial-gradient(circle at 8% 12%, rgba(118,196,66,.34) 0 8%, transparent 8.4%),
+                    radial-gradient(circle at 92% 16%, rgba(0,164,214,.32) 0 9%, transparent 9.4%),
+                    radial-gradient(circle at 88% 88%, rgba(117,68,154,.30) 0 11%, transparent 11.4%),
+                    radial-gradient(circle at 12% 88%, rgba(245,130,32,.27) 0 7%, transparent 7.4%),
+                    linear-gradient(135deg, #f7fff2 0%, #eefaff 50%, #faf3ff 100%);
+                  display: grid;
+                  place-items: center;
+                  padding: 28px;
+                }
+                .card {
+                  position: relative;
+                  width: min(980px, 94vw);
+                  max-height: 94vh;
+                  background: var(--paper);
+                  border: 4px solid var(--ink);
+                  border-radius: 30px;
+                  box-shadow: 0 22px 55px rgba(16,24,32,.24);
+                  overflow: hidden;
+                  text-align: center;
+                }
+                .stripe {
+                  height: 17px;
+                  background: linear-gradient(90deg, var(--lime) 0 25%, var(--aqua) 25% 50%, var(--purple) 50% 75%, var(--orange) 75% 100%);
+                }
+                .content { padding: clamp(24px, 4.5vh, 48px) clamp(28px, 6vw, 74px) 42px; }
+                .brand { min-height: 118px; display: grid; place-items: center; margin-bottom: 6px; }
+                .fish-logo { width: 132px; height: 132px; object-fit: contain; }
+                .logo-fallback {
+                  font-size: clamp(34px, 5vw, 60px);
+                  line-height: 1;
+                  font-weight: 800;
+                  color: var(--blue);
+                  -webkit-text-stroke: 2px var(--ink);
+                }
+                .closed-badge {
+                  display: inline-grid;
+                  place-items: center;
+                  min-width: 112px;
+                  height: 62px;
+                  margin: 4px auto 18px;
+                  padding: 0 24px;
+                  border: 4px solid var(--ink);
+                  border-radius: 999px;
+                  background: var(--orange);
+                  box-shadow: 0 8px 0 rgba(16,24,32,.12);
+                  color: var(--ink);
+                  font-size: 22px;
+                  line-height: 1;
+                  font-weight: 800;
+                  letter-spacing: 1px;
+                }
+                h1 {
+                  max-width: 820px;
+                  margin: 0 auto 24px;
+                  color: var(--purple);
+                  font-size: clamp(40px, 5.8vw, 72px);
+                  line-height: 1.02;
+                  font-weight: 800;
+                  letter-spacing: -2px;
+                }
+                .message {
+                  margin: 0 auto 20px;
+                  padding: 22px 28px;
+                  border-radius: 18px;
+                }
+                .connection-message { background: #fff6e9; border: 3px solid var(--orange); }
+                .closed-message { background: #eefaff; border: 3px solid var(--aqua); }
+                .message-label {
+                  display: inline-block;
+                  margin-bottom: 7px;
+                  color: var(--purple);
+                  font-size: 14px;
+                  font-weight: 800;
+                  letter-spacing: 1.5px;
+                }
+                .message p {
+                  margin: 0;
+                  font-size: clamp(20px, 2.2vw, 29px);
+                  line-height: 1.35;
+                  font-weight: 700;
+                }
+                .message small {
+                  display: block;
+                  margin-top: 9px;
+                  color: #53616d;
+                  font-size: 16px;
+                  font-weight: 600;
+                }
+                .assistance {
+                  margin: 0 auto;
+                  padding: 22px 28px;
+                  border: 3px solid var(--lime);
+                  border-radius: 18px;
+                  background: #f7fff2;
+                  font-size: clamp(21px, 2.35vw, 31px);
+                  line-height: 1.3;
+                  font-weight: 700;
+                }
+                .assistance strong { color: #397819; }
+                @media (max-height: 720px) {
+                  .content { padding-top: 20px; padding-bottom: 24px; }
+                  .brand { min-height: 80px; }
+                  .fish-logo { width: 88px; height: 88px; }
+                  .closed-badge { height: 50px; margin-bottom: 12px; font-size: 18px; }
+                  h1 { margin-bottom: 15px; }
+                  .message, .assistance { padding-top: 15px; padding-bottom: 15px; }
+                  .message { margin-bottom: 14px; }
+                }
+              </style>
+            </head>
+            <body>
+              <main class="card" aria-labelledby="closed-heading">
+                <div class="stripe"></div>
+                <div class="content">
+                  <div class="brand">{{logoMarkup}}</div>
+                  <div class="closed-badge" aria-hidden="true">CLOSED</div>
+                  <h1 id="closed-heading">WAIVER STATION CLOSED</h1>
+                  {{statusMarkup}}
+                  <section class="assistance">
+                    Please see a staff member at the <strong>front desk</strong> for assistance.
+                  </section>
+                </div>
+              </main>
+            </body>
+            </html>
+            """;
+    }
+
+    private static string GetApplicationLogoDataUrl()
+    {
+        try
+        {
+            using var icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            if (icon is null)
+                return string.Empty;
+
+            using var bitmap = icon.ToBitmap();
+            using var stream = new MemoryStream();
+            bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+            return "data:image/png;base64," + Convert.ToBase64String(stream.ToArray());
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 
@@ -1093,6 +1318,31 @@ internal sealed class KioskForm : Form
                                     staffPreview: true,
                                     scheduleTimeOverride: settingsDialog.SelectedDateTime);
                                 return;
+                            case StaffSettingsAction.ToggleStationClosed:
+                                var previousClosedSetting = _settings.StationClosed;
+                                try
+                                {
+                                    _settings.StationClosed = !previousClosedSetting;
+                                    _settings.Save();
+                                    if (_settings.StationClosed)
+                                        ShowStationClosedPage(connectionError: false);
+                                    else
+                                        await ResetForNextGuestAsync("staff reopened waiver station", showStatus: false);
+
+                                    KioskLog.Write(_settings.StationClosed
+                                        ? "Staff turned on the waiver station closed page."
+                                        : "Staff turned off the waiver station closed page.");
+                                }
+                                catch (Exception ex)
+                                {
+                                    _settings.StationClosed = previousClosedSetting;
+                                    KioskLog.Write("Closed-page setting error: " +
+                                        ex.GetType().Name + " - " + ex.Message);
+                                    MessageBox.Show(settingsDialog,
+                                        "The waiver station setting could not be saved.\n\n" + ex.Message,
+                                        "Staff Settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                }
+                                continue;
                         }
                     }
                     return;
@@ -2123,6 +2373,7 @@ internal sealed class KioskSettings
     public string[] AllowedPathPrefixes { get; set; } = ["/public/onlinewaiver/"];
     public int IdleTimeoutMinutes { get; set; } = 3;
     public int CompletionResetSeconds { get; set; } = 15;
+    public bool StationClosed { get; set; }
 
     public string[] CompletionUrlKeywords { get; set; } =
         ["success", "complete", "completed", "confirmation", "finished", "done", "submitted", "thankyou", "thank-you"];
@@ -2332,7 +2583,8 @@ internal enum StaffSettingsAction
     ExitToWindows,
     PreviewDateTime,
     UseLiveDateTime,
-    PreviewThankYouPage
+    PreviewThankYouPage,
+    ToggleStationClosed
 }
 
 internal sealed class StaffSettingsDialog : Form
@@ -2360,7 +2612,7 @@ internal sealed class StaffSettingsDialog : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
-        ClientSize = new Size(680, 650);
+        ClientSize = new Size(680, 710);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.White;
 
@@ -2485,7 +2737,7 @@ internal sealed class StaffSettingsDialog : Form
         var exitButton = new Button
         {
             Text = "Exit Kiosk",
-            Bounds = new Rectangle(30, 592, 190, 45),
+            Bounds = new Rectangle(30, 652, 190, 45),
             BackColor = Color.FromArgb(245, 130, 32),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -2529,19 +2781,44 @@ internal sealed class StaffSettingsDialog : Form
             using var passwordDialog = new StaffPasswordChangeDialog(_settings);
             passwordDialog.ShowDialog(this);
         };
+        var closedPageStatus = new Label
+        {
+            AutoSize = false,
+            Text = _settings.StationClosed
+                ? "Closed page is ON — guests cannot start a waiver."
+                : "Closed page is OFF — the waiver station is available.",
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            ForeColor = _settings.StationClosed
+                ? Color.FromArgb(180, 35, 24)
+                : Color.FromArgb(54, 128, 27),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Bounds = new Rectangle(18, 85, 365, 42)
+        };
+        var closedPageButton = new Button
+        {
+            Text = _settings.StationClosed ? "Turn Off Closed Page" : "Turn On Closed Page",
+            Bounds = new Rectangle(397, 85, 205, 42),
+            BackColor = _settings.StationClosed
+                ? Color.FromArgb(118, 196, 66)
+                : Color.FromArgb(245, 130, 32),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 10, FontStyle.Bold)
+        };
+        closedPageButton.Click += (_, _) => Complete(StaffSettingsAction.ToggleStationClosed);
         var staffToolsGroup = new GroupBox
         {
-            Text = "Advertisements and Staff Tools",
+            Text = "Waiver Station, Advertisements, and Staff Tools",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
-            Bounds = new Rectangle(30, 489, 620, 87)
+            Bounds = new Rectangle(30, 489, 620, 145)
         };
         staffToolsGroup.Controls.AddRange([
-            advertisementsButton, thankYouPreviewButton, changePasswordButton]);
+            advertisementsButton, thankYouPreviewButton, changePasswordButton,
+            closedPageStatus, closedPageButton]);
         var returnButton = new Button
         {
             Text = "Return to Kiosk",
-            Bounds = new Rectangle(460, 592, 190, 45),
+            Bounds = new Rectangle(460, 652, 190, 45),
             DialogResult = DialogResult.Cancel,
             BackColor = Color.FromArgb(238, 250, 255),
             FlatStyle = FlatStyle.Flat,

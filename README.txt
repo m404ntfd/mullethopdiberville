@@ -67,6 +67,8 @@ Enter the staff password, then select "Open Staff Settings." The menu provides:
 * Add, edit, enable, disable, or delete scheduled JPG advertisements.
 * Preview the complete thank-you page with all ads active for the current or
   staff-previewed date and time.
+* Turn the guest-facing "Waiver Station Closed" page on or off. This setting is
+  retained after the kiosk or computer restarts.
 * Change the staff password after verifying the current password.
 * Return to the kiosk without making a change.
 
@@ -152,7 +154,12 @@ WHAT THE KIOSK DOES
 * Resets after 3 minutes without guest activity if a waiver is abandoned.
 * Clears cookies, local storage, cache, and other site data when it resets so the
   previous guest's browser session is not left for the next guest.
-* Retries the starting page automatically after a connection problem.
+* Replaces browser connection errors with a branded "Waiver Station Closed"
+  page that directs guests to the front desk, then retries the waiver website
+  automatically in the background.
+* Lets staff deliberately display a separate closed page without connection-error
+  language. Ctrl + Alt + Shift + F12 continues to open Staff Settings from both
+  closed pages.
 
 
 IMPORTANT FIRST-DAY TEST
