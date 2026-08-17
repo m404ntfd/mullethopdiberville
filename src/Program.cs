@@ -354,7 +354,11 @@ internal sealed class KioskForm : Form
 
             await _webView.EnsureCoreWebView2Async(environment);
             ConfigureBrowser();
-            await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(ActivityAndCompletionScript);
+            var waiverPageScript = ActivityAndCompletionScript.Replace(
+                "__MULLET_HOP_LOGO_DATA_URL__",
+                GetApplicationLogoDataUrl(),
+                StringComparison.Ordinal);
+            await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(waiverPageScript);
 
             _browserReady = true;
             _lastActivityUtc = DateTime.UtcNow;
@@ -1470,6 +1474,7 @@ internal sealed class KioskForm : Form
         (() => {
           if (window.__mulletHopKioskInstalled) return;
           window.__mulletHopKioskInstalled = true;
+          const kioskLogoSource = '__MULLET_HOP_LOGO_DATA_URL__';
 
           let lastActivityMessage = 0;
           const postActivity = () => {
@@ -2164,10 +2169,8 @@ internal sealed class KioskForm : Form
                 help.id = 'mullet-hop-waiver-help';
                 help.setAttribute('aria-label', 'Help choosing the correct waiver option');
                 help.innerHTML = `
-                  <img src='https://www.coastalmississippi.com/imager/files_idss_com/C537/images/listings/Mullet-Hop-eea044b35056a36_e45adf5f6bc0c5c2a30a39868f44eab6.png'
-                       alt='Mullet Hop Trampoline Park'
-                       onerror="this.style.display='none';document.getElementById('mullet-hop-logo-fallback').style.display='block'">
-                  <div id='mullet-hop-logo-fallback'>MULLET HOP</div>
+                  ${kioskLogoSource ? "<img id='mullet-hop-waiver-logo' src='" + kioskLogoSource + "' alt='Mullet Hop fish logo'>" : ''}
+                  <div id='mullet-hop-logo-fallback' style='display:${kioskLogoSource ? 'none' : 'block'}'>MULLET HOP</div>
                   <h2>Which option should I choose?</h2>
                   <div class='choice choice-just-me'>
                     <span class='choice-title'>JUST ME</span>
@@ -2178,6 +2181,12 @@ internal sealed class KioskForm : Form
                     Choose this if you are the legal parent or guardian signing for one or more minors.
                   </div>
                 `;
+                const helpLogo = help.querySelector('#mullet-hop-waiver-logo');
+                helpLogo?.addEventListener('error', () => {
+                  helpLogo.remove();
+                  const fallback = help.querySelector('#mullet-hop-logo-fallback');
+                  if (fallback) fallback.style.display = 'block';
+                });
                 tools.insertBefore(help, tools.firstChild);
               }
               return;
