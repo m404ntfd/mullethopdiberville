@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>MulletHopWaiverKiosk</AssemblyName>
+    <RootNamespace>MulletHopWaiverKiosk</RootNamespace>
+    <Version>2.0.0</Version>
+    <Authors>Mullet Hop</Authors>
+    <Product>Mullet Hop Waiver Kiosk</Product>
+    <Description>Full-screen Mullet Hop waiver kiosk with scheduled advertising and automatic updates.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UpdateRepositoryUrl)' != ''">
+    <AssemblyMetadata Include="UpdateRepositoryUrl" Value="$(UpdateRepositoryUrl)" />
+  </ItemGroup>
+</Project>
