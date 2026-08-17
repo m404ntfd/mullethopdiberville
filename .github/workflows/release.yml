@@ -88,6 +88,7 @@ jobs:
             --mainExe MulletHopWaiverKiosk.exe `
             --packTitle "Mullet Hop Waiver Kiosk" `
             --packAuthors "Mullet Hop" `
+            --icon assets/MulletHopFish.ico `
             --runtime win-x64 `
             --channel win `
             --outputDir Releases

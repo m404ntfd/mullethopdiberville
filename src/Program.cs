@@ -24,7 +24,7 @@ internal static class Program
         using var mutex = new Mutex(true, MutexName, out var ownsMutex);
         if (!ownsMutex)
         {
-            MessageBox.Show("The waiver kiosk is already running.", "Waiver Kiosk",
+            MessageBox.Show("The waiver kiosk is already running.", "Mullet Hop Waiver Kiosk",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -50,7 +50,7 @@ internal static class Program
             MessageBox.Show(
                 "The waiver kiosk could not start.\n\n" + ex.Message +
                 "\n\nSee README.txt for repair instructions.",
-                "Waiver Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                "Mullet Hop Waiver Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 }
@@ -228,6 +228,9 @@ internal sealed class KioskForm : Form
         _settings = settings;
 
         Text = "Mullet Hop Waiver Kiosk";
+        var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        if (appIcon is not null)
+            Icon = appIcon;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         Bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
@@ -284,7 +287,7 @@ internal sealed class KioskForm : Form
                 _allowExit = true;
                 MessageBox.Show(
                     "The staff settings shortcut could not be registered. Close any program using Ctrl + Alt + Shift + F12, then start the kiosk again.",
-                    "Waiver Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    "Mullet Hop Waiver Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Close();
                 return;
             }
@@ -1095,7 +1098,7 @@ internal sealed class KioskForm : Form
                     return;
                 }
 
-                MessageBox.Show(dialog, "The staff password was not correct.", "Waiver Kiosk",
+                MessageBox.Show(dialog, "The staff password was not correct.", "Mullet Hop Waiver Kiosk",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 KioskLog.Write("Incorrect staff settings password entered.");
             }
@@ -2163,7 +2166,7 @@ internal sealed class KioskSettings
                 settings = new KioskSettings();
                 MessageBox.Show(
                     "The kiosk settings could not be read. A new staff password must be created.",
-                    "Waiver Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    "Mullet Hop Waiver Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 

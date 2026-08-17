@@ -7,7 +7,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>MulletHopWaiverKiosk</AssemblyName>
     <RootNamespace>MulletHopWaiverKiosk</RootNamespace>
-    <Version>2.0.0</Version>
+    <AssemblyTitle>Mullet Hop Waiver Kiosk</AssemblyTitle>
+    <ApplicationIcon>..\assets\MulletHopFish.ico</ApplicationIcon>
+    <Version>2.0.1</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop Waiver Kiosk</Product>
     <Description>Full-screen Mullet Hop waiver kiosk with scheduled advertising and automatic updates.</Description>
