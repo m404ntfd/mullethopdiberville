@@ -44,9 +44,22 @@ foreach ($shortcutPath in $shortcutPaths) {
     }
 }
 
-$installFolder = Join-Path $env:ProgramFiles 'Mullet Hop Kiosk Controller'
-if (Test-Path -LiteralPath $installFolder) {
-    Remove-Item -LiteralPath $installFolder -Recurse -Force
+$installFolder = Join-Path $env:LOCALAPPDATA 'MulletHop.KioskController'
+$updateExe = Join-Path $installFolder 'Update.exe'
+if (Test-Path -LiteralPath $updateExe -PathType Leaf) {
+    $uninstall = Start-Process `
+        -FilePath $updateExe `
+        -ArgumentList @('uninstall', '--silent') `
+        -Wait `
+        -PassThru
+    if ($uninstall.ExitCode -ne 0) {
+        Write-Warning 'The controller updater reported an uninstall error.'
+    }
+}
+
+$legacyInstallFolder = Join-Path $env:ProgramFiles 'Mullet Hop Kiosk Controller'
+if (Test-Path -LiteralPath $legacyInstallFolder) {
+    Remove-Item -LiteralPath $legacyInstallFolder -Recurse -Force
 }
 $dataFolder = Join-Path $env:LOCALAPPDATA 'MulletHopKioskController'
 if (Test-Path -LiteralPath $dataFolder) {

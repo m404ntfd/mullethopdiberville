@@ -73,16 +73,23 @@ Controller installed on another Windows PC on the same private network. The
 controller can show each kiosk's online status, version, open/closed screen, last
 check-in, and IP address. Staff can open or close one kiosk, open or close all
 kiosks, check one kiosk for an update without installing it, or tell one kiosk to
-install an available update.
+install an available update. The controller also has its own update button and
+checks for controller updates automatically whenever it opens.
 
 Download the controller package from:
 
 https://github.com/m404ntfd/mullethopdiberville/releases/latest
 
 Install it on the office PC, then use the address and pairing key displayed in
-its setup panel. On each kiosk, press Ctrl + Alt + Shift + F12, open Staff
+its setup panel. View Key temporarily reveals the complete key, while Copy Key
+places the complete key on the Windows clipboard as pasteable text. On each
+kiosk, press Ctrl + Alt + Shift + F12, open Staff
 Settings, and select Remote Control Setup. Give each station a unique name,
 paste the controller address and key, test the connection, and save.
+
+Controller version 1.1.0 must be installed once with its new Setup-based package
+to establish automatic updates. Existing pairing information and kiosk history
+are retained. Later controller releases install and restart automatically.
 
 Kiosks check in every five seconds. Commands are authenticated with the shared
 pairing key and signed timestamps. A kiosk does not accept unsolicited inbound

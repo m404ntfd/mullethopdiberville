@@ -1,3 +1,5 @@
+using Velopack;
+
 namespace MulletHopKioskController;
 
 internal static class Program
@@ -7,6 +9,10 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // Velopack must run before the normal controller startup so install,
+        // update, and uninstall hooks can finish without opening the dashboard.
+        VelopackApp.Build().Run();
+
         using var mutex = new Mutex(true, MutexName, out var ownsMutex);
         if (!ownsMutex)
         {
@@ -17,6 +23,8 @@ internal static class Program
                 MessageBoxIcon.Information);
             return;
         }
+
+        ControllerUpdater.ApplyAvailableUpdateOnStartup();
 
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();

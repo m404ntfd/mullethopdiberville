@@ -96,29 +96,16 @@ jobs:
             --runtime win-x64 `
             --self-contained true `
             -p:Version=${{ steps.controller_version.outputs.value }} `
+            -p:UpdateRepositoryUrl=https://github.com/${{ github.repository }} `
             -p:PublishSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:DebugType=None `
             --output controller-publish
 
-      - name: Package kiosk controller
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path ControllerPackage -Force | Out-Null
-          Copy-Item controller-publish/MulletHopKioskController.exe ControllerPackage/
-          Copy-Item controller/install/Install-Kiosk-Controller.cmd ControllerPackage/
-          Copy-Item controller/install/Install-Kiosk-Controller.ps1 ControllerPackage/
-          Copy-Item controller/install/Uninstall-Kiosk-Controller.ps1 ControllerPackage/
-          Copy-Item controller/README.md ControllerPackage/
-          Compress-Archive `
-            -Path ControllerPackage/* `
-            -DestinationPath "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
-            -Force
-
       - name: Install matching Velopack command-line tool
         run: dotnet tool install --global vpk --version 1.2.0
 
-      - name: Download prior release information
+      - name: Download prior kiosk release information
         shell: pwsh
         run: |
           $latestRelease = Invoke-RestMethod `
@@ -137,6 +124,21 @@ jobs:
               --outputDir Releases
           }
 
+      - name: Download prior controller release information
+        shell: pwsh
+        run: |
+          try {
+            vpk download github `
+              --repoUrl https://github.com/${{ github.repository }} `
+              --token "${{ secrets.GITHUB_TOKEN }}" `
+              --channel controller `
+              --outputDir ControllerReleases
+          }
+          catch {
+            Write-Host "No earlier controller update feed exists. Building the first full controller installer."
+            New-Item -ItemType Directory -Path ControllerReleases -Force | Out-Null
+          }
+
       - name: Build Velopack installer and update packages
         shell: pwsh
         run: |
@@ -152,6 +154,35 @@ jobs:
             --channel win `
             --outputDir Releases
 
+      - name: Build controller Velopack installer and update packages
+        shell: pwsh
+        run: |
+          vpk pack `
+            --packId MulletHop.KioskController `
+            --packVersion ${{ steps.controller_version.outputs.value }} `
+            --packDir controller-publish `
+            --mainExe MulletHopKioskController.exe `
+            --packTitle "Mullet Hop Kiosk Controller" `
+            --packAuthors "Mullet Hop" `
+            --icon assets/MulletHopFish.ico `
+            --runtime win-x64 `
+            --channel controller `
+            --outputDir ControllerReleases
+
+      - name: Package kiosk controller
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ControllerPackage -Force | Out-Null
+          Copy-Item ControllerReleases/MulletHop.KioskController-Setup.exe ControllerPackage/
+          Copy-Item controller/install/Install-Kiosk-Controller.cmd ControllerPackage/
+          Copy-Item controller/install/Install-Kiosk-Controller.ps1 ControllerPackage/
+          Copy-Item controller/install/Uninstall-Kiosk-Controller.ps1 ControllerPackage/
+          Copy-Item controller/README.md ControllerPackage/
+          Compress-Archive `
+            -Path ControllerPackage/* `
+            -DestinationPath "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
+            -Force
+
       - name: Publish GitHub release
         shell: pwsh
         run: |
@@ -164,7 +195,7 @@ jobs:
             --channel win `
             --outputDir Releases
 
-      - name: Attach kiosk controller to release
+      - name: Attach controller installer and update feed to release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -172,6 +203,7 @@ jobs:
           gh release upload `
             "v${{ steps.version.outputs.value }}" `
             "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
+            'ControllerReleases/*' `
             --repo "${{ github.repository }}" `
             --clobber
 
@@ -182,5 +214,7 @@ jobs:
           path: |
             Releases/*-Setup.exe
             Releases/releases.*.json
+            ControllerReleases/*-Setup.exe
+            ControllerReleases/releases.*.json
             Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip
           if-no-files-found: error

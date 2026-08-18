@@ -21,6 +21,8 @@ internal sealed class ControllerForm : Form
     private readonly Button _closeButton = new();
     private readonly Button _checkUpdateButton = new();
     private readonly Button _installUpdateButton = new();
+    private readonly Button _controllerUpdateButton = new();
+    private readonly Button _exitButton = new();
 
     public ControllerForm()
     {
@@ -91,68 +93,99 @@ internal sealed class ControllerForm : Form
         var group = new GroupBox
         {
             Dock = DockStyle.Top,
-            Height = 128,
-            Padding = new Padding(18, 8, 18, 10),
+            Height = 165,
+            Padding = new Padding(18, 24, 18, 10),
             Text = "One-Time Kiosk Pairing Information",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(8, 119, 189),
             BackColor = Color.White
         };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 4,
+            RowCount = 3,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = Color.White
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
         var addressLabel = new Label
         {
             Text = "Controller address:",
-            AutoSize = true,
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.FromArgb(16, 24, 32),
             Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-            Location = new Point(22, 34)
+            Margin = new Padding(3, 2, 3, 2)
         };
         _addresses.DropDownStyle = ComboBoxStyle.DropDownList;
-        _addresses.Bounds = new Rectangle(155, 28, 360, 32);
+        _addresses.Dock = DockStyle.Fill;
+        _addresses.Font = new Font("Segoe UI", 9.5f);
+        _addresses.Margin = new Padding(3, 4, 8, 4);
         foreach (var address in GetControllerAddresses())
             _addresses.Items.Add(address);
         if (_addresses.Items.Count > 0)
             _addresses.SelectedIndex = 0;
-        var copyAddress = MakeSmallButton("Copy Address", 527, 27, Color.FromArgb(105, 210, 236));
+        var copyAddress = MakeTableButton("Copy Address", Color.FromArgb(105, 210, 236));
         copyAddress.Click += (_, _) => CopyText(_addresses.Text, "Controller address copied.");
 
         var keyLabel = new Label
         {
             Text = "Pairing key:",
-            AutoSize = true,
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.FromArgb(16, 24, 32),
             Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-            Location = new Point(705, 34)
+            Margin = new Padding(3, 2, 3, 2)
         };
         _pairingKey.Text = _state.PairingKey;
         _pairingKey.ReadOnly = true;
         _pairingKey.UseSystemPasswordChar = true;
-        _pairingKey.Bounds = new Rectangle(798, 28, 245, 32);
-        _pairingKey.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        var showKey = new CheckBox
+        _pairingKey.Dock = DockStyle.Fill;
+        _pairingKey.Font = new Font("Segoe UI", 9.5f);
+        _pairingKey.Margin = new Padding(3, 4, 8, 4);
+        var viewKey = MakeTableButton("View Key", Color.FromArgb(255, 217, 188));
+        viewKey.Click += (_, _) =>
         {
-            Text = "Show",
-            AutoSize = true,
-            ForeColor = Color.FromArgb(16, 24, 32),
-            Location = new Point(1052, 33),
-            Anchor = AnchorStyles.Top | AnchorStyles.Right
+            _pairingKey.UseSystemPasswordChar = !_pairingKey.UseSystemPasswordChar;
+            viewKey.Text = _pairingKey.UseSystemPasswordChar ? "View Key" : "Hide Key";
         };
-        showKey.CheckedChanged += (_, _) => _pairingKey.UseSystemPasswordChar = !showKey.Checked;
-        var copyKey = MakeSmallButton("Copy Key", 1110, 27, Color.FromArgb(118, 196, 66));
-        copyKey.Width = 72;
-        copyKey.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        var copyKey = MakeTableButton("Copy Key", Color.FromArgb(118, 196, 66));
         copyKey.Click += (_, _) => CopyText(_state.PairingKey, "Pairing key copied.");
 
         var note = new Label
         {
             AutoSize = false,
+            Dock = DockStyle.Fill,
             Text = "On each kiosk: Ctrl + Alt + Shift + F12 → Staff Settings → Remote Control Setup. Enter a unique kiosk name, then paste the address and key above.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f),
-            Bounds = new Rectangle(22, 70, 1155, 42),
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(3, 3, 3, 0)
         };
-        group.Controls.AddRange([
-            addressLabel, _addresses, copyAddress, keyLabel, _pairingKey, showKey, copyKey, note]);
+
+        layout.Controls.Add(addressLabel, 0, 0);
+        layout.Controls.Add(_addresses, 1, 0);
+        layout.Controls.Add(copyAddress, 2, 0);
+        layout.SetColumnSpan(copyAddress, 2);
+        layout.Controls.Add(keyLabel, 0, 1);
+        layout.Controls.Add(_pairingKey, 1, 1);
+        layout.Controls.Add(viewKey, 2, 1);
+        layout.Controls.Add(copyKey, 3, 1);
+        layout.Controls.Add(note, 0, 2);
+        layout.SetColumnSpan(note, 4);
+        group.Controls.Add(layout);
         return group;
     }
 
@@ -177,7 +210,7 @@ internal sealed class ControllerForm : Form
         var panel = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 112,
+            Height = 160,
             Padding = new Padding(18, 10, 18, 10),
             BackColor = Color.White
         };
@@ -185,28 +218,47 @@ internal sealed class ControllerForm : Form
         _selectionStatus.AutoSize = false;
         _selectionStatus.ForeColor = Color.FromArgb(52, 65, 76);
         _selectionStatus.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-        _selectionStatus.Bounds = new Rectangle(20, 7, 1160, 25);
-        _selectionStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
+        _selectionStatus.Bounds = new Rectangle(20, 7, 900, 25);
+        _selectionStatus.Anchor = AnchorStyles.Left | AnchorStyles.Top;
 
-        ConfigureActionButton(_openButton, "Open Selected", 20, Color.FromArgb(118, 196, 66));
-        ConfigureActionButton(_closeButton, "Close Selected", 188, Color.FromArgb(245, 130, 32));
-        ConfigureActionButton(_checkUpdateButton, "Check for Update", 356, Color.FromArgb(105, 210, 236));
-        ConfigureActionButton(_installUpdateButton, "Install Update", 524, Color.FromArgb(117, 68, 154), Color.White);
+        ConfigureActionButton(_openButton, "Open Selected", 20, Color.FromArgb(118, 196, 66), width: 160);
+        ConfigureActionButton(_closeButton, "Close Selected", 190, Color.FromArgb(245, 130, 32), width: 160);
+        ConfigureActionButton(_checkUpdateButton, "Check Kiosk Update", 360, Color.FromArgb(105, 210, 236), width: 190);
+        ConfigureActionButton(_installUpdateButton, "Install Kiosk Update", 560, Color.FromArgb(117, 68, 154), Color.White, 190);
         _openButton.Click += (_, _) => QueueSelected(CommandTypes.SetClosed, false);
         _closeButton.Click += (_, _) => QueueSelected(CommandTypes.SetClosed, true);
         _checkUpdateButton.Click += (_, _) => QueueSelected(CommandTypes.CheckUpdate);
         _installUpdateButton.Click += (_, _) => InstallSelectedUpdate();
 
-        var openAll = MakeActionButton("Open All", 860, Color.FromArgb(210, 239, 190));
-        openAll.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        var openAll = MakeActionButton("Open All", 20, 98, Color.FromArgb(210, 239, 190), 160);
         openAll.Click += (_, _) => QueueForAll(CommandTypes.SetClosed, false);
-        var closeAll = MakeActionButton("Close All", 1028, Color.FromArgb(255, 217, 188));
-        closeAll.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        var closeAll = MakeActionButton("Close All", 190, 98, Color.FromArgb(255, 217, 188), 160);
         closeAll.Click += (_, _) => CloseAllKiosks();
+
+        ConfigureActionButton(
+            _controllerUpdateButton,
+            "Check Controller Update",
+            952,
+            Color.FromArgb(8, 119, 189),
+            Color.White,
+            220);
+        _controllerUpdateButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync();
+
+        ConfigureActionButton(
+            _exitButton,
+            "Exit Controller",
+            952,
+            Color.FromArgb(180, 35, 24),
+            Color.White,
+            220,
+            98);
+        _exitButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _exitButton.Click += (_, _) => ExitController();
 
         panel.Controls.AddRange([
             _selectionStatus, _openButton, _closeButton, _checkUpdateButton,
-            _installUpdateButton, openAll, closeAll]);
+            _installUpdateButton, openAll, closeAll, _controllerUpdateButton, _exitButton]);
         UpdateActionButtons();
         return panel;
     }
@@ -354,6 +406,67 @@ internal sealed class ControllerForm : Form
             QueueForAll(CommandTypes.SetClosed, true);
     }
 
+    private async Task CheckControllerUpdateAsync()
+    {
+        _controllerUpdateButton.Enabled = false;
+        var originalText = _controllerUpdateButton.Text;
+        _controllerUpdateButton.Text = "Checking…";
+        try
+        {
+            var result = await ControllerUpdater.CheckForUpdateAsync();
+            if (IsDisposed)
+                return;
+
+            if (result.Status != ControllerUpdateStatus.Available)
+            {
+                MessageBox.Show(this, result.Message, "Controller Update",
+                    MessageBoxButtons.OK,
+                    result.Status == ControllerUpdateStatus.Failed
+                        ? MessageBoxIcon.Warning
+                        : MessageBoxIcon.Information);
+                return;
+            }
+
+            var answer = MessageBox.Show(this,
+                result.Message + "\n\nDownload and install it now? The controller will restart automatically.",
+                "Controller Update Available",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (answer != DialogResult.Yes)
+                return;
+
+            _controllerUpdateButton.Text = "Installing…";
+            var installResult = await ControllerUpdater.CheckDownloadAndApplyAsync();
+            if (!IsDisposed && installResult.Status != ControllerUpdateStatus.Applying)
+            {
+                MessageBox.Show(this, installResult.Message, "Controller Update",
+                    MessageBoxButtons.OK,
+                    installResult.Status == ControllerUpdateStatus.Failed
+                        ? MessageBoxIcon.Warning
+                        : MessageBoxIcon.Information);
+            }
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                _controllerUpdateButton.Text = originalText;
+                _controllerUpdateButton.Enabled = true;
+            }
+        }
+    }
+
+    private void ExitController()
+    {
+        var answer = MessageBox.Show(this,
+            "Exit the kiosk controller?\n\nKiosks will keep their current state, but remote commands will be unavailable until the controller starts again.",
+            "Exit Kiosk Controller",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (answer == DialogResult.Yes)
+            Close();
+    }
+
     private ManagedKiosk? SelectedKiosk()
     {
         var id = SelectedStationId();
@@ -431,10 +544,11 @@ internal sealed class ControllerForm : Form
         }
     }
 
-    private static Button MakeSmallButton(string text, int x, int y, Color color) => new()
+    private static Button MakeTableButton(string text, Color color) => new()
     {
         Text = text,
-        Bounds = new Rectangle(x, y, 126, 34),
+        Dock = DockStyle.Fill,
+        Margin = new Padding(3, 3, 3, 3),
         BackColor = color,
         FlatStyle = FlatStyle.Flat,
         Font = new Font("Segoe UI", 9, FontStyle.Bold)
@@ -453,21 +567,26 @@ internal sealed class ControllerForm : Form
     }
 
     private static void ConfigureActionButton(
-        Button button, string text, int x, Color color, Color? foreground = null)
+        Button button,
+        string text,
+        int x,
+        Color color,
+        Color? foreground = null,
+        int width = 155,
+        int y = 40)
     {
         button.Text = text;
-        button.Bounds = new Rectangle(x, 40, 155, 48);
+        button.Bounds = new Rectangle(x, y, width, 48);
         button.BackColor = color;
         button.ForeColor = foreground ?? Color.FromArgb(16, 24, 32);
         button.FlatStyle = FlatStyle.Flat;
         button.Font = new Font("Segoe UI", 10, FontStyle.Bold);
     }
 
-    private static Button MakeActionButton(string text, int x, Color color)
+    private static Button MakeActionButton(string text, int x, int y, Color color, int width)
     {
         var button = new Button();
-        ConfigureActionButton(button, text, x, color);
-        button.Width = 155;
+        ConfigureActionButton(button, text, x, color, width: width, y: y);
         return button;
     }
 }

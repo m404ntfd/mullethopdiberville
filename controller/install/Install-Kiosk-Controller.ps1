@@ -21,13 +21,14 @@ Write-Host 'Mullet Hop Kiosk Controller Installer' -ForegroundColor Cyan
 Write-Host '--------------------------------------' -ForegroundColor Cyan
 Write-Host ''
 
-$sourceExe = Join-Path $PSScriptRoot 'MulletHopKioskController.exe'
-if (-not (Test-Path -LiteralPath $sourceExe)) {
-    throw 'MulletHopKioskController.exe must be in the same folder as this installer.'
+$setupExe = Join-Path $PSScriptRoot 'MulletHop.KioskController-Setup.exe'
+if (-not (Test-Path -LiteralPath $setupExe)) {
+    throw 'MulletHop.KioskController-Setup.exe must be in the same folder as this installer.'
 }
 
-$installFolder = Join-Path $env:ProgramFiles 'Mullet Hop Kiosk Controller'
+$installFolder = Join-Path $env:LOCALAPPDATA 'MulletHop.KioskController'
 $installedExe = Join-Path $installFolder 'MulletHopKioskController.exe'
+$legacyInstallFolder = Join-Path $env:ProgramFiles 'Mullet Hop Kiosk Controller'
 $urlPrefix = 'http://+:47832/mullethop/'
 $firewallName = 'Mullet Hop Kiosk Controller (TCP 47832)'
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
@@ -35,8 +36,18 @@ $currentUser = "$env:USERDOMAIN\$env:USERNAME"
 Get-Process -Name 'MulletHopKioskController' -ErrorAction SilentlyContinue |
     Stop-Process -Force
 
-New-Item -ItemType Directory -Path $installFolder -Force | Out-Null
-Copy-Item -LiteralPath $sourceExe -Destination $installedExe -Force
+$setup = Start-Process `
+    -FilePath $setupExe `
+    -ArgumentList @('--silent', '--installto', ('"{0}"' -f $installFolder)) `
+    -Wait `
+    -PassThru
+if ($setup.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $installedExe -PathType Leaf)) {
+    throw 'The controller application could not be installed.'
+}
+
+if (Test-Path -LiteralPath $legacyInstallFolder) {
+    Remove-Item -LiteralPath $legacyInstallFolder -Recurse -Force
+}
 
 & netsh.exe http delete urlacl url=$urlPrefix 2>$null | Out-Null
 & netsh.exe http add urlacl url=$urlPrefix user=$currentUser | Out-Null
@@ -55,21 +66,16 @@ New-NetFirewallRule `
     -Profile Private | Out-Null
 
 $shell = New-Object -ComObject WScript.Shell
-$shortcutPaths = @(
-    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Mullet Hop Kiosk Controller.lnk'),
-    (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Mullet Hop Kiosk Controller.lnk'),
-    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Kiosk Controller.lnk')
-)
-foreach ($shortcutPath in $shortcutPaths) {
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $installedExe
-    $shortcut.WorkingDirectory = $installFolder
-    $shortcut.Description = 'Manage Mullet Hop waiver kiosks on the local network'
-    $shortcut.Save()
-}
+$startupShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Kiosk Controller.lnk'
+$shortcut = $shell.CreateShortcut($startupShortcut)
+$shortcut.TargetPath = $installedExe
+$shortcut.WorkingDirectory = $installFolder
+$shortcut.Description = 'Manage Mullet Hop waiver kiosks on the local network'
+$shortcut.Save()
 
 Write-Host 'Installation complete.' -ForegroundColor Green
 Write-Host 'The controller will start automatically when this Windows account signs in.' -ForegroundColor Green
+Write-Host 'Controller updates will be checked and installed automatically when it opens.' -ForegroundColor Green
 Write-Host 'Windows Firewall allows kiosk check-ins on private networks only.' -ForegroundColor Green
 Write-Host ''
 

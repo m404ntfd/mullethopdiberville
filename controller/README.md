@@ -8,6 +8,7 @@ the same private network as the waiver kiosks. It provides:
 * Open All and Close All controls.
 * A non-installing update check per selected kiosk.
 * An install-update command per selected kiosk.
+* A separate controller update check and an Exit Controller button.
 * Queued commands: if a kiosk is temporarily offline, the newest command waits
   until that kiosk reconnects.
 
@@ -26,9 +27,18 @@ https://github.com/m404ntfd/mullethopdiberville/releases/latest
 4. Leave the controller installed on a computer whose local IP address will not
    change. A DHCP reservation in the router is recommended.
 
-The controller starts automatically when that Windows account signs in. The
-controller does not need internet access for open/close commands. Each kiosk
-still needs internet access to check GitHub and install a kiosk update.
+The controller starts automatically when that Windows account signs in. It also
+checks GitHub for controller updates whenever it opens, installs an available
+update, and restarts automatically. Use Check Controller Update on the right
+side of the dashboard to check manually.
+
+Version 1.1.0 must be installed once with the new package to establish the
+automatic updater. After that one-time installation, later controller versions
+can update themselves. Existing pairing information and kiosk history are kept.
+
+The controller does not need internet access for open/close commands. It needs
+internet access only to update itself, and each kiosk still needs internet
+access to check GitHub and install a kiosk update.
 
 
 PAIR EACH WAIVER KIOSK ONCE
@@ -36,7 +46,8 @@ PAIR EACH WAIVER KIOSK ONCE
 
 The kiosk must be version 2.1.0 or newer.
 
-1. On the controller, click Copy Address and Copy Key.
+1. On the controller, click Copy Address and Copy Key. Select View Key if staff
+   need to read the complete key on screen.
 2. On the kiosk, press Ctrl + Alt + Shift + F12 and enter the staff password.
 3. Open Staff Settings, then Remote Control Setup.
 4. Turn on remote management.
@@ -58,8 +69,8 @@ Select one kiosk in the list, then choose:
 * Open Selected: removes the staff-controlled closed screen and resets to a
   fresh waiver.
 * Close Selected: displays the normal Waiver Station Closed screen.
-* Check for Update: checks the public GitHub release without installing it.
-* Install Update: checks, downloads, installs, and restarts that kiosk when a
+* Check Kiosk Update: checks the public GitHub release without installing it.
+* Install Kiosk Update: checks, downloads, installs, and restarts that kiosk when a
   newer version exists.
 
 Double-clicking a kiosk row also toggles that kiosk between open and closed.
@@ -67,6 +78,11 @@ Double-clicking a kiosk row also toggles that kiosk between open and closed.
 Open All and Close All apply to every known station. Close All asks for
 confirmation. Offline stations retain the latest queued command and carry it out
 when they reconnect.
+
+Check Controller Update on the right checks for a newer office-controller
+version and offers to install it. Exit Controller closes the office controller;
+the kiosks keep their current open/closed state, but new remote commands are not
+available until the controller starts again.
 
 
 NETWORK NOTES
