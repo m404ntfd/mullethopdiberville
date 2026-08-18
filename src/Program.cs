@@ -1738,6 +1738,76 @@ internal sealed class KioskForm : Form
             logo.src = kioskLogoSource;
           };
 
+          const installSignatureTouchBridge = canvas => {
+            if (!(canvas instanceof HTMLCanvasElement) ||
+                canvas.dataset.mulletHopSignatureTouch === '1') return;
+
+            canvas.dataset.mulletHopSignatureTouch = '1';
+            canvas.style.setProperty('touch-action', 'none', 'important');
+            canvas.style.setProperty('-ms-touch-action', 'none', 'important');
+            canvas.style.setProperty('user-select', 'none', 'important');
+            canvas.style.setProperty('-webkit-user-select', 'none', 'important');
+
+            let activePointerId = null;
+
+            const dispatchMouseEvent = (name, pointerEvent) => {
+              const samples = name === 'mousemove' && pointerEvent.getCoalescedEvents
+                ? pointerEvent.getCoalescedEvents()
+                : [pointerEvent];
+              const events = samples.length ? samples : [pointerEvent];
+
+              events.forEach(sample => {
+                canvas.dispatchEvent(new MouseEvent(name, {
+                  bubbles: true,
+                  cancelable: true,
+                  view: window,
+                  detail: 1,
+                  screenX: sample.screenX,
+                  screenY: sample.screenY,
+                  clientX: sample.clientX,
+                  clientY: sample.clientY,
+                  ctrlKey: sample.ctrlKey,
+                  altKey: sample.altKey,
+                  shiftKey: sample.shiftKey,
+                  metaKey: sample.metaKey,
+                  button: 0,
+                  buttons: name === 'mouseup' ? 0 : 1
+                }));
+              });
+            };
+
+            const isTouchOrPen = event =>
+              event.pointerType === 'touch' || event.pointerType === 'pen';
+
+            canvas.addEventListener('pointerdown', event => {
+              if (!isTouchOrPen(event) || activePointerId !== null) return;
+              activePointerId = event.pointerId;
+              event.preventDefault();
+              canvas.setPointerCapture?.(event.pointerId);
+              dispatchMouseEvent('mousedown', event);
+            }, { capture: true, passive: false });
+
+            canvas.addEventListener('pointermove', event => {
+              if (!isTouchOrPen(event) || event.pointerId !== activePointerId) return;
+              event.preventDefault();
+              dispatchMouseEvent('mousemove', event);
+            }, { capture: true, passive: false });
+
+            const finishStroke = event => {
+              if (!isTouchOrPen(event) || event.pointerId !== activePointerId) return;
+              event.preventDefault();
+              dispatchMouseEvent('mouseup', event);
+              if (canvas.hasPointerCapture?.(event.pointerId))
+                canvas.releasePointerCapture(event.pointerId);
+              activePointerId = null;
+            };
+
+            canvas.addEventListener('pointerup', finishStroke,
+              { capture: true, passive: false });
+            canvas.addEventListener('pointercancel', finishStroke,
+              { capture: true, passive: false });
+          };
+
           const applyWaiverTheme = () => {
             if (!document.body) return;
             if (location.hostname.toLowerCase() !== 'mullet.lilypadpos.app' ||
@@ -1926,7 +1996,10 @@ internal sealed class KioskForm : Form
                 border: 3px solid #00a4d6 !important;
                 border-radius: 12px !important;
                 box-shadow: inset 0 2px 7px rgba(16,24,32,.09) !important;
-                touch-action: none;
+                touch-action: none !important;
+                -ms-touch-action: none !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
               }
               body.mullet-hop-waiver-themed img { max-width: 100%; }
               #mullet-hop-provider-logo {
@@ -2205,6 +2278,7 @@ internal sealed class KioskForm : Form
 
             document.body.classList.add('mullet-hop-waiver-themed');
             repairProviderLogo();
+            document.querySelectorAll('canvas').forEach(installSignatureTouchBridge);
             const main = document.getElementById('divMain') ||
                          document.querySelector('body > form') ||
                          document.querySelector("form[action*='waiver']") ||

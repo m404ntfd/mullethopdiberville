@@ -145,7 +145,8 @@ WHAT THE KIOSK DOES
   kiosk continues automatically.
 * Applies the Mullet Hop theme throughout every waiver step, including
   touch-friendly fields, buttons, choices, validation messages, and the
-  signature area.
+  signature area. Touchscreen and stylus strokes are translated into the
+  continuous drag events expected by the waiver's signature pad.
 * Watches the page for common waiver-completion messages and completion URLs.
 * Replaces the provider's completion screen with a Mullet Hop thank-you page that
   directs guests to the front desk to purchase their jump pass and socks. Active
