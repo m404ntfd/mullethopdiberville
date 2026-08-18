@@ -190,6 +190,11 @@ internal static class LegacyInstallationMigration
 
 internal sealed class KioskForm : Form
 {
+    private static readonly HttpClient ConnectionCheckClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(12)
+    };
+
     private const int WmHotKey = 0x0312;
     private const int StaffExitHotKeyId = 0x4D48;
     private const uint ModAlt = 0x0001;
@@ -206,7 +211,7 @@ internal sealed class KioskForm : Form
     private readonly Label _previewBanner = new();
     private readonly System.Windows.Forms.Timer _idleTimer = new() { Interval = 1000 };
     private readonly System.Windows.Forms.Timer _completionTimer = new();
-    private readonly System.Windows.Forms.Timer _retryTimer = new() { Interval = 15000 };
+    private readonly System.Windows.Forms.Timer _retryTimer = new() { Interval = 60000 };
 
     private DateTime _lastActivityUtc = DateTime.UtcNow;
     private bool _allowExit;
@@ -274,15 +279,7 @@ internal sealed class KioskForm : Form
             _completionTimer.Stop();
             await ResetForNextGuestAsync("completion");
         };
-        _retryTimer.Tick += (_, _) =>
-        {
-            _retryTimer.Stop();
-            if (_browserReady && !_isResetting && !_settings.StationClosed)
-            {
-                _showingClosedPage = false;
-                _webView.CoreWebView2.Navigate(_settings.StartUrl);
-            }
-        };
+        _retryTimer.Tick += RetryTimer_Tick;
 
         Shown += async (_, _) =>
         {
@@ -562,6 +559,48 @@ internal sealed class KioskForm : Form
 
     private void MarkActivity() => _lastActivityUtc = DateTime.UtcNow;
 
+    private async void RetryTimer_Tick(object? sender, EventArgs e)
+    {
+        _retryTimer.Stop();
+
+        if (!_browserReady || _settings.StationClosed || !_showingClosedPage)
+            return;
+
+        if (_isResetting || _promptOpen)
+        {
+            _retryTimer.Start();
+            return;
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, _settings.StartUrl);
+            request.Headers.UserAgent.ParseAdd("MulletHopWaiverKiosk/" + KioskUpdater.CurrentVersion);
+            using var response = await ConnectionCheckClient.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead);
+
+            if (response.IsSuccessStatusCode && _browserReady && !_isResetting &&
+                !_promptOpen && !_settings.StationClosed && _showingClosedPage)
+            {
+                _webView.CoreWebView2.Navigate(_settings.StartUrl);
+                _showingClosedPage = false;
+                _lastActivityUtc = DateTime.UtcNow;
+                KioskLog.Write("Waiver connection restored; loading a fresh starting page.");
+                return;
+            }
+
+            KioskLog.Write($"Automatic waiver connection check returned HTTP {(int)response.StatusCode}.");
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Automatic waiver connection check failed: " +
+                ex.GetType().Name + " - " + ex.Message);
+        }
+
+        if (_browserReady && !_isResetting && !_settings.StationClosed && _showingClosedPage)
+            _retryTimer.Start();
+    }
+
     private bool IsAllowedUri(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) || !Uri.TryCreate(value, UriKind.Absolute, out var uri))
@@ -693,7 +732,7 @@ internal sealed class KioskForm : Form
             _pendingSwitchEmail = null;
             _pendingSwitchChoice = null;
             KioskLog.Write("Waiver switch error: " + ex.GetType().Name + " - " + ex.Message);
-            _retryTimer.Start();
+            ShowStationClosedPage(connectionError: true);
         }
         finally
         {
@@ -768,7 +807,7 @@ internal sealed class KioskForm : Form
                 <section class="message connection-message">
                   <span class="message-label">CONNECTION ISSUE</span>
                   <p>The application cannot reach the waiver website or does not have an internet connection.</p>
-                  <small>The kiosk will keep trying to reconnect automatically.</small>
+                  <small>The kiosk will check the connection every 60 seconds.</small>
                 </section>
                 """
             : """
