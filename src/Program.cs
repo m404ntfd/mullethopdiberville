@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Reflection;
+using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -221,6 +222,7 @@ internal sealed class KioskForm : Form
     private bool _hotKeyRegistered;
     private bool _showingThankYouPage;
     private bool _showingClosedPage;
+    private bool _connectionCheckInProgress;
     private string? _pendingSwitchEmail;
     private string? _pendingSwitchChoice;
     private string? _lastWaiverEmail;
@@ -280,6 +282,7 @@ internal sealed class KioskForm : Form
             await ResetForNextGuestAsync("completion");
         };
         _retryTimer.Tick += RetryTimer_Tick;
+        NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
 
         Shown += async (_, _) =>
         {
@@ -325,6 +328,12 @@ internal sealed class KioskForm : Form
         if (_hotKeyRegistered)
             UnregisterHotKey(Handle, StaffExitHotKeyId);
         base.OnHandleDestroyed(e);
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
+        base.OnFormClosed(e);
     }
 
     protected override void WndProc(ref Message m)
@@ -562,7 +571,25 @@ internal sealed class KioskForm : Form
 
     private void MarkActivity() => _lastActivityUtc = DateTime.UtcNow;
 
-    private async void RetryTimer_Tick(object? sender, EventArgs e)
+    private async void RetryTimer_Tick(object? sender, EventArgs e) =>
+        await CheckForRestoredConnectionAsync();
+
+    private void NetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
+    {
+        if (!e.IsAvailable || IsDisposed || Disposing || !IsHandleCreated)
+            return;
+
+        try
+        {
+            BeginInvoke(new Action(() => _ = CheckForRestoredConnectionAsync()));
+        }
+        catch (InvalidOperationException)
+        {
+            // The kiosk window is closing, so there is no connection page to recover.
+        }
+    }
+
+    private async Task CheckForRestoredConnectionAsync()
     {
         _retryTimer.Stop();
 
@@ -575,6 +602,11 @@ internal sealed class KioskForm : Form
             return;
         }
 
+        if (_connectionCheckInProgress)
+            return;
+
+        _connectionCheckInProgress = true;
+
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, _settings.StartUrl);
@@ -585,10 +617,8 @@ internal sealed class KioskForm : Form
             if (response.IsSuccessStatusCode && _browserReady && !_isResetting &&
                 !_promptOpen && !_settings.StationClosed && _showingClosedPage)
             {
-                _webView.CoreWebView2.Navigate(_settings.StartUrl);
-                _showingClosedPage = false;
-                _lastActivityUtc = DateTime.UtcNow;
-                KioskLog.Write("Waiver connection restored; loading a fresh starting page.");
+                KioskLog.Write("Waiver connection restored; preparing a fresh starting page.");
+                await ResetForNextGuestAsync("connection restored", showStatus: false);
                 return;
             }
 
@@ -599,9 +629,12 @@ internal sealed class KioskForm : Form
             KioskLog.Write("Automatic waiver connection check failed: " +
                 ex.GetType().Name + " - " + ex.Message);
         }
-
-        if (_browserReady && !_isResetting && !_settings.StationClosed && _showingClosedPage)
-            _retryTimer.Start();
+        finally
+        {
+            _connectionCheckInProgress = false;
+            if (_browserReady && !_isResetting && !_settings.StationClosed && _showingClosedPage)
+                _retryTimer.Start();
+        }
     }
 
     private bool IsAllowedUri(string? value)
@@ -4005,7 +4038,22 @@ internal sealed class PinEntryDialog : Form
         AcceptButton = exit;
         CancelButton = cancel;
         Controls.AddRange([heading, pinLabel, _pin, exit, cancel]);
-        Shown += (_, _) => _pin.Focus();
+        ActiveControl = _pin;
+        Shown += (_, _) => BeginInvoke(new Action(FocusPasswordField));
+        Activated += (_, _) => FocusPasswordField();
+    }
+
+    private void FocusPasswordField()
+    {
+        if (IsDisposed || Disposing)
+            return;
+
+        TopMost = true;
+        Activate();
+        BringToFront();
+        _pin.Select();
+        _pin.SelectionStart = _pin.Text.Length;
+        _pin.SelectionLength = 0;
     }
 }
 

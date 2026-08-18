@@ -158,12 +158,14 @@ WHAT THE KIOSK DOES
 * Clears cookies, local storage, cache, and other site data when it resets so the
   previous guest's browser session is not left for the next guest.
 * Replaces browser connection errors with a branded "Waiver Station Closed"
-  page that directs guests to the front desk. It checks the connection quietly
-  every 60 seconds and automatically loads a fresh starting page when the waiver
-  website becomes available again.
+  page that directs guests to the front desk. It reacts immediately when Windows
+  reports that the network is available, also checks quietly every 60 seconds,
+  clears the interrupted session, and automatically loads a fresh starting page
+  when the waiver website becomes available again.
 * Lets staff deliberately display a separate closed page without connection-error
   language. Ctrl + Alt + Shift + F12 continues to open Staff Settings from both
-  closed pages.
+  closed pages. The password dialog opens in the foreground with its entry field
+  focused so staff can type immediately.
 
 
 IMPORTANT FIRST-DAY TEST
