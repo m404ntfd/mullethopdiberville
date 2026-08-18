@@ -914,24 +914,31 @@ internal sealed class KioskForm : Form
                   background: #05080a;
                   cursor: none;
                 }
+                body {
+                  display: flex;
+                  flex-direction: column;
+                }
+                .video-stage {
+                  flex: 1 1 auto;
+                  min-height: 0;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  background: #05080a;
+                }
                 video {
                   display: block;
                   width: 100%;
                   height: 100%;
-                  object-fit: cover;
+                  object-fit: contain;
                 }
                 .wake-message {
-                  position: fixed;
-                  left: 50%;
-                  bottom: 34px;
-                  transform: translateX(-50%);
-                  width: max-content;
-                  max-width: calc(100vw - 40px);
-                  padding: 13px 24px;
-                  border: 3px solid rgba(255,255,255,.88);
-                  border-radius: 999px;
-                  background: rgba(16,24,32,.78);
-                  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+                  flex: 0 0 auto;
+                  width: 100%;
+                  min-height: 72px;
+                  padding: 18px 24px;
+                  border-top: 3px solid rgba(255,255,255,.88);
+                  background: #101820;
                   color: #fff;
                   font: 800 clamp(17px, 2vw, 27px)/1.2 'Segoe UI', Arial, sans-serif;
                   letter-spacing: .8px;
@@ -941,9 +948,11 @@ internal sealed class KioskForm : Form
               </style>
             </head>
             <body>
-              <video id="screensaver-video" autoplay loop muted playsinline preload="auto">
-                <source src="{{videoUrl}}" type="video/mp4">
-              </video>
+              <div class="video-stage">
+                <video id="screensaver-video" autoplay loop muted playsinline preload="auto">
+                  <source src="{{videoUrl}}" type="video/mp4">
+                </video>
+              </div>
               <div class="wake-message">TOUCH THE SCREEN TO START A WAIVER</div>
               <script>
                 let waking = false;
@@ -2749,7 +2758,7 @@ internal sealed class KioskSettings
     public string[] AllowedHosts { get; set; } = ["mullet.lilypadpos.app"];
     public string[] AllowedPathPrefixes { get; set; } = ["/public/onlinewaiver/"];
     public int IdleTimeoutMinutes { get; set; } = 3;
-    public int ScreensaverTimeoutMinutes { get; set; } = 10;
+    public int ScreensaverTimeoutMinutes { get; set; } = 3;
     public int CompletionResetSeconds { get; set; } = 15;
     public bool StationClosed { get; set; }
 
@@ -2969,6 +2978,8 @@ internal enum StaffSettingsAction
 
 internal sealed class StaffSettingsDialog : Form
 {
+    private static int _lastSelectedTabIndex;
+
     private readonly KioskSettings _settings;
     private readonly string _connectionTestUrl;
     private readonly Button _connectionButton = new();
@@ -3007,6 +3018,39 @@ internal sealed class StaffSettingsDialog : Form
             TextAlign = ContentAlignment.MiddleCenter,
             Bounds = new Rectangle(25, 17, 630, 45)
         };
+        var settingsTabs = new TabControl
+        {
+            Bounds = new Rectangle(20, 76, 640, 560),
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            Padding = new Point(14, 7)
+        };
+        var connectionTab = new TabPage("Connection & Updates")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
+        var dateTimeTab = new TabPage("Date & Time")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
+        var stationTab = new TabPage("Waiver Station")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
+        var staffToolsTab = new TabPage("Ads & Staff Tools")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
+        settingsTabs.TabPages.AddRange([
+            connectionTab, dateTimeTab, stationTab, staffToolsTab]);
+        settingsTabs.SelectedIndex = Math.Clamp(
+            _lastSelectedTabIndex, 0, settingsTabs.TabPages.Count - 1);
+        settingsTabs.SelectedIndexChanged += (_, _) =>
+            _lastSelectedTabIndex = settingsTabs.SelectedIndex;
+
         var currentStatus = new Label
         {
             AutoSize = false,
@@ -3016,7 +3060,7 @@ internal sealed class StaffSettingsDialog : Form
             Font = new Font("Segoe UI", 10, FontStyle.Bold),
             ForeColor = activePreview.HasValue ? Color.FromArgb(182, 76, 0) : Color.FromArgb(8, 119, 189),
             TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(30, 62, 620, 28)
+            Bounds = new Rectangle(20, 20, 580, 36)
         };
 
         var internetGroup = new GroupBox
@@ -3024,7 +3068,7 @@ internal sealed class StaffSettingsDialog : Form
             Text = "Internet Connection and Kiosk Updates",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(8, 119, 189),
-            Bounds = new Rectangle(30, 98, 620, 162)
+            Bounds = new Rectangle(20, 25, 580, 190)
         };
         var internetNote = new Label
         {
@@ -3032,10 +3076,10 @@ internal sealed class StaffSettingsDialog : Form
             Text = "Test the live waiver website or check GitHub for a newer kiosk version.",
             Font = new Font("Segoe UI", 9.5f),
             ForeColor = Color.FromArgb(16, 24, 32),
-            Bounds = new Rectangle(18, 27, 575, 25)
+            Bounds = new Rectangle(18, 30, 540, 25)
         };
         _connectionButton.Text = "Check Connection";
-        _connectionButton.Bounds = new Rectangle(18, 61, 165, 36);
+        _connectionButton.Bounds = new Rectangle(18, 70, 165, 38);
         _connectionButton.BackColor = Color.FromArgb(105, 210, 236);
         _connectionButton.FlatStyle = FlatStyle.Flat;
         _connectionButton.Click += async (_, _) => await CheckConnectionAsync();
@@ -3044,9 +3088,9 @@ internal sealed class StaffSettingsDialog : Form
         _connectionResult.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         _connectionResult.ForeColor = Color.FromArgb(83, 97, 109);
         _connectionResult.TextAlign = ContentAlignment.MiddleLeft;
-        _connectionResult.Bounds = new Rectangle(198, 61, 395, 36);
+        _connectionResult.Bounds = new Rectangle(198, 70, 355, 38);
         _updateButton.Text = "Check for Kiosk Update";
-        _updateButton.Bounds = new Rectangle(18, 108, 165, 36);
+        _updateButton.Bounds = new Rectangle(18, 126, 165, 38);
         _updateButton.BackColor = Color.FromArgb(118, 196, 66);
         _updateButton.FlatStyle = FlatStyle.Flat;
         _updateButton.Click += async (_, _) => await CheckForUpdateAsync();
@@ -3055,16 +3099,25 @@ internal sealed class StaffSettingsDialog : Form
         _updateResult.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         _updateResult.ForeColor = Color.FromArgb(83, 97, 109);
         _updateResult.TextAlign = ContentAlignment.MiddleLeft;
-        _updateResult.Bounds = new Rectangle(198, 108, 395, 36);
+        _updateResult.Bounds = new Rectangle(198, 126, 355, 38);
         internetGroup.Controls.AddRange([
             internetNote, _connectionButton, _connectionResult, _updateButton, _updateResult]);
+        var connectionHelp = new Label
+        {
+            AutoSize = false,
+            Text = "Connection problems automatically display the Waiver Station Closed page. The kiosk checks every 60 seconds and returns to a fresh waiver when the website is available again.",
+            Font = new Font("Segoe UI", 10),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(30, 240, 560, 70)
+        };
+        connectionTab.Controls.AddRange([internetGroup, connectionHelp]);
 
         var previewGroup = new GroupBox
         {
             Text = "Preview a Different Date and Time",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
-            Bounds = new Rectangle(30, 272, 620, 185)
+            Bounds = new Rectangle(20, 75, 580, 245)
         };
         var previewNote = new Label
         {
@@ -3072,32 +3125,32 @@ internal sealed class StaffSettingsDialog : Form
             Text = "Choose a date and time, then reload a fresh waiver in preview mode. This changes the browser time only; content generated by LilYPad's server may still use its live server clock.",
             Font = new Font("Segoe UI", 9.5f),
             ForeColor = Color.FromArgb(16, 24, 32),
-            Bounds = new Rectangle(18, 27, 580, 44)
+            Bounds = new Rectangle(18, 30, 540, 58)
         };
         var dateLabel = new Label
         {
             Text = "Date:", AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold),
-            ForeColor = Color.FromArgb(16, 24, 32), Location = new Point(32, 82)
+            ForeColor = Color.FromArgb(16, 24, 32), Location = new Point(32, 108)
         };
         var timeLabel = new Label
         {
             Text = "Time:", AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold),
-            ForeColor = Color.FromArgb(16, 24, 32), Location = new Point(323, 82)
+            ForeColor = Color.FromArgb(16, 24, 32), Location = new Point(320, 108)
         };
         var initialValue = activePreview ?? DateTime.Now;
         _datePicker.Format = DateTimePickerFormat.Long;
         _datePicker.Value = initialValue;
-        _datePicker.Bounds = new Rectangle(82, 77, 215, 32);
+        _datePicker.Bounds = new Rectangle(82, 103, 215, 32);
         _timePicker.Format = DateTimePickerFormat.Custom;
         _timePicker.CustomFormat = "h:mm tt";
         _timePicker.ShowUpDown = true;
         _timePicker.Value = initialValue;
-        _timePicker.Bounds = new Rectangle(375, 77, 125, 32);
+        _timePicker.Bounds = new Rectangle(375, 103, 125, 32);
 
         var previewButton = new Button
         {
             Text = "Preview Selected Date & Time",
-            Bounds = new Rectangle(18, 127, 245, 42),
+            Bounds = new Rectangle(18, 165, 250, 44),
             BackColor = Color.FromArgb(118, 196, 66),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -3106,7 +3159,7 @@ internal sealed class StaffSettingsDialog : Form
         var liveButton = new Button
         {
             Text = "Return to Live Date & Time",
-            Bounds = new Rectangle(276, 127, 235, 42),
+            Bounds = new Rectangle(282, 165, 250, 44),
             BackColor = Color.FromArgb(245, 130, 32),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold),
@@ -3115,6 +3168,7 @@ internal sealed class StaffSettingsDialog : Form
         liveButton.Click += (_, _) => Complete(StaffSettingsAction.UseLiveDateTime);
         previewGroup.Controls.AddRange([
             previewNote, dateLabel, timeLabel, _datePicker, _timePicker, previewButton, liveButton]);
+        dateTimeTab.Controls.AddRange([currentStatus, previewGroup]);
 
         var exitButton = new Button
         {
@@ -3128,7 +3182,7 @@ internal sealed class StaffSettingsDialog : Form
         var advertisementsButton = new Button
         {
             Text = "Manage Advertisements",
-            Bounds = new Rectangle(18, 30, 180, 42),
+            Bounds = new Rectangle(20, 45, 250, 48),
             BackColor = Color.FromArgb(117, 68, 154),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
@@ -3144,7 +3198,7 @@ internal sealed class StaffSettingsDialog : Form
         var thankYouPreviewButton = new Button
         {
             Text = "Preview Thank-You Page",
-            Bounds = new Rectangle(210, 30, 190, 42),
+            Bounds = new Rectangle(290, 45, 250, 48),
             BackColor = Color.FromArgb(105, 210, 236),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -3153,7 +3207,7 @@ internal sealed class StaffSettingsDialog : Form
         var changePasswordButton = new Button
         {
             Text = "Change Staff Password",
-            Bounds = new Rectangle(412, 30, 190, 42),
+            Bounds = new Rectangle(20, 115, 250, 48),
             BackColor = Color.FromArgb(118, 196, 66),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -3174,12 +3228,12 @@ internal sealed class StaffSettingsDialog : Form
                 ? Color.FromArgb(180, 35, 24)
                 : Color.FromArgb(54, 128, 27),
             TextAlign = ContentAlignment.MiddleLeft,
-            Bounds = new Rectangle(18, 78, 365, 42)
+            Bounds = new Rectangle(18, 92, 320, 42)
         };
         var closedPageButton = new Button
         {
             Text = _settings.StationClosed ? "Turn Off Closed Page" : "Turn On Closed Page",
-            Bounds = new Rectangle(397, 78, 205, 42),
+            Bounds = new Rectangle(350, 92, 210, 42),
             BackColor = _settings.StationClosed
                 ? Color.FromArgb(118, 196, 66)
                 : Color.FromArgb(245, 130, 32),
@@ -3187,46 +3241,95 @@ internal sealed class StaffSettingsDialog : Form
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
         };
         closedPageButton.Click += (_, _) => Complete(StaffSettingsAction.ToggleStationClosed);
+        var closedPageNote = new Label
+        {
+            AutoSize = false,
+            Text = "When this page is on, Return to Kiosk keeps the closed message visible and the screensaver remains disabled.",
+            Font = new Font("Segoe UI", 9.5f),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(18, 30, 540, 50)
+        };
+        var closedPageGroup = new GroupBox
+        {
+            Text = "Waiver Station Closed Page",
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            ForeColor = Color.FromArgb(117, 68, 154),
+            Bounds = new Rectangle(20, 25, 580, 170)
+        };
+        closedPageGroup.Controls.AddRange([
+            closedPageNote, closedPageStatus, closedPageButton]);
+
         var screensaverLabel = new Label
         {
             Text = "Start screensaver after:",
-            AutoSize = true,
+            AutoSize = false,
             Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
             ForeColor = Color.FromArgb(16, 24, 32),
-            Location = new Point(18, 134)
+            Bounds = new Rectangle(18, 102, 170, 30),
+            TextAlign = ContentAlignment.MiddleLeft
         };
         _screensaverMinutes.Minimum = 1;
         _screensaverMinutes.Maximum = 240;
         _screensaverMinutes.Value = Math.Clamp(_settings.ScreensaverTimeoutMinutes, 1, 240);
         _screensaverMinutes.TextAlign = HorizontalAlignment.Center;
-        _screensaverMinutes.Bounds = new Rectangle(183, 129, 68, 32);
+        _screensaverMinutes.ForeColor = Color.FromArgb(16, 24, 32);
+        _screensaverMinutes.Bounds = new Rectangle(195, 101, 75, 32);
         _screensaverMinutes.ValueChanged += (_, _) =>
             _screensaverSaveButton.Text = "Save Time";
         var screensaverMinutesLabel = new Label
         {
             Text = "minutes without touch or keyboard use",
-            AutoSize = true,
+            AutoSize = false,
             Font = new Font("Segoe UI", 9.5f),
             ForeColor = Color.FromArgb(16, 24, 32),
-            Location = new Point(260, 134)
+            Bounds = new Rectangle(282, 102, 278, 30),
+            TextAlign = ContentAlignment.MiddleLeft
         };
         _screensaverSaveButton.Text = "Save Time";
-        _screensaverSaveButton.Bounds = new Rectangle(503, 127, 99, 36);
+        _screensaverSaveButton.Bounds = new Rectangle(18, 147, 150, 40);
         _screensaverSaveButton.BackColor = Color.FromArgb(105, 210, 236);
+        _screensaverSaveButton.ForeColor = Color.FromArgb(16, 24, 32);
         _screensaverSaveButton.FlatStyle = FlatStyle.Flat;
         _screensaverSaveButton.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         _screensaverSaveButton.Click += (_, _) => SaveScreensaverTimeout();
+        var screensaverNote = new Label
+        {
+            AutoSize = false,
+            Text = "The video runs only while the waiver station is open. Touching the screen or pressing a key clears the previous session and loads a fresh starting page.",
+            Font = new Font("Segoe UI", 9.5f),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(18, 30, 540, 58)
+        };
+        var screensaverGroup = new GroupBox
+        {
+            Text = "Video Screensaver",
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            ForeColor = Color.FromArgb(8, 119, 189),
+            Bounds = new Rectangle(20, 215, 580, 215)
+        };
+        screensaverGroup.Controls.AddRange([
+            screensaverNote, screensaverLabel, _screensaverMinutes,
+            screensaverMinutesLabel, _screensaverSaveButton]);
+        stationTab.Controls.AddRange([closedPageGroup, screensaverGroup]);
+
         var staffToolsGroup = new GroupBox
         {
-            Text = "Waiver Station, Advertisements, and Staff Tools",
+            Text = "Advertisements and Staff Tools",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
-            Bounds = new Rectangle(30, 469, 620, 170)
+            Bounds = new Rectangle(20, 25, 580, 215)
         };
         staffToolsGroup.Controls.AddRange([
-            advertisementsButton, thankYouPreviewButton, changePasswordButton,
-            closedPageStatus, closedPageButton, screensaverLabel, _screensaverMinutes,
-            screensaverMinutesLabel, _screensaverSaveButton]);
+            advertisementsButton, thankYouPreviewButton, changePasswordButton]);
+        var staffToolsNote = new Label
+        {
+            AutoSize = false,
+            Text = "Advertisement schedules and the thank-you preview use the date and time selected on the Date & Time tab.",
+            Font = new Font("Segoe UI", 10),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(30, 265, 560, 55)
+        };
+        staffToolsTab.Controls.AddRange([staffToolsGroup, staffToolsNote]);
         var returnButton = new Button
         {
             Text = "Return to Kiosk",
@@ -3239,8 +3342,7 @@ internal sealed class StaffSettingsDialog : Form
 
         CancelButton = returnButton;
         Controls.AddRange([
-            heading, currentStatus, internetGroup, previewGroup, staffToolsGroup,
-            exitButton, returnButton]);
+            heading, settingsTabs, exitButton, returnButton]);
     }
 
     private async Task CheckConnectionAsync()

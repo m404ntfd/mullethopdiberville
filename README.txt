@@ -59,6 +59,9 @@ Ctrl + Alt + Shift + F12
 
 Enter the staff password, then select "Open Staff Settings." The menu provides:
 
+Settings are separated into Connection & Updates, Date & Time, Waiver Station,
+and Ads & Staff Tools tabs.
+
 * Exit Kiosk.
 * Check whether the computer can reach the live waiver website.
 * Check GitHub for a newer kiosk version and install it immediately.
@@ -70,7 +73,8 @@ Enter the staff password, then select "Open Staff Settings." The menu provides:
 * Turn the guest-facing "Waiver Station Closed" page on or off. This setting is
   retained after the kiosk or computer restarts.
 * Select how many minutes of guest inactivity pass before the video screensaver
-  begins. The saved delay is retained after the kiosk or computer restarts.
+  begins. The default is 3 minutes, and the saved delay is retained after the
+  kiosk or computer restarts.
 * Change the staff password after verifying the current password.
 * Return to the kiosk and load a clean waiver starting page.
 
@@ -154,6 +158,7 @@ WHAT THE KIOSK DOES
 * Plays the packaged Mullet Hop video as a full-screen, looping screensaver after
   the staff-selected period without screen or keyboard activity. The first touch
   or keypress clears the prior session and loads a fresh waiver starting page.
+  The start prompt has a separate footer so it never covers content in the video.
   The release build reassembles and verifies the exact uploaded MP4 from the
   source parts before placing it in the installed kiosk.
 * Watches the page for common waiver-completion messages and completion URLs.
