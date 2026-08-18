@@ -39,6 +39,10 @@ jobs:
           }
           "value=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - name: Assemble screensaver video
+        shell: pwsh
+        run: ./scripts/Assemble-Screensaver.ps1
+
       - name: Restore packages
         run: dotnet restore src/MulletHopWaiverKiosk.csproj
 
@@ -55,6 +59,21 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:DebugType=None `
             --output publish
+
+      - name: Verify packaged screensaver video
+        shell: pwsh
+        run: |
+          $screensaverPath = "publish/MulletHopScreensaver.mp4"
+          if (-not (Test-Path -LiteralPath $screensaverPath -PathType Leaf)) {
+            throw "The published kiosk is missing $screensaverPath."
+          }
+
+          $screensaver = Get-Item -LiteralPath $screensaverPath
+          if ($screensaver.Length -lt 1MB) {
+            throw "The published screensaver video is unexpectedly small."
+          }
+
+          Write-Host "Screensaver video included: $($screensaver.Length) bytes."
 
       - name: Install matching Velopack command-line tool
         run: dotnet tool install --global vpk --version 1.2.0

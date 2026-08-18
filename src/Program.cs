@@ -203,6 +203,8 @@ internal sealed class KioskForm : Form
     private const uint ModShift = 0x0004;
     private const uint VkF12 = 0x7B;
     private const string AdvertisementVirtualHost = "mullethop-ads.local";
+    private const string ScreensaverVirtualHost = "mullethop-kiosk.local";
+    private const string ScreensaverFileName = "MulletHopScreensaver.mp4";
     private const string LogoUrl =
         "https://www.coastalmississippi.com/imager/files_idss_com/C537/images/listings/Mullet-Hop-eea044b35056a36_e45adf5f6bc0c5c2a30a39868f44eab6.png";
 
@@ -222,6 +224,8 @@ internal sealed class KioskForm : Form
     private bool _hotKeyRegistered;
     private bool _showingThankYouPage;
     private bool _showingClosedPage;
+    private bool _showingScreensaver;
+    private bool _idleResetPerformed;
     private bool _connectionCheckInProgress;
     private string? _pendingSwitchEmail;
     private string? _pendingSwitchChoice;
@@ -409,6 +413,10 @@ internal sealed class KioskForm : Form
             AdvertisementVirtualHost,
             KioskSettings.AdvertisementsDirectory,
             CoreWebView2HostResourceAccessKind.DenyCors);
+        core.SetVirtualHostNameToFolderMapping(
+            ScreensaverVirtualHost,
+            AppContext.BaseDirectory,
+            CoreWebView2HostResourceAccessKind.DenyCors);
 
         core.NavigationStarting += Core_NavigationStarting;
         core.FrameNavigationStarting += (_, e) =>
@@ -431,7 +439,6 @@ internal sealed class KioskForm : Form
 
     private void Core_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
-        MarkActivity();
         _retryTimer.Stop();
 
         if (IsInternalKioskPageUri(e.Uri))
@@ -454,9 +461,7 @@ internal sealed class KioskForm : Form
 
     private async void Core_NavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
-        MarkActivity();
-
-        if (_showingThankYouPage || _showingClosedPage)
+        if (_showingThankYouPage || _showingClosedPage || _showingScreensaver)
             return;
 
         if (!e.IsSuccess || e.HttpStatusCode >= 400)
@@ -498,6 +503,8 @@ internal sealed class KioskForm : Form
 
         if (message == "activity")
             MarkActivity();
+        else if (message == "screensaver-wake")
+            _ = WakeFromScreensaverAsync();
         else if (message == "completion-text")
             ShowThankYouPage();
         else if (message == "reset-waiver")
@@ -561,15 +568,30 @@ internal sealed class KioskForm : Form
 
     private void IdleTimer_Tick(object? sender, EventArgs e)
     {
-        if (!_browserReady || _promptOpen || _isResetting || _completionTimer.Enabled || _showingClosedPage)
+        if (!_browserReady || _promptOpen || _isResetting || _completionTimer.Enabled ||
+            _showingClosedPage || _showingScreensaver)
             return;
 
         var idleFor = DateTime.UtcNow - _lastActivityUtc;
-        if (idleFor >= TimeSpan.FromMinutes(Math.Max(1, _settings.IdleTimeoutMinutes)))
-            _ = ResetForNextGuestAsync("inactivity");
+        if (idleFor >= TimeSpan.FromMinutes(Math.Max(1, _settings.ScreensaverTimeoutMinutes)))
+        {
+            ShowScreensaver();
+            return;
+        }
+
+        if (!_idleResetPerformed &&
+            idleFor >= TimeSpan.FromMinutes(Math.Max(1, _settings.IdleTimeoutMinutes)))
+        {
+            _idleResetPerformed = true;
+            _ = ResetForNextGuestAsync("inactivity", showStatus: false, resetIdleClock: false);
+        }
     }
 
-    private void MarkActivity() => _lastActivityUtc = DateTime.UtcNow;
+    private void MarkActivity()
+    {
+        _lastActivityUtc = DateTime.UtcNow;
+        _idleResetPerformed = false;
+    }
 
     private async void RetryTimer_Tick(object? sender, EventArgs e) =>
         await CheckForRestoredConnectionAsync();
@@ -656,7 +678,8 @@ internal sealed class KioskForm : Form
 
     private bool IsInternalKioskPageUri(string? value)
     {
-        if ((!_showingThankYouPage && !_showingClosedPage) || string.IsNullOrWhiteSpace(value))
+        if ((!_showingThankYouPage && !_showingClosedPage && !_showingScreensaver) ||
+            string.IsNullOrWhiteSpace(value))
             return false;
 
         return string.Equals(value, "about:blank", StringComparison.OrdinalIgnoreCase) ||
@@ -683,6 +706,7 @@ internal sealed class KioskForm : Form
 
         _showingThankYouPage = true;
         _showingClosedPage = false;
+        _showingScreensaver = false;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
@@ -694,7 +718,8 @@ internal sealed class KioskForm : Form
             : "Waiver completion detected; branded thank-you page displayed.");
     }
 
-    private async Task ResetForNextGuestAsync(string reason, bool showStatus = true)
+    private async Task ResetForNextGuestAsync(
+        string reason, bool showStatus = true, bool resetIdleClock = true)
     {
         if (!_browserReady || _isResetting)
             return;
@@ -716,11 +741,13 @@ internal sealed class KioskForm : Form
             await _webView.CoreWebView2.Profile.ClearBrowsingDataAsync();
             _showingThankYouPage = false;
             _showingClosedPage = false;
+            _showingScreensaver = false;
             if (_settings.StationClosed)
                 ShowStationClosedPage(connectionError: false);
             else
                 _webView.CoreWebView2.Navigate(_settings.StartUrl);
-            _lastActivityUtc = DateTime.UtcNow;
+            if (resetIdleClock)
+                MarkActivity();
             KioskLog.Write("Waiver reset: " + reason + ".");
         }
         catch (Exception ex)
@@ -819,6 +846,7 @@ internal sealed class KioskForm : Form
 
         _showingThankYouPage = false;
         _showingClosedPage = true;
+        _showingScreensaver = false;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
@@ -830,6 +858,108 @@ internal sealed class KioskForm : Form
         KioskLog.Write(connectionError
             ? "The branded connection-closed page was displayed; the waiver site will be retried automatically."
             : "The staff-controlled waiver station closed page was displayed.");
+    }
+
+    private void ShowScreensaver()
+    {
+        if (!_browserReady || _isResetting || _promptOpen || _settings.StationClosed ||
+            _showingClosedPage || _showingScreensaver)
+            return;
+
+        var videoPath = Path.Combine(AppContext.BaseDirectory, ScreensaverFileName);
+        if (!File.Exists(videoPath))
+        {
+            KioskLog.Write("Screensaver video is missing: " + videoPath);
+            MarkActivity();
+            return;
+        }
+
+        _showingScreensaver = true;
+        _showingThankYouPage = false;
+        _completionTimer.Stop();
+        _retryTimer.Stop();
+        HideBanner();
+        _webView.CoreWebView2.NavigateToString(BuildScreensaverHtml());
+        KioskLog.Write("Screensaver started after " +
+            _settings.ScreensaverTimeoutMinutes + " minute(s) without guest activity.");
+    }
+
+    private async Task WakeFromScreensaverAsync()
+    {
+        if (!_showingScreensaver || _isResetting)
+            return;
+
+        MarkActivity();
+        KioskLog.Write("Screensaver dismissed by guest activity; loading a fresh starting page.");
+        await ResetForNextGuestAsync("screensaver wake", showStatus: false);
+    }
+
+    private static string BuildScreensaverHtml()
+    {
+        var videoUrl = $"https://{ScreensaverVirtualHost}/{ScreensaverFileName}";
+        return $$"""
+            <!doctype html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Mullet Hop Waiver Kiosk</title>
+              <style>
+                * { box-sizing: border-box; }
+                html, body {
+                  width: 100%;
+                  height: 100%;
+                  margin: 0;
+                  overflow: hidden;
+                  background: #05080a;
+                  cursor: none;
+                }
+                video {
+                  display: block;
+                  width: 100%;
+                  height: 100%;
+                  object-fit: cover;
+                }
+                .wake-message {
+                  position: fixed;
+                  left: 50%;
+                  bottom: 34px;
+                  transform: translateX(-50%);
+                  width: max-content;
+                  max-width: calc(100vw - 40px);
+                  padding: 13px 24px;
+                  border: 3px solid rgba(255,255,255,.88);
+                  border-radius: 999px;
+                  background: rgba(16,24,32,.78);
+                  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+                  color: #fff;
+                  font: 800 clamp(17px, 2vw, 27px)/1.2 'Segoe UI', Arial, sans-serif;
+                  letter-spacing: .8px;
+                  text-align: center;
+                  pointer-events: none;
+                }
+              </style>
+            </head>
+            <body>
+              <video id="screensaver-video" autoplay loop muted playsinline preload="auto">
+                <source src="{{videoUrl}}" type="video/mp4">
+              </video>
+              <div class="wake-message">TOUCH THE SCREEN TO START A WAIVER</div>
+              <script>
+                let waking = false;
+                const wake = () => {
+                  if (waking) return;
+                  waking = true;
+                  window.chrome.webview.postMessage('screensaver-wake');
+                };
+                ['pointerdown', 'touchstart', 'mousedown', 'keydown']
+                  .forEach(name => window.addEventListener(name, wake,
+                    { capture: true, passive: true }));
+                document.getElementById('screensaver-video').play().catch(() => {});
+              </script>
+            </body>
+            </html>
+            """;
     }
 
     private static string BuildStationClosedHtml(bool connectionError)
@@ -1410,7 +1540,11 @@ internal sealed class KioskForm : Form
                         using var settingsDialog = new StaffSettingsDialog(
                             _settings, _previewDateTime.HasValue ? GetEffectiveNow() : null);
                         if (settingsDialog.ShowDialog(this) != DialogResult.OK)
+                        {
+                            await ResetForNextGuestAsync(
+                                "staff returned to kiosk", showStatus: false);
                             return;
+                        }
 
                         switch (settingsDialog.SelectedAction)
                         {
@@ -1418,6 +1552,10 @@ internal sealed class KioskForm : Form
                                 _allowExit = true;
                                 KioskLog.Write("Staff exit accepted.");
                                 Close();
+                                return;
+                            case StaffSettingsAction.ReturnToKiosk:
+                                await ResetForNextGuestAsync(
+                                    "staff returned to kiosk", showStatus: false);
                                 return;
                             case StaffSettingsAction.PreviewDateTime:
                                 await EnableDateTimePreviewAsync(settingsDialog.SelectedDateTime);
@@ -2611,6 +2749,7 @@ internal sealed class KioskSettings
     public string[] AllowedHosts { get; set; } = ["mullet.lilypadpos.app"];
     public string[] AllowedPathPrefixes { get; set; } = ["/public/onlinewaiver/"];
     public int IdleTimeoutMinutes { get; set; } = 3;
+    public int ScreensaverTimeoutMinutes { get; set; } = 10;
     public int CompletionResetSeconds { get; set; } = 15;
     public bool StationClosed { get; set; }
 
@@ -2711,6 +2850,7 @@ internal sealed class KioskSettings
         foreach (var advertisement in Advertisements)
             advertisement.Normalize();
         IdleTimeoutMinutes = Math.Clamp(IdleTimeoutMinutes, 1, 60);
+        ScreensaverTimeoutMinutes = Math.Clamp(ScreensaverTimeoutMinutes, 1, 240);
         CompletionResetSeconds = Math.Clamp(CompletionResetSeconds, 12, 60);
     }
 
@@ -2819,6 +2959,7 @@ internal sealed class PinSetupDialog : Form
 internal enum StaffSettingsAction
 {
     None,
+    ReturnToKiosk,
     ExitToWindows,
     PreviewDateTime,
     UseLiveDateTime,
@@ -2836,6 +2977,8 @@ internal sealed class StaffSettingsDialog : Form
     private readonly Label _updateResult = new();
     private readonly DateTimePicker _datePicker = new();
     private readonly DateTimePicker _timePicker = new();
+    private readonly NumericUpDown _screensaverMinutes = new();
+    private readonly Button _screensaverSaveButton = new();
 
     public StaffSettingsAction SelectedAction { get; private set; }
     public DateTime SelectedDateTime => _datePicker.Value.Date + _timePicker.Value.TimeOfDay;
@@ -2921,7 +3064,7 @@ internal sealed class StaffSettingsDialog : Form
             Text = "Preview a Different Date and Time",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
-            Bounds = new Rectangle(30, 272, 620, 205)
+            Bounds = new Rectangle(30, 272, 620, 185)
         };
         var previewNote = new Label
         {
@@ -2929,32 +3072,32 @@ internal sealed class StaffSettingsDialog : Form
             Text = "Choose a date and time, then reload a fresh waiver in preview mode. This changes the browser time only; content generated by LilYPad's server may still use its live server clock.",
             Font = new Font("Segoe UI", 9.5f),
             ForeColor = Color.FromArgb(16, 24, 32),
-            Bounds = new Rectangle(18, 27, 580, 52)
+            Bounds = new Rectangle(18, 27, 580, 44)
         };
         var dateLabel = new Label
         {
             Text = "Date:", AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold),
-            ForeColor = Color.FromArgb(16, 24, 32), Location = new Point(32, 94)
+            ForeColor = Color.FromArgb(16, 24, 32), Location = new Point(32, 82)
         };
         var timeLabel = new Label
         {
             Text = "Time:", AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold),
-            ForeColor = Color.FromArgb(16, 24, 32), Location = new Point(323, 94)
+            ForeColor = Color.FromArgb(16, 24, 32), Location = new Point(323, 82)
         };
         var initialValue = activePreview ?? DateTime.Now;
         _datePicker.Format = DateTimePickerFormat.Long;
         _datePicker.Value = initialValue;
-        _datePicker.Bounds = new Rectangle(82, 89, 215, 32);
+        _datePicker.Bounds = new Rectangle(82, 77, 215, 32);
         _timePicker.Format = DateTimePickerFormat.Custom;
         _timePicker.CustomFormat = "h:mm tt";
         _timePicker.ShowUpDown = true;
         _timePicker.Value = initialValue;
-        _timePicker.Bounds = new Rectangle(375, 89, 125, 32);
+        _timePicker.Bounds = new Rectangle(375, 77, 125, 32);
 
         var previewButton = new Button
         {
             Text = "Preview Selected Date & Time",
-            Bounds = new Rectangle(18, 145, 245, 42),
+            Bounds = new Rectangle(18, 127, 245, 42),
             BackColor = Color.FromArgb(118, 196, 66),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -2963,7 +3106,7 @@ internal sealed class StaffSettingsDialog : Form
         var liveButton = new Button
         {
             Text = "Return to Live Date & Time",
-            Bounds = new Rectangle(276, 145, 235, 42),
+            Bounds = new Rectangle(276, 127, 235, 42),
             BackColor = Color.FromArgb(245, 130, 32),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold),
@@ -3031,12 +3174,12 @@ internal sealed class StaffSettingsDialog : Form
                 ? Color.FromArgb(180, 35, 24)
                 : Color.FromArgb(54, 128, 27),
             TextAlign = ContentAlignment.MiddleLeft,
-            Bounds = new Rectangle(18, 85, 365, 42)
+            Bounds = new Rectangle(18, 78, 365, 42)
         };
         var closedPageButton = new Button
         {
             Text = _settings.StationClosed ? "Turn Off Closed Page" : "Turn On Closed Page",
-            Bounds = new Rectangle(397, 85, 205, 42),
+            Bounds = new Rectangle(397, 78, 205, 42),
             BackColor = _settings.StationClosed
                 ? Color.FromArgb(118, 196, 66)
                 : Color.FromArgb(245, 130, 32),
@@ -3044,25 +3187,55 @@ internal sealed class StaffSettingsDialog : Form
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
         };
         closedPageButton.Click += (_, _) => Complete(StaffSettingsAction.ToggleStationClosed);
+        var screensaverLabel = new Label
+        {
+            Text = "Start screensaver after:",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Location = new Point(18, 134)
+        };
+        _screensaverMinutes.Minimum = 1;
+        _screensaverMinutes.Maximum = 240;
+        _screensaverMinutes.Value = Math.Clamp(_settings.ScreensaverTimeoutMinutes, 1, 240);
+        _screensaverMinutes.TextAlign = HorizontalAlignment.Center;
+        _screensaverMinutes.Bounds = new Rectangle(183, 129, 68, 32);
+        _screensaverMinutes.ValueChanged += (_, _) =>
+            _screensaverSaveButton.Text = "Save Time";
+        var screensaverMinutesLabel = new Label
+        {
+            Text = "minutes without touch or keyboard use",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 9.5f),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Location = new Point(260, 134)
+        };
+        _screensaverSaveButton.Text = "Save Time";
+        _screensaverSaveButton.Bounds = new Rectangle(503, 127, 99, 36);
+        _screensaverSaveButton.BackColor = Color.FromArgb(105, 210, 236);
+        _screensaverSaveButton.FlatStyle = FlatStyle.Flat;
+        _screensaverSaveButton.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _screensaverSaveButton.Click += (_, _) => SaveScreensaverTimeout();
         var staffToolsGroup = new GroupBox
         {
             Text = "Waiver Station, Advertisements, and Staff Tools",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
-            Bounds = new Rectangle(30, 489, 620, 145)
+            Bounds = new Rectangle(30, 469, 620, 170)
         };
         staffToolsGroup.Controls.AddRange([
             advertisementsButton, thankYouPreviewButton, changePasswordButton,
-            closedPageStatus, closedPageButton]);
+            closedPageStatus, closedPageButton, screensaverLabel, _screensaverMinutes,
+            screensaverMinutesLabel, _screensaverSaveButton]);
         var returnButton = new Button
         {
             Text = "Return to Kiosk",
             Bounds = new Rectangle(460, 652, 190, 45),
-            DialogResult = DialogResult.Cancel,
             BackColor = Color.FromArgb(238, 250, 255),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
         };
+        returnButton.Click += (_, _) => Complete(StaffSettingsAction.ReturnToKiosk);
 
         CancelButton = returnButton;
         Controls.AddRange([
@@ -3106,6 +3279,30 @@ internal sealed class StaffSettingsDialog : Form
         {
             if (!IsDisposed)
                 _connectionButton.Enabled = true;
+        }
+    }
+
+    private void SaveScreensaverTimeout()
+    {
+        var previousValue = _settings.ScreensaverTimeoutMinutes;
+        try
+        {
+            _settings.ScreensaverTimeoutMinutes = (int)_screensaverMinutes.Value;
+            _settings.Save();
+            _screensaverSaveButton.Text = "Saved";
+            KioskLog.Write("Screensaver inactivity time changed to " +
+                _settings.ScreensaverTimeoutMinutes + " minute(s).");
+        }
+        catch (Exception ex)
+        {
+            _settings.ScreensaverTimeoutMinutes = previousValue;
+            _screensaverMinutes.Value = Math.Clamp(previousValue, 1, 240);
+            _screensaverSaveButton.Text = "Save Time";
+            KioskLog.Write("Screensaver setting error: " +
+                ex.GetType().Name + " - " + ex.Message);
+            MessageBox.Show(this,
+                "The screensaver time could not be saved.\n\n" + ex.Message,
+                "Staff Settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

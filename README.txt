@@ -69,8 +69,10 @@ Enter the staff password, then select "Open Staff Settings." The menu provides:
   staff-previewed date and time.
 * Turn the guest-facing "Waiver Station Closed" page on or off. This setting is
   retained after the kiosk or computer restarts.
+* Select how many minutes of guest inactivity pass before the video screensaver
+  begins. The saved delay is retained after the kiosk or computer restarts.
 * Change the staff password after verifying the current password.
-* Return to the kiosk without making a change.
+* Return to the kiosk and load a clean waiver starting page.
 
 After applying a preview date/time or returning to live time, Staff Settings
 opens again automatically so additional testing can be completed without
@@ -149,6 +151,11 @@ WHAT THE KIOSK DOES
   continuous drag events expected by the waiver's signature pad.
 * Replaces the broken LilYPad header image with the full transparent Mullet Hop
   logo and embeds a clearer fish-and-springs image for the kiosk's compact logo.
+* Plays the packaged Mullet Hop video as a full-screen, looping screensaver after
+  the staff-selected period without screen or keyboard activity. The first touch
+  or keypress clears the prior session and loads a fresh waiver starting page.
+  The release build reassembles and verifies the exact uploaded MP4 from the
+  source parts before placing it in the installed kiosk.
 * Watches the page for common waiver-completion messages and completion URLs.
 * Replaces the provider's completion screen with a Mullet Hop thank-you page that
   directs guests to the front desk to purchase their jump pass and socks. Active
@@ -165,7 +172,8 @@ WHAT THE KIOSK DOES
 * Lets staff deliberately display a separate closed page without connection-error
   language. Ctrl + Alt + Shift + F12 continues to open Staff Settings from both
   closed pages. The password dialog opens in the foreground with its entry field
-  focused so staff can type immediately.
+  focused so staff can type immediately. Staff Settings also controls the
+  screensaver delay, and Return to Kiosk reloads a clean waiver starting page.
 
 
 IMPORTANT FIRST-DAY TEST
