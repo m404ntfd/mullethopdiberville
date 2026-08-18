@@ -147,6 +147,8 @@ WHAT THE KIOSK DOES
   touch-friendly fields, buttons, choices, validation messages, and the
   signature area. Touchscreen and stylus strokes are translated into the
   continuous drag events expected by the waiver's signature pad.
+* Replaces the broken LilYPad header image with the full transparent Mullet Hop
+  logo and embeds a clearer fish-and-springs image for the kiosk's compact logo.
 * Watches the page for common waiver-completion messages and completion URLs.
 * Replaces the provider's completion screen with a Mullet Hop thank-you page that
   directs guests to the front desk to purchase their jump pass and socks. Active

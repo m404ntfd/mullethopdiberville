@@ -354,6 +354,9 @@ internal sealed class KioskForm : Form
             var waiverPageScript = ActivityAndCompletionScript.Replace(
                 "__MULLET_HOP_LOGO_DATA_URL__",
                 GetApplicationLogoDataUrl(),
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_PROVIDER_LOGO_DATA_URL__",
+                GetProviderLogoDataUrl(),
                 StringComparison.Ordinal);
             await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(waiverPageScript);
 
@@ -970,6 +973,11 @@ internal sealed class KioskForm : Form
 
     private static string GetApplicationLogoDataUrl()
     {
+        var embeddedLogo = GetEmbeddedPngDataUrl(
+            "MulletHopWaiverKiosk.Assets.MulletHopFish.png");
+        if (!string.IsNullOrWhiteSpace(embeddedLogo))
+            return embeddedLogo;
+
         try
         {
             using var icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -980,6 +988,34 @@ internal sealed class KioskForm : Form
             using var stream = new MemoryStream();
             bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
             return "data:image/png;base64," + Convert.ToBase64String(stream.ToArray());
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string GetProviderLogoDataUrl()
+    {
+        var providerLogo = GetEmbeddedPngDataUrl(
+            "MulletHopWaiverKiosk.Assets.MulletHopFullLogo.png");
+        return string.IsNullOrWhiteSpace(providerLogo)
+            ? GetApplicationLogoDataUrl()
+            : providerLogo;
+    }
+
+    private static string GetEmbeddedPngDataUrl(string resourceName)
+    {
+        try
+        {
+            using var stream = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream(resourceName);
+            if (stream is null)
+                return string.Empty;
+
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            return "data:image/png;base64," + Convert.ToBase64String(buffer.ToArray());
         }
         catch
         {
@@ -1514,6 +1550,7 @@ internal sealed class KioskForm : Form
           if (window.__mulletHopKioskInstalled) return;
           window.__mulletHopKioskInstalled = true;
           const kioskLogoSource = '__MULLET_HOP_LOGO_DATA_URL__';
+          const providerLogoSource = '__MULLET_HOP_PROVIDER_LOGO_DATA_URL__';
 
           let lastActivityMessage = 0;
           const postActivity = () => {
@@ -1724,7 +1761,7 @@ internal sealed class KioskForm : Form
               holder.insertBefore(fallback, holder.firstChild);
             };
 
-            if (!kioskLogoSource) {
+            if (!providerLogoSource) {
               showFallback();
               return;
             }
@@ -1735,7 +1772,7 @@ internal sealed class KioskForm : Form
             logo.removeAttribute('height');
             logo.removeAttribute('srcset');
             logo.addEventListener('error', showFallback, { once: true });
-            logo.src = kioskLogoSource;
+            logo.src = providerLogoSource;
           };
 
           const installSignatureTouchBridge = canvas => {
@@ -2004,9 +2041,9 @@ internal sealed class KioskForm : Form
               body.mullet-hop-waiver-themed img { max-width: 100%; }
               #mullet-hop-provider-logo {
                 display: block !important;
-                width: min(150px, 42vw) !important;
-                height: 150px !important;
-                max-height: 150px !important;
+                width: min(560px, 84vw) !important;
+                height: auto !important;
+                max-height: 190px !important;
                 margin: 0 auto 14px !important;
                 object-fit: contain !important;
               }
