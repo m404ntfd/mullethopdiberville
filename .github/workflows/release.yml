@@ -173,7 +173,15 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path ControllerPackage -Force | Out-Null
-          Copy-Item ControllerReleases/MulletHop.KioskController-Setup.exe ControllerPackage/
+          $controllerSetup = Get-ChildItem `
+            -LiteralPath ControllerReleases `
+            -Filter '*-Setup.exe' | Select-Object -First 1
+          if ($null -eq $controllerSetup) {
+            throw 'The controller Setup executable was not generated.'
+          }
+          Copy-Item `
+            -LiteralPath $controllerSetup.FullName `
+            -Destination ControllerPackage/MulletHop.KioskController-Setup.exe
           Copy-Item controller/install/Install-Kiosk-Controller.cmd ControllerPackage/
           Copy-Item controller/install/Install-Kiosk-Controller.ps1 ControllerPackage/
           Copy-Item controller/install/Uninstall-Kiosk-Controller.ps1 ControllerPackage/
