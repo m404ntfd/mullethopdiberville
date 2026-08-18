@@ -39,12 +39,25 @@ jobs:
           }
           "value=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - name: Read controller version
+        id: controller_version
+        shell: pwsh
+        run: |
+          $projectText = Get-Content -LiteralPath "controller/src/MulletHopKioskController.csproj" -Raw
+          if ($projectText -notmatch '<Version>([^<]+)</Version>') {
+            throw 'The controller project file does not contain a Version value.'
+          }
+          "value=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Assemble screensaver video
         shell: pwsh
         run: ./scripts/Assemble-Screensaver.ps1
 
       - name: Restore packages
-        run: dotnet restore src/MulletHopWaiverKiosk.csproj
+        shell: pwsh
+        run: |
+          dotnet restore src/MulletHopWaiverKiosk.csproj
+          dotnet restore controller/src/MulletHopKioskController.csproj
 
       - name: Publish kiosk application
         shell: pwsh
@@ -74,6 +87,33 @@ jobs:
           }
 
           Write-Host "Screensaver video included: $($screensaver.Length) bytes."
+
+      - name: Publish kiosk controller
+        shell: pwsh
+        run: |
+          dotnet publish controller/src/MulletHopKioskController.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:Version=${{ steps.controller_version.outputs.value }} `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            --output controller-publish
+
+      - name: Package kiosk controller
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ControllerPackage -Force | Out-Null
+          Copy-Item controller-publish/MulletHopKioskController.exe ControllerPackage/
+          Copy-Item controller/install/Install-Kiosk-Controller.cmd ControllerPackage/
+          Copy-Item controller/install/Install-Kiosk-Controller.ps1 ControllerPackage/
+          Copy-Item controller/install/Uninstall-Kiosk-Controller.ps1 ControllerPackage/
+          Copy-Item controller/README.md ControllerPackage/
+          Compress-Archive `
+            -Path ControllerPackage/* `
+            -DestinationPath "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
+            -Force
 
       - name: Install matching Velopack command-line tool
         run: dotnet tool install --global vpk --version 1.2.0
@@ -124,6 +164,17 @@ jobs:
             --channel win `
             --outputDir Releases
 
+      - name: Attach kiosk controller to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload `
+            "v${{ steps.version.outputs.value }}" `
+            "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
+            --repo "${{ github.repository }}" `
+            --clobber
+
       - name: Keep installer as a workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -131,4 +182,5 @@ jobs:
           path: |
             Releases/*-Setup.exe
             Releases/releases.*.json
+            Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip
           if-no-files-found: error

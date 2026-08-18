@@ -59,6 +59,7 @@ internal static class Program
 internal enum KioskUpdateStatus
 {
     UpToDate,
+    Available,
     Applying,
     NotConfigured,
     NotInstalled,
@@ -102,6 +103,45 @@ internal static class KioskUpdater
             // the waiver. Staff can retry from Staff Settings.
             KioskLog.Write("Automatic update check error: " +
                 ex.GetType().Name + " - " + ex.Message);
+        }
+    }
+
+    public static async Task<KioskUpdateResult> CheckForUpdateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(RepositoryUrl))
+        {
+            return new KioskUpdateResult(
+                KioskUpdateStatus.NotConfigured,
+                "This build was not created by the GitHub release workflow.");
+        }
+
+        try
+        {
+            var manager = new UpdateManager(
+                new GithubSource(RepositoryUrl, accessToken: null, prerelease: false));
+            var update = await manager.CheckForUpdatesAsync();
+            return update is null
+                ? new KioskUpdateResult(
+                    KioskUpdateStatus.UpToDate,
+                    $"Version {CurrentVersion} is up to date.")
+                : new KioskUpdateResult(
+                    KioskUpdateStatus.Available,
+                    $"Version {update.TargetFullRelease.Version} is available " +
+                    $"for kiosk {Environment.MachineName}.");
+        }
+        catch (Exception ex) when (
+            string.Equals(ex.GetType().Name, "NotInstalledException", StringComparison.Ordinal))
+        {
+            return new KioskUpdateResult(
+                KioskUpdateStatus.NotInstalled,
+                "Automatic updates begin after the kiosk is installed with the Velopack Setup file.");
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Kiosk update check error: " + ex.GetType().Name + " - " + ex.Message);
+            return new KioskUpdateResult(
+                KioskUpdateStatus.Failed,
+                "The update check failed. Verify the internet connection and try again.");
         }
     }
 
@@ -189,7 +229,7 @@ internal static class LegacyInstallationMigration
     }
 }
 
-internal sealed class KioskForm : Form
+internal sealed partial class KioskForm : Form
 {
     private static readonly HttpClient ConnectionCheckClient = new()
     {
@@ -287,6 +327,7 @@ internal sealed class KioskForm : Form
         };
         _retryTimer.Tick += RetryTimer_Tick;
         NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
+        InitializeRemoteManagement();
 
         Shown += async (_, _) =>
         {
@@ -336,6 +377,7 @@ internal sealed class KioskForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        StopRemoteManagement();
         NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
         base.OnFormClosed(e);
     }
@@ -376,6 +418,7 @@ internal sealed class KioskForm : Form
             _browserReady = true;
             _lastActivityUtc = DateTime.UtcNow;
             _idleTimer.Start();
+            StartRemoteManagement();
             if (_settings.StationClosed)
                 ShowStationClosedPage(connectionError: false);
             else
@@ -1578,23 +1621,14 @@ internal sealed class KioskForm : Form
                                     scheduleTimeOverride: settingsDialog.SelectedDateTime);
                                 return;
                             case StaffSettingsAction.ToggleStationClosed:
-                                var previousClosedSetting = _settings.StationClosed;
                                 try
                                 {
-                                    _settings.StationClosed = !previousClosedSetting;
-                                    _settings.Save();
-                                    if (_settings.StationClosed)
-                                        ShowStationClosedPage(connectionError: false);
-                                    else
-                                        await ResetForNextGuestAsync("staff reopened waiver station", showStatus: false);
-
-                                    KioskLog.Write(_settings.StationClosed
-                                        ? "Staff turned on the waiver station closed page."
-                                        : "Staff turned off the waiver station closed page.");
+                                    await SetStationClosedAsync(
+                                        !_settings.StationClosed,
+                                        "staff settings");
                                 }
                                 catch (Exception ex)
                                 {
-                                    _settings.StationClosed = previousClosedSetting;
                                     KioskLog.Write("Closed-page setting error: " +
                                         ex.GetType().Name + " - " + ex.Message);
                                     MessageBox.Show(settingsDialog,
@@ -2761,6 +2795,14 @@ internal sealed class KioskSettings
     public int ScreensaverTimeoutMinutes { get; set; } = 3;
     public int CompletionResetSeconds { get; set; } = 15;
     public bool StationClosed { get; set; }
+    public bool RemoteManagementEnabled { get; set; }
+    public string RemoteControllerUrl { get; set; } = string.Empty;
+    public string RemotePairingKey { get; set; } = string.Empty;
+    public string StationId { get; set; } = Guid.NewGuid().ToString("N");
+    public string StationName { get; set; } = Environment.MachineName;
+    public string RemoteLastCommandId { get; set; } = string.Empty;
+    public bool RemoteLastCommandSuccess { get; set; }
+    public string RemoteLastCommandMessage { get; set; } = string.Empty;
 
     public string[] CompletionUrlKeywords { get; set; } =
         ["success", "complete", "completed", "confirmation", "finished", "done", "submitted", "thankyou", "thank-you"];
@@ -2856,6 +2898,14 @@ internal sealed class KioskSettings
         AllowedPathPrefixes ??= ["/public/onlinewaiver/"];
         CompletionUrlKeywords ??= ["success", "complete", "done", "submitted"];
         Advertisements ??= [];
+        RemoteControllerUrl = (RemoteControllerUrl ?? string.Empty).Trim();
+        RemotePairingKey = (RemotePairingKey ?? string.Empty).Trim();
+        if (!Guid.TryParseExact(StationId, "N", out _)) StationId = Guid.NewGuid().ToString("N");
+        StationName = string.IsNullOrWhiteSpace(StationName)
+            ? Environment.MachineName
+            : StationName.Trim();
+        RemoteLastCommandId ??= string.Empty;
+        RemoteLastCommandMessage ??= string.Empty;
         foreach (var advertisement in Advertisements)
             advertisement.Normalize();
         IdleTimeoutMinutes = Math.Clamp(IdleTimeoutMinutes, 1, 60);
@@ -3217,6 +3267,19 @@ internal sealed class StaffSettingsDialog : Form
             using var passwordDialog = new StaffPasswordChangeDialog(_settings);
             passwordDialog.ShowDialog(this);
         };
+        var remoteManagementButton = new Button
+        {
+            Text = "Remote Control Setup",
+            Bounds = new Rectangle(290, 115, 250, 48),
+            BackColor = Color.FromArgb(245, 130, 32),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+        };
+        remoteManagementButton.Click += (_, _) =>
+        {
+            using var remoteDialog = new RemoteManagementSettingsDialog(_settings);
+            remoteDialog.ShowDialog(this);
+        };
         var closedPageStatus = new Label
         {
             AutoSize = false,
@@ -3320,7 +3383,8 @@ internal sealed class StaffSettingsDialog : Form
             Bounds = new Rectangle(20, 25, 580, 215)
         };
         staffToolsGroup.Controls.AddRange([
-            advertisementsButton, thankYouPreviewButton, changePasswordButton]);
+            advertisementsButton, thankYouPreviewButton, changePasswordButton,
+            remoteManagementButton]);
         var staffToolsNote = new Label
         {
             AutoSize = false,
@@ -3441,6 +3505,216 @@ internal sealed class StaffSettingsDialog : Form
         SelectedAction = action;
         DialogResult = DialogResult.OK;
         Close();
+    }
+}
+
+internal sealed class RemoteManagementSettingsDialog : Form
+{
+    private readonly KioskSettings _settings;
+    private readonly CheckBox _enabled = new();
+    private readonly TextBox _stationName = new();
+    private readonly TextBox _controllerUrl = new();
+    private readonly TextBox _pairingKey = new();
+    private readonly Button _testButton = new();
+    private readonly Label _testResult = new();
+
+    public RemoteManagementSettingsDialog(KioskSettings settings)
+    {
+        _settings = settings;
+        Text = "Remote Kiosk Control Setup";
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        StartPosition = FormStartPosition.CenterParent;
+        MaximizeBox = false;
+        MinimizeBox = false;
+        ShowInTaskbar = false;
+        TopMost = true;
+        ClientSize = new Size(640, 525);
+        Font = new Font("Segoe UI", 10);
+        BackColor = Color.White;
+
+        var heading = new Label
+        {
+            AutoSize = false,
+            Text = "REMOTE KIOSK CONTROL",
+            Font = new Font("Segoe UI", 20, FontStyle.Bold),
+            ForeColor = Color.FromArgb(117, 68, 154),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Bounds = new Rectangle(25, 16, 590, 45)
+        };
+        var note = new Label
+        {
+            AutoSize = false,
+            Text = "Enter the controller address and pairing key shown on the office PC. This kiosk will check in over the local network every five seconds.",
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.FromArgb(52, 65, 76),
+            Bounds = new Rectangle(38, 64, 564, 54)
+        };
+
+        _enabled.Text = "Allow this kiosk to be managed by the Mullet Hop Kiosk Controller";
+        _enabled.Checked = settings.RemoteManagementEnabled;
+        _enabled.AutoSize = true;
+        _enabled.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        _enabled.ForeColor = Color.FromArgb(8, 119, 189);
+        _enabled.Location = new Point(45, 128);
+        _enabled.CheckedChanged += (_, _) => UpdateEnabledState();
+
+        var stationLabel = MakeLabel("Kiosk Display Name:", 45, 178);
+        _stationName.Text = settings.StationName;
+        _stationName.MaxLength = 60;
+        _stationName.Bounds = new Rectangle(215, 172, 365, 32);
+
+        var addressLabel = MakeLabel("Controller Address:", 45, 226);
+        _controllerUrl.Text = settings.RemoteControllerUrl;
+        _controllerUrl.MaxLength = 300;
+        _controllerUrl.PlaceholderText = "http://192.168.1.20:47832/mullethop/";
+        _controllerUrl.Bounds = new Rectangle(215, 220, 365, 32);
+
+        var keyLabel = MakeLabel("Pairing Key:", 45, 274);
+        _pairingKey.Text = settings.RemotePairingKey;
+        _pairingKey.MaxLength = 200;
+        _pairingKey.UseSystemPasswordChar = true;
+        _pairingKey.Bounds = new Rectangle(215, 268, 275, 32);
+        var showKey = new CheckBox
+        {
+            Text = "Show",
+            AutoSize = true,
+            Location = new Point(503, 274)
+        };
+        showKey.CheckedChanged += (_, _) => _pairingKey.UseSystemPasswordChar = !showKey.Checked;
+
+        _testButton.Text = "Test Controller Connection";
+        _testButton.Bounds = new Rectangle(45, 326, 220, 40);
+        _testButton.BackColor = Color.FromArgb(105, 210, 236);
+        _testButton.FlatStyle = FlatStyle.Flat;
+        _testButton.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        _testButton.Click += async (_, _) => await TestConnectionAsync();
+        _testResult.AutoSize = false;
+        _testResult.Text = "Connection has not been tested.";
+        _testResult.ForeColor = Color.FromArgb(83, 97, 109);
+        _testResult.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _testResult.Bounds = new Rectangle(282, 320, 298, 58);
+        _testResult.TextAlign = ContentAlignment.MiddleLeft;
+
+        var securityNote = new Label
+        {
+            AutoSize = false,
+            Text = "Commands and check-ins are authenticated with the pairing key. Keep the key within your staff network and do not post it publicly.",
+            ForeColor = Color.FromArgb(83, 97, 109),
+            Bounds = new Rectangle(45, 386, 535, 48)
+        };
+
+        var save = new Button
+        {
+            Text = "Save Settings",
+            Bounds = new Rectangle(45, 456, 180, 44),
+            BackColor = Color.FromArgb(118, 196, 66),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 10, FontStyle.Bold)
+        };
+        save.Click += (_, _) => SaveSettings();
+        var cancel = new Button
+        {
+            Text = "Cancel",
+            Bounds = new Rectangle(400, 456, 180, 44),
+            DialogResult = DialogResult.Cancel,
+            BackColor = Color.FromArgb(238, 250, 255),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 10, FontStyle.Bold)
+        };
+
+        AcceptButton = save;
+        CancelButton = cancel;
+        Controls.AddRange([
+            heading, note, _enabled, stationLabel, _stationName, addressLabel, _controllerUrl,
+            keyLabel, _pairingKey, showKey, _testButton, _testResult, securityNote, save, cancel]);
+        UpdateEnabledState();
+    }
+
+    private static Label MakeLabel(string text, int x, int y) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        Font = new Font("Segoe UI", 10, FontStyle.Bold),
+        ForeColor = Color.FromArgb(16, 24, 32),
+        Location = new Point(x, y)
+    };
+
+    private void UpdateEnabledState()
+    {
+        _stationName.Enabled = _enabled.Checked;
+        _controllerUrl.Enabled = _enabled.Checked;
+        _pairingKey.Enabled = _enabled.Checked;
+        _testButton.Enabled = _enabled.Checked;
+    }
+
+    private async Task TestConnectionAsync()
+    {
+        _testButton.Enabled = false;
+        _testResult.Text = "Contacting the controller…";
+        _testResult.ForeColor = Color.FromArgb(83, 97, 109);
+        try
+        {
+            var result = await RemoteManagementProtocol.TestAsync(
+                _controllerUrl.Text, _pairingKey.Text);
+            if (IsDisposed) return;
+            _testResult.Text = result.Message;
+            _testResult.ForeColor = result.Success
+                ? Color.FromArgb(54, 128, 27)
+                : Color.FromArgb(180, 35, 24);
+        }
+        finally
+        {
+            if (!IsDisposed)
+                _testButton.Enabled = _enabled.Checked;
+        }
+    }
+
+    private void SaveSettings()
+    {
+        var stationName = _stationName.Text.Trim();
+        if (_enabled.Checked && string.IsNullOrWhiteSpace(stationName))
+        {
+            MessageBox.Show(this, "Enter a name for this kiosk.", Text,
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _stationName.Focus();
+            return;
+        }
+
+        if (_enabled.Checked && !RemoteManagementProtocol.IsConfigurationValid(
+                _controllerUrl.Text, _pairingKey.Text, out var error))
+        {
+            MessageBox.Show(this, error, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        _settings.RemoteManagementEnabled = _enabled.Checked;
+        _settings.StationName = string.IsNullOrWhiteSpace(stationName)
+            ? Environment.MachineName
+            : stationName;
+        _settings.RemoteControllerUrl = NormalizeControllerUrl(_controllerUrl.Text);
+        _settings.RemotePairingKey = _pairingKey.Text.Trim();
+        _settings.Save();
+        KioskLog.Write(_enabled.Checked
+            ? "Remote kiosk control was enabled for " + _settings.StationName + "."
+            : "Remote kiosk control was disabled.");
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    private static string NormalizeControllerUrl(string value)
+    {
+        value = value.Trim();
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            return value;
+
+        var builder = new UriBuilder(uri);
+        var path = builder.Path.TrimEnd('/');
+        if (string.IsNullOrEmpty(path) || path == "/")
+            path = "/mullethop";
+        builder.Path = path + "/";
+        builder.Query = string.Empty;
+        builder.Fragment = string.Empty;
+        return builder.Uri.ToString();
     }
 }
 
