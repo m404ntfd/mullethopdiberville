@@ -14,6 +14,21 @@ Latest Windows installer:
 https://github.com/m404ntfd/mullethopdiberville/releases/latest
 
 
+SOURCE FOLDER LAYOUT
+--------------------
+
+* src\ contains the full-screen Mullet Hop Waiver Kiosk application.
+* controller\src\ contains the office Kiosk Controller application.
+* controller\install\ contains the controller installer and uninstaller.
+* controller\README.md contains controller setup and network instructions.
+* assets\ and scripts\ contain kiosk branding and screensaver build files.
+* MulletHopKioskSuite.sln opens both Windows applications together in Visual
+  Studio.
+
+The two applications remain separate installers, but they are built and released
+together so their local-network commands remain compatible.
+
+
 QUICK INSTALL
 -------------
 
@@ -48,6 +63,32 @@ updates can be delivered remotely.
 
 The GitHub repository containing the Releases feed must be public. Do not place a
 GitHub password, personal access token, or other secret in the kiosk application.
+
+
+REMOTE KIOSK CONTROLLER
+-----------------------
+
+Version 2.1.0 and newer can be paired with the optional Mullet Hop Kiosk
+Controller installed on another Windows PC on the same private network. The
+controller can show each kiosk's online status, version, open/closed screen, last
+check-in, and IP address. Staff can open or close one kiosk, open or close all
+kiosks, check one kiosk for an update without installing it, or tell one kiosk to
+install an available update.
+
+Download the controller package from:
+
+https://github.com/m404ntfd/mullethopdiberville/releases/latest
+
+Install it on the office PC, then use the address and pairing key displayed in
+its setup panel. On each kiosk, press Ctrl + Alt + Shift + F12, open Staff
+Settings, and select Remote Control Setup. Give each station a unique name,
+paste the controller address and key, test the connection, and save.
+
+Kiosks check in every five seconds. Commands are authenticated with the shared
+pairing key and signed timestamps. A kiosk does not accept unsolicited inbound
+connections, so only the controller PC needs the TCP 47832 private-network
+firewall rule created by its installer. See README.md in the controller download
+for complete installation and network instructions.
 
 
 STAFF SETTINGS AND EXIT

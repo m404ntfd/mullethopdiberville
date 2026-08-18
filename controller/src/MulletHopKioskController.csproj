@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>MulletHopKioskController</AssemblyName>
+    <RootNamespace>MulletHopKioskController</RootNamespace>
+    <AssemblyTitle>Mullet Hop Kiosk Controller</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <Authors>Mullet Hop</Authors>
+    <Product>Mullet Hop Kiosk Controller</Product>
+    <Description>Local-network dashboard for Mullet Hop waiver kiosks.</Description>
+  </PropertyGroup>
+</Project>

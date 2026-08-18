@@ -1,7 +1,10 @@
 bin/
 obj/
 publish/
+controller-publish/
+ControllerPackage/
 Releases/
+Mullet-Hop-Kiosk-Controller-*.zip
 *.user
 *.suo
 *.cache
