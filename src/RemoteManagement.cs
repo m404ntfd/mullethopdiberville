@@ -66,7 +66,10 @@ internal sealed partial class KioskForm
                 Show();
                 Activate();
                 BringToFront();
-                var replacing = _settings.RemoteManagementEnabled
+                var replacing = RemoteManagementProtocol.IsConfigurationValid(
+                    _settings.RemoteControllerUrl,
+                    _settings.RemotePairingKey,
+                    out _)
                     ? "\n\nThis kiosk is already managed. Allowing this request will replace its saved controller connection."
                     : string.Empty;
                 var answer = MessageBox.Show(
@@ -123,7 +126,11 @@ internal sealed partial class KioskForm
         if (!RemoteManagementProtocol.IsConfigurationValid(
                 _settings.RemoteControllerUrl, _settings.RemotePairingKey, out var configurationError))
         {
-            LogRemoteConnectionProblem(configurationError);
+            if (!string.IsNullOrWhiteSpace(_settings.RemoteControllerUrl) ||
+                !string.IsNullOrWhiteSpace(_settings.RemotePairingKey))
+            {
+                LogRemoteConnectionProblem(configurationError);
+            }
             return;
         }
 

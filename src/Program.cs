@@ -4437,7 +4437,7 @@ internal sealed class StaffSettingsDialog : Form
         };
         var remoteManagementButton = new Button
         {
-            Text = "Remote Control Setup",
+            Text = "Remote Control Options",
             Bounds = new Rectangle(290, 115, 250, 48),
             BackColor = Color.FromArgb(245, 130, 32),
             FlatStyle = FlatStyle.Flat,
@@ -5058,23 +5058,18 @@ internal sealed class RemoteManagementSettingsDialog : Form
     private readonly KioskSettings _settings;
     private readonly CheckBox _enabled = new();
     private readonly TextBox _stationName = new();
-    private readonly TextBox _controllerUrl = new();
-    private readonly TextBox _pairingKey = new();
-    private readonly Button _testButton = new();
-    private readonly Label _testResult = new();
-    private bool IsDarkTheme => KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
 
     public RemoteManagementSettingsDialog(KioskSettings settings)
     {
         _settings = settings;
-        Text = "Remote Kiosk Control Setup";
+        Text = "Remote Control Options";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
-        ClientSize = new Size(640, 525);
+        ClientSize = new Size(640, 390);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.White;
 
@@ -5090,69 +5085,37 @@ internal sealed class RemoteManagementSettingsDialog : Form
         var note = new Label
         {
             AutoSize = false,
-            Text = "Enter the controller address and pairing key shown on the office PC. This kiosk will check in over the local network every five seconds.",
+            Text = "Turn on remote control and give this kiosk a name. After you save, the kiosk will appear under Discover Kiosks on a controller computer on the same network.",
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = Color.FromArgb(52, 65, 76),
-            Bounds = new Rectangle(38, 64, 564, 54)
+            Bounds = new Rectangle(38, 64, 564, 68)
         };
 
-        _enabled.Text = "Allow this kiosk to be managed by the Mullet Hop Kiosk Controller";
+        _enabled.Text = "Enable remote control and network discovery for this kiosk";
         _enabled.Checked = settings.RemoteManagementEnabled;
         _enabled.AutoSize = true;
         _enabled.Font = new Font("Segoe UI", 10, FontStyle.Bold);
         _enabled.ForeColor = Color.FromArgb(8, 119, 189);
-        _enabled.Location = new Point(45, 128);
-        _enabled.CheckedChanged += (_, _) => UpdateEnabledState();
+        _enabled.Location = new Point(45, 148);
 
-        var stationLabel = MakeLabel("Kiosk Display Name:", 45, 178);
+        var stationLabel = MakeLabel("Kiosk Name:", 45, 205);
         _stationName.Text = settings.StationName;
         _stationName.MaxLength = 60;
-        _stationName.Bounds = new Rectangle(215, 172, 365, 32);
-
-        var addressLabel = MakeLabel("Controller Address:", 45, 226);
-        _controllerUrl.Text = settings.RemoteControllerUrl;
-        _controllerUrl.MaxLength = 300;
-        _controllerUrl.PlaceholderText = "http://192.168.1.20:47832/mullethop/";
-        _controllerUrl.Bounds = new Rectangle(215, 220, 365, 32);
-
-        var keyLabel = MakeLabel("Pairing Key:", 45, 274);
-        _pairingKey.Text = settings.RemotePairingKey;
-        _pairingKey.MaxLength = 200;
-        _pairingKey.UseSystemPasswordChar = true;
-        _pairingKey.Bounds = new Rectangle(215, 268, 275, 32);
-        var showKey = new CheckBox
-        {
-            Text = "Show",
-            AutoSize = true,
-            Location = new Point(503, 274)
-        };
-        showKey.CheckedChanged += (_, _) => _pairingKey.UseSystemPasswordChar = !showKey.Checked;
-
-        _testButton.Text = "Test Controller Connection";
-        _testButton.Bounds = new Rectangle(45, 326, 220, 40);
-        _testButton.BackColor = Color.FromArgb(105, 210, 236);
-        _testButton.FlatStyle = FlatStyle.Flat;
-        _testButton.Font = new Font("Segoe UI", 10, FontStyle.Bold);
-        _testButton.Click += async (_, _) => await TestConnectionAsync();
-        _testResult.AutoSize = false;
-        _testResult.Text = "Connection has not been tested.";
-        _testResult.ForeColor = Color.FromArgb(83, 97, 109);
-        _testResult.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-        _testResult.Bounds = new Rectangle(282, 320, 298, 58);
-        _testResult.TextAlign = ContentAlignment.MiddleLeft;
+        _stationName.Bounds = new Rectangle(180, 199, 400, 32);
 
         var securityNote = new Label
         {
             AutoSize = false,
-            Text = "Commands and check-ins are authenticated with the pairing key. Keep the key within your staff network and do not post it publicly.",
+            Text = "On the controller, select Discover Kiosks and request to add this kiosk. Approve the confirmation shown here. The secure connection information will be exchanged and saved automatically.",
             ForeColor = Color.FromArgb(83, 97, 109),
-            Bounds = new Rectangle(45, 386, 535, 48)
+            TextAlign = ContentAlignment.MiddleCenter,
+            Bounds = new Rectangle(45, 246, 535, 62)
         };
 
         var save = new Button
         {
-            Text = "Save Settings",
-            Bounds = new Rectangle(45, 456, 180, 44),
+            Text = "Save Options",
+            Bounds = new Rectangle(45, 324, 180, 44),
             BackColor = Color.FromArgb(118, 196, 66),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -5161,7 +5124,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
         var cancel = new Button
         {
             Text = "Cancel",
-            Bounds = new Rectangle(400, 456, 180, 44),
+            Bounds = new Rectangle(400, 324, 180, 44),
             DialogResult = DialogResult.Cancel,
             BackColor = Color.FromArgb(238, 250, 255),
             FlatStyle = FlatStyle.Flat,
@@ -5171,9 +5134,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
         AcceptButton = save;
         CancelButton = cancel;
         Controls.AddRange([
-            heading, note, _enabled, stationLabel, _stationName, addressLabel, _controllerUrl,
-            keyLabel, _pairingKey, showKey, _testButton, _testResult, securityNote, save, cancel]);
-        UpdateEnabledState();
+            heading, note, _enabled, stationLabel, _stationName, securityNote, save, cancel]);
         KioskTheme.Apply(this, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
     }
 
@@ -5186,36 +5147,6 @@ internal sealed class RemoteManagementSettingsDialog : Form
         Location = new Point(x, y)
     };
 
-    private void UpdateEnabledState()
-    {
-        _stationName.Enabled = _enabled.Checked;
-        _controllerUrl.Enabled = _enabled.Checked;
-        _pairingKey.Enabled = _enabled.Checked;
-        _testButton.Enabled = _enabled.Checked;
-    }
-
-    private async Task TestConnectionAsync()
-    {
-        _testButton.Enabled = false;
-        _testResult.Text = "Contacting the controller…";
-        _testResult.ForeColor = KioskTheme.MutedText(IsDarkTheme);
-        try
-        {
-            var result = await RemoteManagementProtocol.TestAsync(
-                _controllerUrl.Text, _pairingKey.Text);
-            if (IsDisposed) return;
-            _testResult.Text = result.Message;
-            _testResult.ForeColor = result.Success
-                ? KioskTheme.SuccessText(IsDarkTheme)
-                : KioskTheme.ErrorText(IsDarkTheme);
-        }
-        finally
-        {
-            if (!IsDisposed)
-                _testButton.Enabled = _enabled.Checked;
-        }
-    }
-
     private void SaveSettings()
     {
         var stationName = _stationName.Text.Trim();
@@ -5227,41 +5158,17 @@ internal sealed class RemoteManagementSettingsDialog : Form
             return;
         }
 
-        if (_enabled.Checked && !RemoteManagementProtocol.IsConfigurationValid(
-                _controllerUrl.Text, _pairingKey.Text, out var error))
-        {
-            MessageBox.Show(this, error, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
         _settings.RemoteManagementEnabled = _enabled.Checked;
         _settings.StationName = string.IsNullOrWhiteSpace(stationName)
             ? Environment.MachineName
             : stationName;
-        _settings.RemoteControllerUrl = NormalizeControllerUrl(_controllerUrl.Text);
-        _settings.RemotePairingKey = _pairingKey.Text.Trim();
         _settings.Save();
         KioskLog.Write(_enabled.Checked
-            ? "Remote kiosk control was enabled for " + _settings.StationName + "."
+            ? "Remote kiosk control and network discovery were enabled for " +
+              _settings.StationName + "."
             : "Remote kiosk control was disabled.");
         DialogResult = DialogResult.OK;
         Close();
-    }
-
-    private static string NormalizeControllerUrl(string value)
-    {
-        value = value.Trim();
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
-            return value;
-
-        var builder = new UriBuilder(uri);
-        var path = builder.Path.TrimEnd('/');
-        if (string.IsNullOrEmpty(path) || path == "/")
-            path = "/mullethop";
-        builder.Path = path + "/";
-        builder.Query = string.Empty;
-        builder.Fragment = string.Empty;
-        return builder.Uri.ToString();
     }
 }
 
