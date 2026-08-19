@@ -84,6 +84,8 @@ internal sealed class CloudSyncRequest
     public List<CloudCommand> Commands { get; set; } = [];
     public AdvertisementSyncPackage? Advertisements { get; set; }
     public DateTime? AdvertisementUpdatedUtc { get; set; }
+    public BusinessHoursSyncPackage? BusinessHours { get; set; }
+    public DateTime? BusinessHoursUpdatedUtc { get; set; }
 }
 
 internal sealed class CloudSyncResponse
@@ -92,6 +94,8 @@ internal sealed class CloudSyncResponse
     public List<CloudCommand> Commands { get; set; } = [];
     public AdvertisementSyncPackage? Advertisements { get; set; }
     public DateTime? AdvertisementUpdatedUtc { get; set; }
+    public BusinessHoursSyncPackage? BusinessHours { get; set; }
+    public DateTime? BusinessHoursUpdatedUtc { get; set; }
 }
 
 internal sealed class CloudSyncService : IDisposable
@@ -160,11 +164,14 @@ internal sealed class CloudSyncService : IDisposable
             LocationId = _settings.LocationId,
             Kiosks = _settings.IsRemoteMachine ? [] : _state.Snapshot().Select(k => k.Clone()).ToList(),
             Commands = _settings.IsRemoteMachine ? _state.PendingCloudCommands().ToList() : [],
-            AdvertisementUpdatedUtc = _state.AdvertisementUpdatedUtc
+            AdvertisementUpdatedUtc = _state.AdvertisementUpdatedUtc,
+            BusinessHoursUpdatedUtc = _state.BusinessHoursUpdatedUtc
         };
 
         if (!string.IsNullOrWhiteSpace(_state.AdvertisementRevision))
             request.Advertisements = _state.CreateAdvertisementSyncPackage();
+        if (!string.IsNullOrWhiteSpace(_state.BusinessHoursRevision))
+            request.BusinessHours = _state.CreateBusinessHoursSyncPackage();
 
         using var client = CreateClient(_settings);
         var json = JsonSerializer.Serialize(request, JsonOptions);
@@ -194,6 +201,12 @@ internal sealed class CloudSyncService : IDisposable
              result.AdvertisementUpdatedUtc.Value > _state.AdvertisementUpdatedUtc.Value.AddSeconds(1)))
         {
             _state.ApplyCloudAdvertisements(result.Advertisements, result.AdvertisementUpdatedUtc.Value);
+        }
+        if (result.BusinessHours is not null && result.BusinessHoursUpdatedUtc.HasValue &&
+            (!_state.BusinessHoursUpdatedUtc.HasValue ||
+             result.BusinessHoursUpdatedUtc.Value > _state.BusinessHoursUpdatedUtc.Value.AddSeconds(1)))
+        {
+            _state.ApplyCloudBusinessHours(result.BusinessHours, result.BusinessHoursUpdatedUtc.Value);
         }
     }
 

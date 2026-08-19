@@ -12,8 +12,26 @@ const validLocation = value => typeof value === "string" && /^[A-Za-z0-9_-]{3,80
 
 async function getLocation(env, id) {
   return await env.DB.prepare(
-    "SELECT kiosk_json, advertisement_updated_utc FROM locations WHERE location_id = ?"
+    "SELECT kiosk_json, advertisement_updated_utc, business_hours_updated_utc FROM locations WHERE location_id = ?"
   ).bind(id).first();
+}
+
+async function getBusinessHours(env, id) {
+  const object = await env.ADS.get(`locations/${id}/business-hours.json`);
+  return object ? await object.json() : null;
+}
+
+async function saveBusinessHoursIfNewer(env, id, businessHours, updatedUtc) {
+  if (!businessHours || !updatedUtc) return;
+  const current = await getLocation(env, id);
+  if (current?.business_hours_updated_utc &&
+      Date.parse(current.business_hours_updated_utc) >= Date.parse(updatedUtc)) return;
+  await env.ADS.put(`locations/${id}/business-hours.json`, JSON.stringify(businessHours), {
+    httpMetadata: { contentType: "application/json" }
+  });
+  await env.DB.prepare(
+    "UPDATE locations SET business_hours_updated_utc = ?, updated_utc = ? WHERE location_id = ?"
+  ).bind(updatedUtc, new Date().toISOString(), id).run();
 }
 
 async function getAds(env, id) {
@@ -55,6 +73,7 @@ export default {
       "INSERT INTO locations(location_id, kiosk_json, updated_utc) VALUES(?, '[]', ?) ON CONFLICT(location_id) DO NOTHING"
     ).bind(id, now).run();
     await saveAdsIfNewer(env, id, body.advertisements, body.advertisementUpdatedUtc);
+    await saveBusinessHoursIfNewer(env, id, body.businessHours, body.businessHoursUpdatedUtc);
 
     if (body.role === "local") {
       await env.DB.prepare(
@@ -77,7 +96,9 @@ export default {
       return json({
         kiosks: body.kiosks || [], commands,
         advertisements: await getAds(env, id),
-        advertisementUpdatedUtc: location?.advertisement_updated_utc || null
+        advertisementUpdatedUtc: location?.advertisement_updated_utc || null,
+        businessHours: await getBusinessHours(env, id),
+        businessHoursUpdatedUtc: location?.business_hours_updated_utc || null
       });
     }
 
@@ -91,7 +112,9 @@ export default {
     return json({
       kiosks: JSON.parse(location?.kiosk_json || "[]"), commands: [],
       advertisements: await getAds(env, id),
-      advertisementUpdatedUtc: location?.advertisement_updated_utc || null
+      advertisementUpdatedUtc: location?.advertisement_updated_utc || null,
+      businessHours: await getBusinessHours(env, id),
+      businessHoursUpdatedUtc: location?.business_hours_updated_utc || null
     });
   }
 };

@@ -112,6 +112,23 @@ internal sealed class ControllerServer : IDisposable
                 return;
             }
 
+            if (string.Equals(path, BasePath.TrimEnd('/') + "/api/business-hours/sync", StringComparison.OrdinalIgnoreCase))
+            {
+                var syncRequest = JsonSerializer.Deserialize<BusinessHoursSyncRequest>(body, JsonOptions);
+                if (syncRequest is null || !Guid.TryParseExact(syncRequest.StationId, "N", out _))
+                {
+                    await WritePlainResponseAsync(
+                        context, HttpStatusCode.BadRequest, "Invalid Business Hours sync request.");
+                    return;
+                }
+
+                var package = _state.CreateBusinessHoursSyncPackage();
+                ControllerLog.Write(
+                    $"Business Hours profile {package.Revision} sent to kiosk {syncRequest.StationId}.");
+                await WriteSignedResponseAsync(context, package);
+                return;
+            }
+
             if (!string.Equals(path, BasePath.TrimEnd('/') + "/api/checkin", StringComparison.OrdinalIgnoreCase))
             {
                 await WritePlainResponseAsync(context, HttpStatusCode.NotFound, "Not found.");
@@ -131,7 +148,8 @@ internal sealed class ControllerServer : IDisposable
             await WriteSignedResponseAsync(context, new KioskCheckInResponse
             {
                 Command = command,
-                AdvertisementRevision = _state.AdvertisementRevision
+                AdvertisementRevision = _state.AdvertisementRevision,
+                BusinessHoursRevision = _state.BusinessHoursRevision
             });
         }
         catch (JsonException)

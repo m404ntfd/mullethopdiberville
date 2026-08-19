@@ -11,6 +11,8 @@ internal sealed partial class KioskForm
     private bool _remoteCheckInProgress;
     private bool _advertisementSyncInProgress;
     private DateTime _lastAdvertisementSyncAttemptUtc = DateTime.MinValue;
+    private bool _businessHoursSyncInProgress;
+    private DateTime _lastBusinessHoursSyncAttemptUtc = DateTime.MinValue;
     private string _lastRemoteConnectionError = string.Empty;
 
     private void InitializeRemoteManagement()
@@ -69,6 +71,13 @@ internal sealed partial class KioskForm
             {
                 await SyncAdvertisementsFromControllerAsync();
             }
+
+            if (!string.IsNullOrWhiteSpace(response.BusinessHoursRevision) &&
+                !string.Equals(response.BusinessHoursRevision, _settings.BusinessHoursSyncRevision, StringComparison.Ordinal) &&
+                DateTime.UtcNow - _lastBusinessHoursSyncAttemptUtc >= TimeSpan.FromMinutes(1))
+            {
+                await SyncBusinessHoursFromControllerAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -91,8 +100,83 @@ internal sealed partial class KioskForm
         LastCommandSuccess = _settings.RemoteLastCommandSuccess,
         LastCommandMessage = _settings.RemoteLastCommandMessage,
         AdvertisementSyncRevision = _settings.AdvertisementSyncRevision,
-        AdvertisementLastSyncUtc = _settings.AdvertisementLastSyncUtc
+        AdvertisementLastSyncUtc = _settings.AdvertisementLastSyncUtc,
+        BusinessHoursSyncRevision = _settings.BusinessHoursSyncRevision,
+        BusinessHoursLastSyncUtc = _settings.BusinessHoursLastSyncUtc
     };
+
+    private async Task<(bool Success, string Message)> SyncBusinessHoursFromControllerAsync()
+    {
+        if (_businessHoursSyncInProgress)
+            return (false, "A Business Hours sync is already running.");
+        var configurationError = string.Empty;
+        if (!_settings.RemoteManagementEnabled ||
+            !RemoteManagementProtocol.IsConfigurationValid(
+                _settings.RemoteControllerUrl, _settings.RemotePairingKey, out configurationError))
+            return (false, "Connect this kiosk to the kiosk manager first. " + configurationError);
+
+        _businessHoursSyncInProgress = true;
+        _lastBusinessHoursSyncAttemptUtc = DateTime.UtcNow;
+        try
+        {
+            var package = await RemoteManagementProtocol.DownloadBusinessHoursAsync(
+                _settings.RemoteControllerUrl, _settings.RemotePairingKey, _settings.StationId);
+            if (string.IsNullOrWhiteSpace(package.Revision))
+                throw new InvalidDataException("The kiosk manager has not published a Business Hours profile yet.");
+            if (package.Days.Count != 7 || package.Days.Select(day => day.Day).Distinct().Count() != 7 ||
+                package.Days.Any(day => day.Day is < 0 or > 6 ||
+                    (day.IsOpen && day.CloseTime <= day.OpenTime)))
+                throw new InvalidDataException("The manager Business Hours profile is invalid.");
+
+            var oldEnabled = _settings.BusinessHoursEnabled;
+            var oldClosed = _settings.BusinessClosedMessageMinutes;
+            var oldPreOpening = _settings.PreOpeningScreensaverMinutes;
+            var oldDays = _settings.BusinessHours;
+            var oldRevision = _settings.BusinessHoursSyncRevision;
+            var oldLastSync = _settings.BusinessHoursLastSyncUtc;
+            var oldStatus = _settings.BusinessHoursLastSyncStatus;
+            try
+            {
+                _settings.BusinessHoursEnabled = package.Enabled;
+                _settings.BusinessClosedMessageMinutes = Math.Clamp(package.ClosedMessageMinutes, 1, 240);
+                _settings.PreOpeningScreensaverMinutes = Math.Clamp(package.PreOpeningScreensaverMinutes, 0, 240);
+                _settings.BusinessHours = package.Days.Select(day => new KioskBusinessDayHours
+                {
+                    Day = (DayOfWeek)day.Day, IsOpen = day.IsOpen,
+                    OpenTime = day.OpenTime, CloseTime = day.CloseTime
+                }).OrderBy(day => Array.IndexOf(KioskBusinessDayHours.OrderedDays, day.Day)).ToList();
+                _settings.BusinessHoursSyncRevision = package.Revision;
+                _settings.BusinessHoursLastSyncUtc = DateTime.UtcNow;
+                _settings.BusinessHoursLastSyncStatus = "Business Hours synced from the kiosk manager.";
+                _settings.Save();
+                await ApplyBusinessHoursStateAsync();
+            }
+            catch
+            {
+                _settings.BusinessHoursEnabled = oldEnabled;
+                _settings.BusinessClosedMessageMinutes = oldClosed;
+                _settings.PreOpeningScreensaverMinutes = oldPreOpening;
+                _settings.BusinessHours = oldDays;
+                _settings.BusinessHoursSyncRevision = oldRevision;
+                _settings.BusinessHoursLastSyncUtc = oldLastSync;
+                _settings.BusinessHoursLastSyncStatus = oldStatus;
+                try { _settings.Save(); } catch { }
+                throw;
+            }
+            KioskLog.Write(_settings.BusinessHoursLastSyncStatus);
+            return (true, _settings.BusinessHoursLastSyncStatus);
+        }
+        catch (Exception ex)
+        {
+            var message = "Business Hours sync failed: " + ex.Message +
+                          " The kiosk will keep using its saved local Business Hours settings.";
+            _settings.BusinessHoursLastSyncStatus = message;
+            try { _settings.Save(); } catch { }
+            KioskLog.Write(message);
+            return (false, message);
+        }
+        finally { _businessHoursSyncInProgress = false; }
+    }
 
     private async Task<AdvertisementSyncResult> SyncAdvertisementsFromControllerAsync(
         IProgress<AdvertisementSyncProgress>? progress = null)
@@ -341,6 +425,11 @@ internal sealed partial class KioskForm
                         installResult.Message);
                     break;
 
+                case RemoteCommandTypes.SyncBusinessHours:
+                    var hoursResult = await SyncBusinessHoursFromControllerAsync();
+                    SaveRemoteCommandResult(command.Id, hoursResult.Success, hoursResult.Message);
+                    break;
+
                 default:
                     SaveRemoteCommandResult(command.Id, false, "The controller sent an unsupported command.");
                     break;
@@ -395,6 +484,7 @@ internal static class RemoteCommandTypes
     public const string SetClosed = "set-closed";
     public const string CheckUpdate = "check-update";
     public const string InstallUpdate = "install-update";
+    public const string SyncBusinessHours = "sync-business-hours";
 }
 
 internal sealed class KioskCheckInRequest
@@ -409,12 +499,15 @@ internal sealed class KioskCheckInRequest
     public string LastCommandMessage { get; set; } = string.Empty;
     public string AdvertisementSyncRevision { get; set; } = string.Empty;
     public DateTime? AdvertisementLastSyncUtc { get; set; }
+    public string BusinessHoursSyncRevision { get; set; } = string.Empty;
+    public DateTime? BusinessHoursLastSyncUtc { get; set; }
 }
 
 internal sealed class KioskCheckInResponse
 {
     public KioskRemoteCommand? Command { get; set; }
     public string AdvertisementRevision { get; set; } = string.Empty;
+    public string BusinessHoursRevision { get; set; } = string.Empty;
 }
 
 internal sealed class KioskRemoteCommand
@@ -448,6 +541,24 @@ internal sealed class AdvertisementSyncItem
     public int[] DaysOfWeek { get; set; } = [];
     public TimeSpan DailyStartTime { get; set; }
     public TimeSpan DailyEndTime { get; set; }
+}
+
+internal sealed class BusinessHoursSyncPackage
+{
+    public string Revision { get; set; } = string.Empty;
+    public DateTime GeneratedUtc { get; set; }
+    public bool Enabled { get; set; }
+    public int ClosedMessageMinutes { get; set; }
+    public int PreOpeningScreensaverMinutes { get; set; }
+    public List<BusinessHoursSyncItem> Days { get; set; } = [];
+}
+
+internal sealed class BusinessHoursSyncItem
+{
+    public int Day { get; set; }
+    public bool IsOpen { get; set; }
+    public TimeSpan OpenTime { get; set; }
+    public TimeSpan CloseTime { get; set; }
 }
 
 internal static class RemoteManagementProtocol
@@ -581,6 +692,28 @@ internal static class RemoteManagementProtocol
         progress?.Report(58);
         return JsonSerializer.Deserialize<AdvertisementSyncPackage>(responseBody, JsonOptions)
                ?? new AdvertisementSyncPackage();
+    }
+
+    public static async Task<BusinessHoursSyncPackage> DownloadBusinessHoursAsync(
+        string controllerUrl, string pairingKey, string stationId)
+    {
+        if (!TryBuildApiUri(controllerUrl, "api/business-hours/sync", out var uri))
+            throw new InvalidOperationException("The controller address is not valid.");
+        if (!Guid.TryParseExact(stationId, "N", out _))
+            throw new InvalidOperationException("The kiosk station ID is not valid.");
+
+        var body = JsonSerializer.Serialize(new { stationId }, JsonOptions);
+        using var request = CreateSignedRequest(uri, pairingKey, body);
+        using var response = await Client.SendAsync(request);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException(
+                response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                    ? "The controller rejected the pairing key."
+                    : $"The controller returned HTTP {(int)response.StatusCode}.");
+        VerifySignedResponse(response, pairingKey, responseBody);
+        return JsonSerializer.Deserialize<BusinessHoursSyncPackage>(responseBody, JsonOptions)
+               ?? new BusinessHoursSyncPackage();
     }
 
     private static HttpRequestMessage CreateSignedRequest(Uri uri, string pairingKey, string body)
