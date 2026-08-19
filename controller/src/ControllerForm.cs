@@ -200,7 +200,7 @@ internal sealed class ControllerForm : Form
         {
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Text = "Enable network discovery and set a name in each kiosk's Remote Control Options, then use Discover Kiosks. Connection information is exchanged automatically after kiosk approval.",
+            Text = "Enable network discovery and set a name in each kiosk's Remote Control Options, then use Discover Kiosks to run a fresh network scan. Connection information is exchanged automatically after kiosk approval.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f),
             TextAlign = ContentAlignment.MiddleLeft,

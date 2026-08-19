@@ -89,7 +89,11 @@ internal sealed class KioskDiscoveryClient : IDisposable
                         .Except(known, StringComparer.OrdinalIgnoreCase)
                         .ToArray();
                     await ProbeControllersAsync(subnetControllers, cancellationToken);
-                    nextFullScanUtc = DateTime.UtcNow.AddSeconds(60);
+                    var paired = RemoteManagementProtocol.IsConfigurationValid(
+                        _settings.RemoteControllerUrl,
+                        _settings.RemotePairingKey,
+                        out _);
+                    nextFullScanUtc = DateTime.UtcNow.AddSeconds(paired ? 60 : 10);
                 }
 
                 var delay = pendingResult is not null

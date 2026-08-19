@@ -91,13 +91,14 @@ https://github.com/m404ntfd/mullethopdiberville/releases/latest
 On each kiosk, press Ctrl + Alt + M, open Staff Settings, and select Remote
 Control Options. Check Enable remote control and network discovery, give the
 kiosk a unique name, and save. No controller address or pairing key is entered on
-the kiosk. On the office PC, select Discover Kiosks, select the named kiosk, and
-choose Request Add. The kiosk displays the controller computer and address and
-requires someone at that kiosk to approve the request within two minutes. The
-encrypted pairing exchange saves the connection information automatically, and
-the first authenticated check-in saves the kiosk in the controller. A linked POS
-Controller then adds the kiosk to its next open Kiosk 1-4 position and saves that
-assignment automatically.
+the kiosk. On the office PC, select Discover Kiosks. A fresh 15-second network
+scan starts automatically; select Scan Again to repeat it. Select the named kiosk
+from the fresh results and choose Request Add. The kiosk displays the controller
+computer and address and requires someone at that kiosk to approve the request
+within two minutes. The encrypted pairing exchange saves the connection
+information automatically, and the first authenticated check-in saves the kiosk
+in the controller. A linked POS Controller then adds the kiosk to its next open
+Kiosk 1-4 position and saves that assignment automatically.
 
 Controller version 1.1.0 or newer must be installed once with its Setup-based
 package to establish automatic updates. When a controller update is downloaded,
@@ -111,10 +112,11 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Waiver Kiosk version 2.8.0 simplifies Remote Control Options to an enable checkbox
-and kiosk name. It becomes discoverable only when enabled and securely reconnects
-to its saved controller if that controller's local IP address changes. Kiosk
-Controller version 1.8.0 or newer is required for approval-based discovery.
+Kiosk Controller version 1.9.0 adds the manual 15-second network scan and Scan
+Again button. Waiver Kiosk version 2.8.1 responds reliably within the scan window.
+It remains discoverable only when Remote Control Options is enabled, and the
+approval prompt, encrypted pairing exchange, saved connection, and authenticated
+remote commands remain unchanged.
 
 
 FRONT-DESK POS CONTROLLER
