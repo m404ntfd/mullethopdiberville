@@ -111,13 +111,18 @@ Ctrl + Alt + Shift + F12
 Enter the staff password, then select "Open Staff Settings." The menu provides:
 
 Settings use a left-side navigation rail with Connection & Updates, Date & Time,
-Waiver Station, Business Hours, and Ads & Staff Tools pages.
+Appearance, Waiver Station, Business Hours, and Ads & Staff Tools pages.
 
 * Exit Kiosk.
 * Check whether the computer can reach the live waiver website.
 * Check GitHub for a newer kiosk version and install it immediately.
 * Preview the waiver using a selected browser date and time.
 * Return a date/time preview to the live date and time.
+* Choose Auto, Light, or Dark kiosk appearance. Auto follows the Windows app
+  theme, while Light and Dark override Windows.
+* Schedule Dark mode for selected days and a selected time. When the underlying
+  appearance is Light, the kiosk remains dark overnight and returns to Light or
+  Auto at the next configured business opening.
 * Add, edit, enable, disable, or delete scheduled JPG advertisements.
 * View kiosk-manager advertisement sync status and progress, see the last
   successful sync time, or start a manual sync.
