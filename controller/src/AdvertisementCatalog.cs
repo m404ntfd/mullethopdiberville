@@ -300,7 +300,7 @@ internal sealed class ControllerAdvertisementManagerDialog : Form
             var item = new ListViewItem(advertisement.Name) { Tag = advertisement };
             item.SubItems.Add(advertisement.ScheduleSummary());
             item.SubItems.Add(status);
-            if (!advertisement.Enabled) item.ForeColor = Color.Gray;
+            if (!advertisement.Enabled) item.ForeColor = ControllerTheme.MutedText;
             _list.Items.Add(item);
             if (advertisement.Id == selectId) item.Selected = true;
         }
