@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using MulletHop.KioskDiscovery;
 
 namespace MulletHopKioskController;
 
@@ -18,10 +19,12 @@ internal sealed class ControllerServer : IDisposable
     private Task? _listenTask;
 
     public bool IsRunning => _listener.IsListening;
+    public KioskDiscoveryCoordinator Discovery { get; }
 
     public ControllerServer(ControllerState state)
     {
         _state = state;
+        Discovery = new KioskDiscoveryCoordinator(state);
         _listener.Prefixes.Add($"http://+:{Port}{BasePath}");
     }
 
@@ -76,6 +79,43 @@ internal sealed class ControllerServer : IDisposable
 
             using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
             var body = await reader.ReadToEndAsync();
+            var path = context.Request.Url?.AbsolutePath.TrimEnd('/') ?? string.Empty;
+            if (string.Equals(
+                    path,
+                    BasePath.TrimEnd('/') + "/api/discovery/announce",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var remoteAddress = context.Request.RemoteEndPoint?.Address;
+                var localAddress = context.Request.LocalEndPoint?.Address;
+                if (remoteAddress is null || localAddress is null || !IsPrivateOrLocal(remoteAddress))
+                {
+                    await WritePlainResponseAsync(
+                        context, HttpStatusCode.Forbidden, "Discovery is limited to the local network.");
+                    return;
+                }
+
+                var announcement = JsonSerializer.Deserialize<KioskDiscoveryAnnouncement>(body, JsonOptions);
+                if (announcement is null)
+                {
+                    await WritePlainResponseAsync(
+                        context, HttpStatusCode.BadRequest, "Invalid kiosk discovery announcement.");
+                    return;
+                }
+
+                try
+                {
+                    var response = Discovery.ProcessAnnouncement(
+                        announcement, remoteAddress, localAddress);
+                    await WriteJsonResponseAsync(context, response);
+                }
+                catch (InvalidDataException ex)
+                {
+                    ControllerLog.Write("Rejected kiosk discovery announcement: " + ex.Message);
+                    await WritePlainResponseAsync(context, HttpStatusCode.BadRequest, ex.Message);
+                }
+                return;
+            }
+
             if (!IsAuthorized(context.Request, body))
             {
                 ControllerLog.Write("Rejected a controller request with an invalid signature from " +
@@ -84,7 +124,6 @@ internal sealed class ControllerServer : IDisposable
                 return;
             }
 
-            var path = context.Request.Url?.AbsolutePath.TrimEnd('/') ?? string.Empty;
             if (string.Equals(path, BasePath.TrimEnd('/') + "/api/health", StringComparison.OrdinalIgnoreCase))
             {
                 await WriteSignedResponseAsync(context, new
@@ -229,6 +268,14 @@ internal sealed class ControllerServer : IDisposable
         await WriteBodyAsync(context, body);
     }
 
+    private static async Task WriteJsonResponseAsync(HttpListenerContext context, object payload)
+    {
+        var body = JsonSerializer.Serialize(payload, JsonOptions);
+        context.Response.StatusCode = (int)HttpStatusCode.OK;
+        context.Response.ContentType = "application/json; charset=utf-8";
+        await WriteBodyAsync(context, body);
+    }
+
     private static async Task WritePlainResponseAsync(
         HttpListenerContext context, HttpStatusCode statusCode, string message)
     {
@@ -243,6 +290,30 @@ internal sealed class ControllerServer : IDisposable
         context.Response.ContentLength64 = bytes.Length;
         await context.Response.OutputStream.WriteAsync(bytes);
         context.Response.Close();
+    }
+
+    private static bool IsPrivateOrLocal(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+            address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address))
+            return true;
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            var bytes = address.GetAddressBytes();
+            return bytes[0] == 10 ||
+                   bytes[0] == 127 ||
+                   (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
+                   (bytes[0] == 192 && bytes[1] == 168) ||
+                   (bytes[0] == 169 && bytes[1] == 254);
+        }
+
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            var bytes = address.GetAddressBytes();
+            return address.IsIPv6LinkLocal || (bytes[0] & 0xfe) == 0xfc;
+        }
+        return false;
     }
 
     public void Dispose()

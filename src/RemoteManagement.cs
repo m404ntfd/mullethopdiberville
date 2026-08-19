@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using MulletHop.KioskDiscovery;
 
 namespace MulletHopWaiverKiosk;
 
@@ -14,14 +15,24 @@ internal sealed partial class KioskForm
     private bool _businessHoursSyncInProgress;
     private DateTime _lastBusinessHoursSyncAttemptUtc = DateTime.MinValue;
     private string _lastRemoteConnectionError = string.Empty;
+    private KioskDiscoveryClient? _kioskDiscovery;
 
     private void InitializeRemoteManagement()
     {
         _remoteManagementTimer.Tick += async (_, _) => await CheckInWithControllerAsync();
+        _kioskDiscovery = new KioskDiscoveryClient(
+            _settings,
+            ConfirmControllerPairingAsync,
+            () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                    BeginInvoke(new Action(() => _ = CheckInWithControllerAsync()));
+            });
     }
 
     private void StartRemoteManagement()
     {
+        _kioskDiscovery?.Start();
         _remoteManagementTimer.Start();
         BeginInvoke(new Action(() => _ = CheckInWithControllerAsync()));
     }
@@ -29,6 +40,79 @@ internal sealed partial class KioskForm
     private void StopRemoteManagement()
     {
         _remoteManagementTimer.Stop();
+        _kioskDiscovery?.Dispose();
+        _kioskDiscovery = null;
+    }
+
+    private Task<bool> ConfirmControllerPairingAsync(KioskPairingPayload payload)
+    {
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        void ShowConfirmation()
+        {
+            if (IsDisposed || Disposing)
+            {
+                completion.TrySetResult(false);
+                return;
+            }
+
+            var anotherPromptWasOpen = _promptOpen;
+            _promptOpen = true;
+            if (!anotherPromptWasOpen)
+                _idleTimer.Stop();
+            try
+            {
+                TopMost = true;
+                Show();
+                Activate();
+                BringToFront();
+                var replacing = _settings.RemoteManagementEnabled
+                    ? "\n\nThis kiosk is already managed. Allowing this request will replace its saved controller connection."
+                    : string.Empty;
+                var answer = MessageBox.Show(
+                    Form.ActiveForm ?? this,
+                    $"The Kiosk Controller on {payload.ControllerName} is requesting permission to add this waiver kiosk.\n\n" +
+                    $"Controller address: {payload.ControllerAddress}\n\n" +
+                    "If allowed, the controller and linked POS Controller can view this kiosk's status and send Open, Close, and Reset commands." +
+                    replacing +
+                    "\n\nOnly allow this request if you recognize the controller computer.",
+                    "Allow Kiosk Controller?",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2);
+                completion.TrySetResult(answer == DialogResult.Yes);
+            }
+            catch (Exception ex)
+            {
+                KioskLog.Write("Could not display the controller pairing prompt: " + ex.Message);
+                completion.TrySetResult(false);
+            }
+            finally
+            {
+                _promptOpen = anotherPromptWasOpen;
+                if (!anotherPromptWasOpen && !_allowExit)
+                {
+                    TopMost = true;
+                    Activate();
+                    _webView.Focus();
+                    MarkActivity();
+                    _idleTimer.Start();
+                }
+            }
+        }
+
+        try
+        {
+            if (InvokeRequired)
+                BeginInvoke((Action)ShowConfirmation);
+            else
+                ShowConfirmation();
+        }
+        catch (InvalidOperationException)
+        {
+            completion.TrySetResult(false);
+        }
+        return completion.Task;
     }
 
     private async Task CheckInWithControllerAsync()

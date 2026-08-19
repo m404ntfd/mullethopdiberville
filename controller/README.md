@@ -16,6 +16,7 @@ the same private network as the waiver kiosks. It provides:
 * Optional secure Cloudflare synchronization for a controller installed away
   from the kiosk network.
 * A signed status/control connection for the separate front-desk POS Controller.
+* Local-network kiosk discovery with a required approval prompt on the kiosk.
 
 
 INSTALL THE CONTROLLER PC
@@ -68,24 +69,32 @@ one-time Worker, D1, R2, and access-key setup. Treat the access key and copied
 setup code as staff credentials.
 
 
-PAIR EACH WAIVER KIOSK ONCE
----------------------------
+DISCOVER AND ADD EACH WAIVER KIOSK ONCE
+---------------------------------------
 
-The kiosk must be version 2.1.0 or newer.
+Install the current Waiver Kiosk app and Kiosk Controller app before using
+network discovery.
 
-1. On the controller, click Copy Address and Copy Key. Select View Key if staff
-   need to read the complete key on screen.
-2. On the kiosk, press Ctrl + Alt + M and enter the staff password.
-3. Open Staff Settings, then Remote Control Setup.
-4. Turn on remote management.
-5. Give the kiosk a clear, unique name such as Front Kiosk or Party Desk Kiosk.
-6. Enter the controller address and pairing key.
-7. Select Test Controller Connection, then Save Settings.
-8. Within five seconds the station appears in the controller list.
+1. Make sure the controller computer and waiver kiosk are on the same private
+   network, then leave the Waiver Kiosk app open.
+2. On the controller, select **Discover Kiosks**.
+3. Select the available kiosk and choose **Request Add**.
+4. At the waiver kiosk, verify the controller computer and address shown in the
+   prompt, then select **Yes** within two minutes.
+5. The controller reports **Added and Saved** after the kiosk completes its
+   first authenticated check-in.
 
-Repeat those steps for each kiosk. The pairing key is a staff credential. Do not
-post it publicly. Check-ins and commands are authenticated with an HMAC-SHA256
-signature and a short-lived timestamp.
+Repeat those steps for each kiosk. The discovery exchange encrypts the pairing
+key, and the kiosk saves the approved connection before remote management is
+enabled. The controller saves the kiosk in its managed-device history. A linked
+POS Controller then adds it to the next open Kiosk 1–4 position and saves that
+assignment automatically.
+
+Manual setup remains available: copy the address and pairing key from the
+controller, then enter them under **Staff Settings → Remote Control Setup** on
+the kiosk. Treat the pairing key as a staff credential and do not post it
+publicly. Check-ins and commands are authenticated with an HMAC-SHA256 signature
+and a short-lived timestamp.
 
 
 USE THE DASHBOARD
@@ -163,9 +172,11 @@ NETWORK NOTES
   Control Setup page on each kiosk.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Controller version 1.7.0 adds the separate POS Controller connection. Waiver
-Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus the
-reset-to-start command. Upgrade both before linking a POS Controller computer.
+Controller version 1.8.0 and Waiver Kiosk version 2.7.0 add approval-based local
+network discovery and saved pairing. Controller version 1.7.0 adds the separate
+POS Controller connection. Waiver Kiosk version 2.6.0 adds live open-to-guests
+and error-state reporting plus the reset-to-start command. Upgrade both before
+using network discovery.
 
 
 REMOVE THE CONTROLLER
