@@ -125,13 +125,20 @@ internal sealed partial class KioskForm
                 throw new InvalidDataException("The kiosk manager has not published a Business Hours profile yet.");
             if (package.Days.Count != 7 || package.Days.Select(day => day.Day).Distinct().Count() != 7 ||
                 package.Days.Any(day => day.Day is < 0 or > 6 ||
-                    (day.IsOpen && day.CloseTime <= day.OpenTime)))
+                    (day.IsOpen && day.CloseTime <= day.OpenTime)) ||
+                (package.IncludesAppearanceSettings &&
+                    (package.ThemeMode is < 0 or > 2 ||
+                     (package.ScheduledDarkDays ?? []).Any(day => day is < 0 or > 6))))
                 throw new InvalidDataException("The manager Business Hours profile is invalid.");
 
             var oldEnabled = _settings.BusinessHoursEnabled;
             var oldClosed = _settings.BusinessClosedMessageMinutes;
             var oldPreOpening = _settings.PreOpeningScreensaverMinutes;
             var oldDays = _settings.BusinessHours;
+            var oldThemeMode = _settings.ThemeMode;
+            var oldScheduledDarkEnabled = _settings.ScheduledDarkEnabled;
+            var oldScheduledDarkDays = _settings.ScheduledDarkDays;
+            var oldScheduledDarkTime = _settings.ScheduledDarkTime;
             var oldRevision = _settings.BusinessHoursSyncRevision;
             var oldLastSync = _settings.BusinessHoursLastSyncUtc;
             var oldStatus = _settings.BusinessHoursLastSyncStatus;
@@ -140,6 +147,14 @@ internal sealed partial class KioskForm
                 _settings.BusinessHoursEnabled = package.Enabled;
                 _settings.BusinessClosedMessageMinutes = Math.Clamp(package.ClosedMessageMinutes, 1, 240);
                 _settings.PreOpeningScreensaverMinutes = Math.Clamp(package.PreOpeningScreensaverMinutes, 0, 240);
+                if (package.IncludesAppearanceSettings)
+                {
+                    _settings.ThemeMode = (KioskThemeMode)package.ThemeMode;
+                    _settings.ScheduledDarkEnabled = package.ScheduledDarkEnabled;
+                    _settings.ScheduledDarkDays = (package.ScheduledDarkDays ?? [])
+                        .Select(day => (DayOfWeek)day).Distinct().ToArray();
+                    _settings.ScheduledDarkTime = package.ScheduledDarkTime;
+                }
                 _settings.BusinessHours = package.Days.Select(day => new KioskBusinessDayHours
                 {
                     Day = (DayOfWeek)day.Day, IsOpen = day.IsOpen,
@@ -147,8 +162,9 @@ internal sealed partial class KioskForm
                 }).OrderBy(day => Array.IndexOf(KioskBusinessDayHours.OrderedDays, day.Day)).ToList();
                 _settings.BusinessHoursSyncRevision = package.Revision;
                 _settings.BusinessHoursLastSyncUtc = DateTime.UtcNow;
-                _settings.BusinessHoursLastSyncStatus = "Business Hours synced from the kiosk manager.";
+                _settings.BusinessHoursLastSyncStatus = "Business Hours and kiosk appearance synced from the kiosk manager.";
                 _settings.Save();
+                await ApplyKioskThemeIfChangedAsync(force: true);
                 await ApplyBusinessHoursStateAsync();
             }
             catch
@@ -157,6 +173,10 @@ internal sealed partial class KioskForm
                 _settings.BusinessClosedMessageMinutes = oldClosed;
                 _settings.PreOpeningScreensaverMinutes = oldPreOpening;
                 _settings.BusinessHours = oldDays;
+                _settings.ThemeMode = oldThemeMode;
+                _settings.ScheduledDarkEnabled = oldScheduledDarkEnabled;
+                _settings.ScheduledDarkDays = oldScheduledDarkDays;
+                _settings.ScheduledDarkTime = oldScheduledDarkTime;
                 _settings.BusinessHoursSyncRevision = oldRevision;
                 _settings.BusinessHoursLastSyncUtc = oldLastSync;
                 _settings.BusinessHoursLastSyncStatus = oldStatus;
@@ -550,6 +570,11 @@ internal sealed class BusinessHoursSyncPackage
     public bool Enabled { get; set; }
     public int ClosedMessageMinutes { get; set; }
     public int PreOpeningScreensaverMinutes { get; set; }
+    public bool IncludesAppearanceSettings { get; set; }
+    public int ThemeMode { get; set; }
+    public bool ScheduledDarkEnabled { get; set; }
+    public int[] ScheduledDarkDays { get; set; } = [];
+    public TimeSpan ScheduledDarkTime { get; set; }
     public List<BusinessHoursSyncItem> Days { get; set; } = [];
 }
 

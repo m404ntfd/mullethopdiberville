@@ -73,9 +73,12 @@ Controller installed on another Windows PC on the same private network. The
 controller can show each kiosk's online status, version, open/closed screen, last
 check-in, and IP address. Staff can open or close one kiosk, open or close all
 kiosks, check one kiosk for an update without installing it, or tell one kiosk to
-install an available update. The lower-right Controller Program section can
-check for controller updates, restart the controller, or close it. The controller
-also checks for its own updates automatically whenever it opens.
+install an available update. The controller can also publish Business Hours and
+Kiosk Appearance settings, including Auto/Light/Dark mode and a selected-day
+Dark-mode schedule, to one kiosk or all kiosks. The lower-right Controller
+Program section can check for controller updates, restart the controller, or
+close it. The controller also checks for its own updates automatically whenever
+it opens.
 
 Download the controller package from:
 
