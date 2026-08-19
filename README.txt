@@ -141,8 +141,10 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Kiosk Controller version 1.10.1 enlarges the Controller Program buttons and adds
-code-free manual pairing by kiosk IPv4 address. Waiver Kiosk version 2.9.2 uses
+Kiosk Controller version 1.10.2 adds system-tray operation so minimizing or
+closing the dashboard does not stop remote kiosk service. Version 1.10.1 enlarges
+the Controller Program buttons and adds code-free manual pairing by kiosk IPv4
+address. Waiver Kiosk version 2.9.3 uses
 the existing outbound discovery and encrypted approval exchange for this release.
 The long self-contained setup code remains available only as a fallback.
 

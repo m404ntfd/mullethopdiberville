@@ -163,10 +163,12 @@ when they reconnect.
 The lower-right Controller Program section includes the controller's own
 Auto/Light/Dark appearance selector, master-controller indicator and toggle,
 plus Check Updates, Manage Ads, Business Hours, Remote Access, Restart Controller,
-and Close Controller buttons in a larger three-column, two-row grid. If a
-downloaded update is waiting, Restart Controller offers to install it. Closing the controller does not change a
-kiosk's current open/closed state, but new remote commands are unavailable until
-the controller starts again.
+and Exit Program buttons in a larger three-column, two-row grid. If a downloaded
+update is waiting, Restart Controller offers to install it. Minimizing the window
+or selecting X sends the controller to the Windows system tray while its network
+service continues running. Double-click the fish-and-springs tray icon, or select
+Open Kiosk Controller from its tray menu, to restore the dashboard. Only the
+in-app Exit Program button ends the controller service during normal use.
 
 
 MANAGE AND SYNC ADVERTISEMENTS
@@ -218,8 +220,10 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.10.1 enlarges the Controller Program buttons and adds
-code-free manual pairing by kiosk IPv4 address. Waiver Kiosk version 2.9.1 uses
+Kiosk Controller version 1.10.2 adds system-tray operation so minimizing or
+closing the dashboard does not stop remote kiosk service. Version 1.10.1 enlarges
+the Controller Program buttons and adds code-free manual pairing by kiosk IPv4
+address. Waiver Kiosk version 2.9.3 uses
 the existing outbound discovery and encrypted approval exchange for the IP
 workflow. The long self-contained setup code remains available as a fallback.
 Controller version 1.7.0 adds the separate POS Controller connection. Waiver
