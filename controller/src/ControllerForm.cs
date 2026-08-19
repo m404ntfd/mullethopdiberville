@@ -125,7 +125,7 @@ internal sealed class ControllerForm : Form
         var group = new GroupBox
         {
             Dock = DockStyle.Top,
-            Height = 165,
+            Height = 175,
             Padding = new Padding(18, 24, 18, 10),
             Text = "One-Time Kiosk Pairing Information",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
@@ -200,12 +200,14 @@ internal sealed class ControllerForm : Form
         {
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Text = "On each kiosk: Ctrl + Alt + M → Staff Settings → Remote Control Setup. Enter a unique kiosk name, then paste the address and key above.",
+            Text = "Use Discover Kiosks for approval-based network setup. Manual address and key pairing remains available in each kiosk's Staff Settings.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f),
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(3, 3, 3, 0)
         };
+        var discover = MakeTableButton("Discover Kiosks", Color.FromArgb(245, 130, 32));
+        discover.Click += (_, _) => OpenKioskDiscovery();
 
         layout.Controls.Add(addressLabel, 0, 0);
         layout.Controls.Add(_addresses, 1, 0);
@@ -216,9 +218,32 @@ internal sealed class ControllerForm : Form
         layout.Controls.Add(viewKey, 2, 1);
         layout.Controls.Add(copyKey, 3, 1);
         layout.Controls.Add(note, 0, 2);
-        layout.SetColumnSpan(note, 4);
+        layout.SetColumnSpan(note, 3);
+        layout.Controls.Add(discover, 3, 2);
         group.Controls.Add(layout);
         return group;
+    }
+
+    private void OpenKioskDiscovery()
+    {
+        if (_remoteSettings.IsRemoteMachine)
+        {
+            MessageBox.Show(this,
+                "Kiosk discovery is available only from the controller computer on the same local network as the waiver kiosks.",
+                "Discover Waiver Kiosks", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (!_server.IsRunning)
+        {
+            MessageBox.Show(this,
+                "The local controller service is not running. Resolve the network service error, then try again.",
+                "Discover Waiver Kiosks", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        using var discovery = new KioskDiscoveryDialog(_server.Discovery, _state);
+        discovery.ShowDialog(this);
+        RefreshKioskList();
     }
 
     private Panel BuildSummaryPanel()

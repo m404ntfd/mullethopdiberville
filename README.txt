@@ -88,12 +88,19 @@ Download the controller package from:
 
 https://github.com/m404ntfd/mullethopdiberville/releases/latest
 
-Install it on the office PC, then use the address and pairing key displayed in
-its setup panel. View Key temporarily reveals the complete key, while Copy Key
-places the complete key on the Windows clipboard as pasteable text. On each
-kiosk, press Ctrl + Alt + M, open Staff
-Settings, and select Remote Control Setup. Give each station a unique name,
-paste the controller address and key, test the connection, and save.
+Install it on the office PC, then select Discover Kiosks in its setup panel.
+Select a kiosk and choose Request Add. The kiosk displays the controller computer
+and address and requires someone at that kiosk to approve the request within two
+minutes. The encrypted pairing exchange saves the approved connection on the
+kiosk, and the first authenticated check-in saves the kiosk in the controller.
+A linked POS Controller then adds the kiosk to its next open Kiosk 1-4 position
+and saves that assignment automatically.
+
+Manual setup remains available. View Key temporarily reveals the complete key,
+while Copy Key places it on the Windows clipboard. On the kiosk, press
+Ctrl + Alt + M, open Staff Settings, and select Remote Control Setup. Give each
+station a unique name, paste the controller address and key, test the connection,
+and save.
 
 Controller version 1.1.0 or newer must be installed once with its Setup-based
 package to establish automatic updates. When a controller update is downloaded,
@@ -106,6 +113,10 @@ pairing key and signed timestamps. A kiosk does not accept unsolicited inbound
 connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
+
+Waiver Kiosk version 2.7.0 and Kiosk Controller version 1.8.0 add approval-based
+network discovery and saved pairing. Both applications must be upgraded before
+using Discover Kiosks.
 
 
 FRONT-DESK POS CONTROLLER
