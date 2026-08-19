@@ -15,6 +15,7 @@ internal sealed class PosSettingsDialog : Form
     private List<PosKioskStatus> _knownKiosks = [];
 
     public PosSettings Settings => _working;
+    public PosSettings? AppliedSettings { get; private set; }
 
     public PosSettingsDialog(PosSettings current)
     {
@@ -68,7 +69,7 @@ internal sealed class PosSettingsDialog : Form
 
         _controllerUrl.Text = _working.ControllerUrl;
         _pairingKey.Text = _working.PairingKey;
-        PopulateSlots([]);
+        PopulateSlots(_working.RememberedKioskStatuses());
         Shown += async (_, _) =>
         {
             if (_working.HasConnectionSettings)
@@ -98,10 +99,10 @@ internal sealed class PosSettingsDialog : Form
             _pairingKey.UseSystemPasswordChar = !_pairingKey.UseSystemPasswordChar;
             view.Text = _pairingKey.UseSystemPasswordChar ? "View" : "Hide";
         };
-        var test = MakeButton("Pull Devices Now", Color.FromArgb(105, 210, 236), Color.FromArgb(16, 24, 32));
+        var test = MakeButton("Connect & Remember", Color.FromArgb(105, 210, 236), Color.FromArgb(16, 24, 32));
         test.Bounds = new Rectangle(610, 76, 150, 36);
         test.Click += async (_, _) => await LoadKiosksAsync(showSuccess: true);
-        _connectionStatus.Text = "Devices are pulled from the Kiosk Controller and added to open dashboard positions.";
+        _connectionStatus.Text = "A verified controller connection and all kiosk-number assignments are remembered automatically.";
         _connectionStatus.Bounds = new Rectangle(18, 153, 742, 28);
         _connectionStatus.ForeColor = Color.FromArgb(83, 97, 109);
         group.Controls.AddRange([note, _controllerUrl, _pairingKey, view, test, _connectionStatus]);
@@ -116,10 +117,17 @@ internal sealed class PosSettingsDialog : Form
         var note = new Label
         {
             Text = "Paired devices are added automatically to the next open position. You can change their Kiosk 1–4 assignments below.",
-            Bounds = new Rectangle(18, 30, 720, 44),
+            Bounds = new Rectangle(18, 30, 525, 44),
             ForeColor = Color.FromArgb(52, 65, 76)
         };
         group.Controls.Add(note);
+        var saveAssignments = MakeButton(
+            "Save Kiosk Assignments",
+            Color.FromArgb(118, 196, 66),
+            Color.FromArgb(16, 24, 32));
+        saveAssignments.Bounds = new Rectangle(558, 30, 192, 42);
+        saveAssignments.Click += (_, _) => SaveKioskAssignments();
+        group.Controls.Add(saveAssignments);
         for (var index = 0; index < _slots.Length; index++)
         {
             var y = 80 + index * 37;
@@ -167,18 +175,24 @@ internal sealed class PosSettingsDialog : Form
         {
             var client = new PosControllerClient(_controllerUrl.Text, _pairingKey.Text);
             var response = await client.GetStatusAsync();
-            _knownKiosks = response.Kiosks;
+            _knownKiosks = MergeWithRememberedKiosks(response.Kiosks);
             CaptureSlotSelections();
-            var added = _working.AutoAssignKiosks(_knownKiosks);
+            var added = _working.RememberSuccessfulConnection(
+                _controllerUrl.Text,
+                _pairingKey.Text,
+                response.Kiosks);
+            AppliedSettings = _working.Clone();
             PopulateSlots(_knownKiosks);
-            var assignedCount = _working.KioskSlots.Count(id => !string.IsNullOrWhiteSpace(id));
-            var waitingCount = Math.Max(0, _knownKiosks.Count - assignedCount);
+            var assignedIds = _working.KioskSlots
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToHashSet(StringComparer.Ordinal);
+            var waitingCount = response.Kiosks.Count(kiosk => !assignedIds.Contains(kiosk.StationId));
             SetConnectionStatus(
                 added > 0
-                    ? $"Connected — {added} device{(added == 1 ? "" : "s")} added automatically."
+                    ? $"Connected and remembered — {added} device{(added == 1 ? "" : "s")} added automatically."
                     : waitingCount > 0
-                        ? $"Connected — all four positions are filled; {waitingCount} additional device{(waitingCount == 1 ? " is" : "s are")} available."
-                        : $"Connected — {_knownKiosks.Count} device{(_knownKiosks.Count == 1 ? "" : "s")} loaded.",
+                        ? $"Connected and remembered — all four positions are filled; {waitingCount} additional device{(waitingCount == 1 ? " is" : "s are")} available."
+                        : $"Connected and remembered — {response.Kiosks.Count} device{(response.Kiosks.Count == 1 ? "" : "s")} loaded.",
                 true);
             if (showSuccess && _knownKiosks.Count == 0)
                 MessageBox.Show(this,
@@ -191,11 +205,64 @@ internal sealed class PosSettingsDialog : Form
         }
     }
 
+    private List<PosKioskStatus> MergeWithRememberedKiosks(
+        IEnumerable<PosKioskStatus> currentKiosks)
+    {
+        var merged = _working.RememberedKioskStatuses()
+            .ToDictionary(kiosk => kiosk.StationId, StringComparer.Ordinal);
+        foreach (var kiosk in currentKiosks)
+            merged[kiosk.StationId] = kiosk;
+        return merged.Values
+            .OrderBy(kiosk => kiosk.StationName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(kiosk => kiosk.MachineName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
     private void CaptureSlotSelections()
     {
         _working.KioskSlots = _slots
             .Select(slot => (slot.SelectedItem as KioskChoice)?.Id ?? string.Empty)
             .ToList();
+    }
+
+    private void SaveKioskAssignments()
+    {
+        if (!TryGetUniqueSlotAssignments(out var assignments))
+            return;
+
+        _working.KioskSlots = assignments;
+        try
+        {
+            _working.Save();
+            AppliedSettings = _working.Clone();
+            MessageBox.Show(this,
+                "The Kiosk 1–4 assignments were saved and will remain assigned after the POS Controller restarts.",
+                "Kiosk Assignments Saved",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "The kiosk assignments could not be saved.\n\n" + ex.Message,
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private bool TryGetUniqueSlotAssignments(out List<string> assignments)
+    {
+        assignments = _slots
+            .Select(slot => (slot.SelectedItem as KioskChoice)?.Id ?? string.Empty)
+            .ToList();
+        var selectedIds = assignments
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToList();
+        if (selectedIds.Count == selectedIds.Distinct(StringComparer.Ordinal).Count())
+            return true;
+
+        MessageBox.Show(this,
+            "Each waiver kiosk can only be assigned to one dashboard number.",
+            Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        return false;
     }
 
     private void PopulateSlots(IReadOnlyList<PosKioskStatus> kiosks)
@@ -234,24 +301,16 @@ internal sealed class PosSettingsDialog : Form
             return;
         }
 
-        var selectedIds = _slots
-            .Select(slot => (slot.SelectedItem as KioskChoice)?.Id ?? string.Empty)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .ToList();
-        if (selectedIds.Count != selectedIds.Distinct(StringComparer.Ordinal).Count())
-        {
-            MessageBox.Show(this,
-                "Each waiver kiosk can only be assigned to one dashboard number.",
-                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        if (!TryGetUniqueSlotAssignments(out var assignments))
             return;
-        }
 
         _working.ControllerUrl = _controllerUrl.Text.Trim();
         _working.PairingKey = _pairingKey.Text.Trim();
-        CaptureSlotSelections();
+        _working.KioskSlots = assignments;
         try
         {
             _working.Save();
+            AppliedSettings = _working.Clone();
             DialogResult = DialogResult.OK;
         }
         catch (Exception ex)

@@ -8,6 +8,7 @@ internal sealed class PosSettings
     public string ControllerUrl { get; set; } = string.Empty;
     public string PairingKey { get; set; } = string.Empty;
     public List<string> KioskSlots { get; set; } = [string.Empty, string.Empty, string.Empty, string.Empty];
+    public List<PosRememberedKiosk> RememberedKiosks { get; set; } = [];
     public string StaffPinSalt { get; set; } = string.Empty;
     public string StaffPinHash { get; set; } = string.Empty;
 
@@ -54,6 +55,7 @@ internal sealed class PosSettings
         ControllerUrl = ControllerUrl,
         PairingKey = PairingKey,
         KioskSlots = [.. KioskSlots],
+        RememberedKiosks = RememberedKiosks.Select(kiosk => kiosk.Clone()).ToList(),
         StaffPinSalt = StaffPinSalt,
         StaffPinHash = StaffPinHash
     };
@@ -63,6 +65,7 @@ internal sealed class PosSettings
         ControllerUrl = source.ControllerUrl;
         PairingKey = source.PairingKey;
         KioskSlots = [.. source.KioskSlots];
+        RememberedKiosks = source.RememberedKiosks.Select(kiosk => kiosk.Clone()).ToList();
         StaffPinSalt = source.StaffPinSalt;
         StaffPinHash = source.StaffPinHash;
         Normalize();
@@ -126,6 +129,63 @@ internal sealed class PosSettings
         return added;
     }
 
+    public int RememberSuccessfulConnection(
+        string controllerUrl,
+        string pairingKey,
+        IEnumerable<PosKioskStatus> kiosks)
+    {
+        var normalizedUrl = controllerUrl.Trim();
+        var normalizedKey = pairingKey.Trim();
+        var changed = !string.Equals(ControllerUrl, normalizedUrl, StringComparison.OrdinalIgnoreCase) ||
+                      !string.Equals(PairingKey, normalizedKey, StringComparison.Ordinal);
+        ControllerUrl = normalizedUrl;
+        PairingKey = normalizedKey;
+        var kioskList = kiosks
+            .Where(kiosk => !string.IsNullOrWhiteSpace(kiosk.StationId))
+            .ToList();
+        changed |= RememberKiosks(kioskList);
+        var added = AutoAssignKiosks(kioskList);
+        if (changed || added > 0)
+            Save();
+        return added;
+    }
+
+    public IReadOnlyList<PosKioskStatus> RememberedKioskStatuses() =>
+        RememberedKiosks
+            .Select(kiosk => new PosKioskStatus
+            {
+                StationId = kiosk.StationId,
+                StationName = kiosk.StationName,
+                MachineName = kiosk.MachineName
+            })
+            .ToList();
+
+    private bool RememberKiosks(IEnumerable<PosKioskStatus> kiosks)
+    {
+        var changed = false;
+        foreach (var kiosk in kiosks)
+        {
+            var remembered = RememberedKiosks.FirstOrDefault(item =>
+                string.Equals(item.StationId, kiosk.StationId, StringComparison.Ordinal));
+            if (remembered is null)
+            {
+                remembered = new PosRememberedKiosk { StationId = kiosk.StationId };
+                RememberedKiosks.Add(remembered);
+                changed = true;
+            }
+            var stationName = CleanName(kiosk.StationName, kiosk.MachineName);
+            var machineName = CleanName(kiosk.MachineName, kiosk.StationName);
+            if (!string.Equals(remembered.StationName, stationName, StringComparison.Ordinal) ||
+                !string.Equals(remembered.MachineName, machineName, StringComparison.Ordinal))
+            {
+                remembered.StationName = stationName;
+                remembered.MachineName = machineName;
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
     private void Normalize()
     {
         ControllerUrl = (ControllerUrl ?? string.Empty).Trim();
@@ -134,8 +194,29 @@ internal sealed class PosSettings
         KioskSlots = KioskSlots.Take(4).Select(value => value?.Trim() ?? string.Empty).ToList();
         while (KioskSlots.Count < 4)
             KioskSlots.Add(string.Empty);
+        RememberedKiosks ??= [];
+        RememberedKiosks = RememberedKiosks
+            .Where(kiosk => kiosk is not null && !string.IsNullOrWhiteSpace(kiosk.StationId))
+            .GroupBy(kiosk => kiosk.StationId.Trim(), StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var kiosk = group.Last();
+                kiosk.StationId = kiosk.StationId.Trim();
+                kiosk.StationName = CleanName(kiosk.StationName, kiosk.MachineName);
+                kiosk.MachineName = CleanName(kiosk.MachineName, kiosk.StationName);
+                return kiosk;
+            })
+            .Take(100)
+            .ToList();
         StaffPinSalt ??= string.Empty;
         StaffPinHash ??= string.Empty;
+    }
+
+    private static string CleanName(string? value, string? fallback)
+    {
+        var result = string.IsNullOrWhiteSpace(value) ? fallback : value;
+        result = string.IsNullOrWhiteSpace(result) ? "Waiver Kiosk" : result.Trim();
+        return result.Length <= 80 ? result : result[..80];
     }
 
     private static byte[] DerivePinHash(string pin, byte[] salt)
@@ -143,4 +224,18 @@ internal sealed class PosSettings
         using var pbkdf2 = new Rfc2898DeriveBytes(pin, salt, 150_000, HashAlgorithmName.SHA256);
         return pbkdf2.GetBytes(32);
     }
+}
+
+internal sealed class PosRememberedKiosk
+{
+    public string StationId { get; set; } = string.Empty;
+    public string StationName { get; set; } = string.Empty;
+    public string MachineName { get; set; } = string.Empty;
+
+    public PosRememberedKiosk Clone() => new()
+    {
+        StationId = StationId,
+        StationName = StationName,
+        MachineName = MachineName
+    };
 }

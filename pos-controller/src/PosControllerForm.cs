@@ -244,10 +244,13 @@ internal sealed class PosControllerForm : Form
         {
             var client = new PosControllerClient(_settings.ControllerUrl, _settings.PairingKey);
             var response = await client.GetStatusAsync();
-            var added = _settings.AutoAssignKiosks(response.Kiosks);
-            if (added > 0)
+            var previousSlots = _settings.KioskSlots.ToArray();
+            var added = _settings.RememberSuccessfulConnection(
+                _settings.ControllerUrl,
+                _settings.PairingKey,
+                response.Kiosks);
+            if (added > 0 || !previousSlots.SequenceEqual(_settings.KioskSlots, StringComparer.Ordinal))
             {
-                _settings.Save();
                 UpdateUnlinkedCards();
                 PosLog.Write(
                     $"Automatically added {added} kiosk device{(added == 1 ? "" : "s")} from the Kiosk Controller.");
@@ -342,9 +345,12 @@ internal sealed class PosControllerForm : Form
         }
 
         using var dialog = new PosSettingsDialog(_settings);
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        var result = dialog.ShowDialog(this);
+        if (result != DialogResult.OK && dialog.AppliedSettings is null)
             return;
-        _settings.CopyFrom(dialog.Settings);
+        _settings.CopyFrom(result == DialogResult.OK
+            ? dialog.Settings
+            : dialog.AppliedSettings!);
         UpdateUnlinkedCards();
         _ = RefreshStatusesAsync();
     }

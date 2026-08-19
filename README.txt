@@ -142,7 +142,7 @@ firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
 Kiosk Controller version 1.10.1 enlarges the Controller Program buttons and adds
-code-free manual pairing by kiosk IPv4 address. Waiver Kiosk version 2.9.1 uses
+code-free manual pairing by kiosk IPv4 address. Waiver Kiosk version 2.9.2 uses
 the existing outbound discovery and encrypted approval exchange for this release.
 The long self-contained setup code remains available only as a fallback.
 
@@ -166,8 +166,14 @@ Check for Updates button do not ask for a passcode. Opening Settings requires th
 POS Controller's own 4-8 digit passcode. Settings finds the kiosks already paired
 with the on-site Kiosk Controller and automatically adds new devices to the next
 open Kiosk 1 through Kiosk 4 dashboard position without renumbering existing
-assignments. See the README inside the Mullet-Hop-POS-Controller download for
-complete installation steps.
+assignments. POS Controller version 1.1.1 saves a verified controller address and
+pairing key immediately, and remembers each kiosk's identity, name, and assigned
+number across application and computer restarts. The visible Settings button in
+the upper-right corner can change the saved connection, assignments, or POS
+Settings passcode. A dedicated Save Kiosk Assignments button inside the Kiosk
+1-4 assignment area validates and applies those positions immediately. See the
+README inside the Mullet-Hop-POS-Controller download for complete installation
+steps.
 
 
 STAFF SETTINGS AND EXIT
