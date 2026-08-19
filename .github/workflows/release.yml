@@ -153,20 +153,19 @@ jobs:
             New-Item -ItemType Directory -Path ControllerReleases -Force | Out-Null
           }
 
-          $feedPath = "ControllerReleases/releases.controller.json"
-          if (Test-Path -LiteralPath $feedPath -PathType Leaf) {
-            $feed = Get-Content -LiteralPath $feedPath -Raw | ConvertFrom-Json
-            $currentVersion = "${{ steps.controller_version.outputs.value }}"
-            $matchingRelease = @(
-              $feed.Assets | Where-Object {
-                $_.Type -eq "Full" -and $_.Version -eq $currentVersion
-              }
-            )
+          $currentVersion = "${{ steps.controller_version.outputs.value }}"
+          $expectedPackage = "MulletHop.KioskController-$currentVersion-controller-full.nupkg"
+          $latestRelease = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/${{ github.repository }}/releases/latest" `
+            -Headers @{ Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}" } `
+            -SkipHttpErrorCheck
+          $matchingAsset = @(
+            $latestRelease.assets | Where-Object { $_.name -eq $expectedPackage }
+          )
 
-            if ($matchingRelease.Count -gt 0) {
-              $needsPack = $false
-              Write-Host "Controller $currentVersion is already packaged; reusing its release files."
-            }
+          if ($matchingAsset.Count -gt 0) {
+            $needsPack = $false
+            Write-Host "Controller $currentVersion is already packaged; reusing its release files."
           }
 
           "needs_pack=$($needsPack.ToString().ToLowerInvariant())" |
