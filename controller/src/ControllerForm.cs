@@ -40,8 +40,8 @@ internal sealed class ControllerForm : Form
         if (appIcon is not null)
             Icon = appIcon;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1060, 700);
-        ClientSize = new Size(1200, 760);
+        MinimumSize = new Size(1180, 760);
+        ClientSize = new Size(1320, 820);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(244, 248, 251);
 
@@ -230,7 +230,7 @@ internal sealed class ControllerForm : Form
         var panel = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 190,
+            Height = 250,
             Padding = new Padding(12, 8, 12, 8),
             BackColor = Color.White
         };
@@ -244,8 +244,8 @@ internal sealed class ControllerForm : Form
             Padding = Padding.Empty,
             BackColor = Color.White
         };
-        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
-        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         sections.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var kioskGroup = new GroupBox
@@ -264,30 +264,39 @@ internal sealed class ControllerForm : Form
         _selectionStatus.ForeColor = Color.FromArgb(52, 65, 76);
         _selectionStatus.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
 
-        var kioskButtons = new FlowLayoutPanel
+        var kioskButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
+            ColumnCount = 3,
+            RowCount = 2,
             Padding = new Padding(0, 2, 0, 0),
             Margin = Padding.Empty
         };
-        ConfigureFlowButton(_openButton, "Open Selected", Color.FromArgb(118, 196, 66), 145);
-        ConfigureFlowButton(_closeButton, "Close Selected", Color.FromArgb(245, 130, 32), 145);
-        ConfigureFlowButton(_checkUpdateButton, "Check Kiosk Update", Color.FromArgb(105, 210, 236), 172);
-        ConfigureFlowButton(_installUpdateButton, "Install Kiosk Update", Color.FromArgb(117, 68, 154), 172, Color.White);
+        for (var index = 0; index < 3; index++)
+            kioskButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+        kioskButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        kioskButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        ConfigureTableActionButton(_openButton, "Open Selected", Color.FromArgb(118, 196, 66));
+        ConfigureTableActionButton(_closeButton, "Close Selected", Color.FromArgb(245, 130, 32));
+        ConfigureTableActionButton(_checkUpdateButton, "Check Kiosk Update", Color.FromArgb(105, 210, 236));
+        ConfigureTableActionButton(_installUpdateButton, "Install Kiosk Update", Color.FromArgb(117, 68, 154), Color.White);
         _openButton.Click += (_, _) => QueueSelected(CommandTypes.SetClosed, false);
         _closeButton.Click += (_, _) => QueueSelected(CommandTypes.SetClosed, true);
         _checkUpdateButton.Click += (_, _) => QueueSelected(CommandTypes.CheckUpdate);
         _installUpdateButton.Click += (_, _) => InstallSelectedUpdate();
 
-        var openAll = MakeFlowButton("Open All", Color.FromArgb(210, 239, 190), 130);
+        var openAll = new Button();
+        ConfigureTableActionButton(openAll, "Open All", Color.FromArgb(210, 239, 190));
         openAll.Click += (_, _) => QueueForAll(CommandTypes.SetClosed, false);
-        var closeAll = MakeFlowButton("Close All", Color.FromArgb(255, 217, 188), 130);
+        var closeAll = new Button();
+        ConfigureTableActionButton(closeAll, "Close All", Color.FromArgb(255, 217, 188));
         closeAll.Click += (_, _) => CloseAllKiosks();
-        kioskButtons.Controls.AddRange([
-            _openButton, _closeButton, _checkUpdateButton,
-            _installUpdateButton, openAll, closeAll]);
+        kioskButtons.Controls.Add(_openButton, 0, 0);
+        kioskButtons.Controls.Add(_closeButton, 1, 0);
+        kioskButtons.Controls.Add(_checkUpdateButton, 2, 0);
+        kioskButtons.Controls.Add(_installUpdateButton, 0, 1);
+        kioskButtons.Controls.Add(openAll, 1, 1);
+        kioskButtons.Controls.Add(closeAll, 2, 1);
         kioskGroup.Controls.Add(kioskButtons);
         kioskGroup.Controls.Add(_selectionStatus);
 
@@ -328,15 +337,15 @@ internal sealed class ControllerForm : Form
         var controllerButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
-            RowCount = 2,
+            ColumnCount = 2,
+            RowCount = 3,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         for (var index = 0; index < 3; index++)
-            controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
-        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
         ConfigureTableActionButton(_controllerUpdateButton, "Check Updates", Color.FromArgb(8, 119, 189), Color.White);
         ConfigureTableActionButton(_manageAdsButton, "Manage Ads", Color.FromArgb(117, 68, 154), Color.White);
         ConfigureTableActionButton(_remoteAccessButton, "Remote Access", Color.FromArgb(105, 210, 236));
@@ -354,9 +363,10 @@ internal sealed class ControllerForm : Form
         _closeControllerButton.Click += (_, _) => CloseController();
         controllerButtons.Controls.Add(_controllerUpdateButton, 0, 0);
         controllerButtons.Controls.Add(_manageAdsButton, 1, 0);
-        controllerButtons.Controls.Add(_remoteAccessButton, 2, 0);
-        controllerButtons.Controls.Add(_restartControllerButton, 0, 1);
-        controllerButtons.Controls.Add(_closeControllerButton, 1, 1);
+        controllerButtons.Controls.Add(_remoteAccessButton, 0, 1);
+        controllerButtons.Controls.Add(_restartControllerButton, 1, 1);
+        controllerButtons.Controls.Add(_closeControllerButton, 0, 2);
+        controllerButtons.SetColumnSpan(_closeControllerButton, 2);
 
         controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
         controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);
@@ -875,6 +885,6 @@ internal sealed class ControllerForm : Form
         button.BackColor = color;
         button.ForeColor = foreground ?? Color.FromArgb(16, 24, 32);
         button.FlatStyle = FlatStyle.Flat;
-        button.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+        button.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
     }
 }

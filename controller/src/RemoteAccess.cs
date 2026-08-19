@@ -245,12 +245,12 @@ internal sealed class RemoteAccessSettingsDialog : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(650, 510);
+        ClientSize = new Size(720, 520);
         BackColor = Color.White;
         Font = new Font("Segoe UI", 10);
 
         var title = new Label { Text = "REMOTE ACCESS", Font = new Font("Segoe UI", 19, FontStyle.Bold), ForeColor = Color.FromArgb(117, 68, 154), Bounds = new Rectangle(24, 18, 450, 38) };
-        var note = new Label { Text = "The on-site controller talks directly to kiosks. A remote controller uses the secure Cloudflare relay. No router ports are opened.", Bounds = new Rectangle(25, 58, 600, 48), ForeColor = Color.FromArgb(52, 65, 76) };
+        var note = new Label { Text = "The on-site controller talks directly to kiosks. A remote controller uses the secure Cloudflare relay. No router ports are opened.", Bounds = new Rectangle(25, 58, 670, 48), ForeColor = Color.FromArgb(52, 65, 76) };
         _enabled.Text = "Enable secure cloud synchronization";
         _enabled.Bounds = new Rectangle(28, 112, 360, 30);
         _enabled.Checked = settings.Enabled;
@@ -261,15 +261,15 @@ internal sealed class RemoteAccessSettingsDialog : Form
         AddField("Location ID", _location, 260, settings.LocationId);
         AddField("Cloud access key", _key, 325, settings.AccessKey);
         _key.UseSystemPasswordChar = true;
-        var view = Button("View Key", 500, 349, 118, Color.FromArgb(255, 217, 188));
+        var view = Button("View Key", 565, 349, 130, Color.FromArgb(255, 217, 188));
         view.Click += (_, _) => { _key.UseSystemPasswordChar = !_key.UseSystemPasswordChar; view.Text = _key.UseSystemPasswordChar ? "View Key" : "Hide Key"; };
-        var test = Button("Test Connection", 25, 420, 150, Color.FromArgb(105, 210, 236));
+        var test = Button("Test Connection", 25, 425, 145, Color.FromArgb(105, 210, 236));
         test.Click += async (_, _) => await TestAsync(test);
-        var copy = Button("Copy Setup Code", 185, 420, 145, Color.FromArgb(118, 196, 66));
+        var copy = Button("Copy Setup Code", 180, 425, 150, Color.FromArgb(118, 196, 66));
         copy.Click += (_, _) => { Clipboard.SetText(RemoteAccessSettingsStore.CreateSetupCode(ReadSettings())); MessageBox.Show(this, "Setup code copied. Paste it into the other controller's Remote Access settings.", Text); };
-        var paste = Button("Paste Setup Code", 340, 420, 145, Color.FromArgb(255, 217, 188));
+        var paste = Button("Paste Setup Code", 340, 425, 155, Color.FromArgb(255, 217, 188));
         paste.Click += (_, _) => PasteSetupCode();
-        var save = Button("Save and Restart", 495, 420, 130, Color.FromArgb(117, 68, 154));
+        var save = Button("Save and Close", 505, 425, 190, Color.FromArgb(117, 68, 154));
         save.ForeColor = Color.White;
         save.Click += (_, _) => SaveAndClose();
         Controls.AddRange([title, note, _enabled, _remote, view, test, copy, paste, save]);
@@ -279,7 +279,7 @@ internal sealed class RemoteAccessSettingsDialog : Form
     {
         Controls.Add(new Label { Text = label, Bounds = new Rectangle(25, y, 600, 24), Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) });
         box.Text = value;
-        box.Bounds = new Rectangle(25, y + 25, 460, 30);
+        box.Bounds = new Rectangle(25, y + 25, 525, 30);
         Controls.Add(box);
     }
 
