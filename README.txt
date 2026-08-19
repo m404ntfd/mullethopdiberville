@@ -34,7 +34,7 @@ QUICK INSTALL
 
 1. Open https://github.com/m404ntfd/mullethopdiberville/releases/latest.
 2. Download MulletHop.WaiverKiosk-Setup.exe.
-3. Exit an older copy of the kiosk with Ctrl + Alt + Shift + F12.
+3. Exit an older copy of the kiosk with Ctrl + Alt + M.
 4. Run the downloaded Setup file. This first Velopack installation is required
    once; later versions install automatically.
 5. The kiosk opens after installation. Existing staff passwords, settings, and
@@ -53,7 +53,7 @@ The Velopack-installed kiosk checks its public GitHub Releases feed whenever the
 program starts. When a newer release is available, the kiosk downloads it,
 installs it, and restarts automatically before opening for guests.
 
-Staff can also press Ctrl + Alt + Shift + F12, open Staff Settings, and select
+Staff can also press Ctrl + Alt + M, open Staff Settings, and select
 "Check for Updates." Update failures are written to the normal kiosk log
 and do not prevent the waiver from opening.
 
@@ -87,7 +87,7 @@ https://github.com/m404ntfd/mullethopdiberville/releases/latest
 Install it on the office PC, then use the address and pairing key displayed in
 its setup panel. View Key temporarily reveals the complete key, while Copy Key
 places the complete key on the Windows clipboard as pasteable text. On each
-kiosk, press Ctrl + Alt + Shift + F12, open Staff
+kiosk, press Ctrl + Alt + M, open Staff
 Settings, and select Remote Control Setup. Give each station a unique name,
 paste the controller address and key, test the connection, and save.
 
@@ -109,7 +109,7 @@ STAFF SETTINGS AND EXIT
 
 Press all four keys together:
 
-Ctrl + Alt + Shift + F12
+Ctrl + Alt + M
 
 Enter the staff password, then select "Open Staff Settings." The menu provides:
 
@@ -145,7 +145,7 @@ Appearance, Waiver Station, Business Hours, and Ads & Staff Tools pages.
   screensaver begins. The default is 30 minutes; selecting 0 disables the
   pre-opening screensaver.
 * Start an immediate temporary blackout. The display ignores ordinary keyboard,
-  mouse, and touch input until staff use Ctrl + Alt + Shift + F12, enter the
+  mouse, and touch input until staff use Ctrl + Alt + M, enter the
   password, and select Return to Kiosk.
 * Change the staff password after verifying the current password.
 * Return to the kiosk and load a clean waiver starting page.
@@ -264,7 +264,7 @@ WHAT THE KIOSK DOES
   clears the interrupted session, and automatically loads a fresh starting page
   when the waiver website becomes available again.
 * Lets staff deliberately display a separate closed page without connection-error
-  language. Ctrl + Alt + Shift + F12 continues to open Staff Settings from both
+  language. Ctrl + Alt + M continues to open Staff Settings from both
   closed pages. The password dialog opens in the foreground with its entry field
   focused so staff can type immediately. Staff Settings also controls the
   screensaver delay, and Return to Kiosk reloads a clean waiver starting page.

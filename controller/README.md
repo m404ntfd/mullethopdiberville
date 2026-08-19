@@ -74,7 +74,7 @@ The kiosk must be version 2.1.0 or newer.
 
 1. On the controller, click Copy Address and Copy Key. Select View Key if staff
    need to read the complete key on screen.
-2. On the kiosk, press Ctrl + Alt + Shift + F12 and enter the staff password.
+2. On the kiosk, press Ctrl + Alt + M and enter the staff password.
 3. Open Staff Settings, then Remote Control Setup.
 4. Turn on remote management.
 5. Give the kiosk a clear, unique name such as Front Kiosk or Party Desk Kiosk.

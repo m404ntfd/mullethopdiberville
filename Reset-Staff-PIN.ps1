@@ -11,7 +11,7 @@ Write-Host 'Mullet Hop Waiver Kiosk - Reset Staff Password' -ForegroundColor Cya
 Write-Host ''
 
 if (Get-Process -Name 'MulletHopWaiverKiosk' -ErrorAction SilentlyContinue) {
-    throw 'Exit the kiosk first using Ctrl + Alt + Shift + F12, then run this tool again.'
+    throw 'Exit the kiosk first using Ctrl + Alt + M, then run this tool again.'
 }
 
 $answer = Read-Host 'Remove the current staff password and create a new one on the next launch? (Y/N)'
