@@ -105,11 +105,12 @@ Open All and Close All apply to every known station. Close All asks for
 confirmation. Offline stations retain the latest queued command and carry it out
 when they reconnect.
 
-The lower-right Controller Program section checks for controller updates and
-provides Manage Ads, Restart, and Close buttons. If a downloaded update is waiting, Restart
-offers to install it. Closing the controller does not change a kiosk's current
-open/closed state, but new remote commands are unavailable until the controller
-starts again.
+The lower-right Controller Program section includes the controller's own
+Auto/Light/Dark appearance selector plus Check Updates, Manage Ads, Business
+Hours, Remote Access, Restart, and Close buttons. If a downloaded update is
+waiting, Restart offers to install it. Closing the controller does not change a
+kiosk's current open/closed state, but new remote commands are unavailable until
+the controller starts again.
 
 
 MANAGE AND SYNC ADVERTISEMENTS
@@ -132,6 +133,22 @@ and use the same signed pairing-key connection as other controller requests.
 Each kiosk keeps the complete last successful catalog locally. If the manager
 PC is offline, unavailable, or moved to a different address, the kiosk continues
 using the saved JPG files and schedules until a later sync succeeds.
+
+
+MANAGE HOURS AND KIOSK APPEARANCE
+---------------------------------
+
+Select Business Hours in the Controller Program section. The Business Hours tab
+sets each day's opening and closing time, the Business Closed screen duration,
+and the pre-opening screensaver time. The Kiosk Appearance tab selects Auto,
+Light, or Dark for the kiosks and can schedule selected days and a time to switch
+Light kiosks to Dark.
+
+A scheduled Dark override ends at the next configured business opening. Auto
+then follows the kiosk's Windows setting; if Windows is still using Dark mode,
+the kiosk remains dark. Save & Publish stores one combined Hours and Appearance
+profile. Sync Selected Kiosk and Sync All Kiosks send that profile through the
+same authenticated connection used for other controller commands.
 
 
 NETWORK NOTES

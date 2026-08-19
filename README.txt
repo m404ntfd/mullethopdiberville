@@ -73,9 +73,12 @@ Controller installed on another Windows PC on the same private network. The
 controller can show each kiosk's online status, version, open/closed screen, last
 check-in, and IP address. Staff can open or close one kiosk, open or close all
 kiosks, check one kiosk for an update without installing it, or tell one kiosk to
-install an available update. The lower-right Controller Program section can
-check for controller updates, restart the controller, or close it. The controller
-also checks for its own updates automatically whenever it opens.
+install an available update. The controller can also publish Business Hours and
+Kiosk Appearance settings, including Auto/Light/Dark mode and a selected-day
+Dark-mode schedule, to one kiosk or all kiosks. The lower-right Controller
+Program section can check for controller updates, restart the controller, or
+close it. The controller also checks for its own updates automatically whenever
+it opens.
 
 Download the controller package from:
 
@@ -111,13 +114,18 @@ Ctrl + Alt + Shift + F12
 Enter the staff password, then select "Open Staff Settings." The menu provides:
 
 Settings use a left-side navigation rail with Connection & Updates, Date & Time,
-Waiver Station, Business Hours, and Ads & Staff Tools pages.
+Appearance, Waiver Station, Business Hours, and Ads & Staff Tools pages.
 
 * Exit Kiosk.
 * Check whether the computer can reach the live waiver website.
 * Check GitHub for a newer kiosk version and install it immediately.
 * Preview the waiver using a selected browser date and time.
 * Return a date/time preview to the live date and time.
+* Choose Auto, Light, or Dark kiosk appearance. Auto follows the Windows app
+  theme, while Light and Dark override Windows.
+* Schedule Dark mode for selected days and a selected time. When the underlying
+  appearance is Light, the kiosk remains dark overnight and returns to Light or
+  Auto at the next configured business opening.
 * Add, edit, enable, disable, or delete scheduled JPG advertisements.
 * View kiosk-manager advertisement sync status and progress, see the last
   successful sync time, or start a manual sync.

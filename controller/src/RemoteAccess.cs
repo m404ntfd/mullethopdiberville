@@ -286,6 +286,7 @@ internal sealed class RemoteAccessSettingsDialog : Form
         save.ForeColor = Color.White;
         save.Click += (_, _) => SaveAndClose();
         Controls.AddRange([title, note, _enabled, _remote, view, test, copy, paste, save]);
+        ControllerTheme.Apply(this);
     }
 
     private void AddField(string label, TextBox box, int y, string value)

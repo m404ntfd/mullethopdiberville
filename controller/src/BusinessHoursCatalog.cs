@@ -1,5 +1,12 @@
 namespace MulletHopKioskController;
 
+internal enum ControllerKioskThemeMode
+{
+    Auto,
+    Light,
+    Dark
+}
+
 internal sealed class ControllerBusinessDayHours
 {
     public DayOfWeek Day { get; set; }
@@ -18,6 +25,10 @@ internal sealed class ControllerBusinessHours
     public bool Enabled { get; set; }
     public int ClosedMessageMinutes { get; set; } = 5;
     public int PreOpeningScreensaverMinutes { get; set; } = 30;
+    public ControllerKioskThemeMode ThemeMode { get; set; } = ControllerKioskThemeMode.Auto;
+    public bool ScheduledDarkEnabled { get; set; }
+    public DayOfWeek[] ScheduledDarkDays { get; set; } = Enum.GetValues<DayOfWeek>();
+    public TimeSpan ScheduledDarkTime { get; set; } = TimeSpan.FromHours(18);
     public List<ControllerBusinessDayHours> Days { get; set; } = CreateDefaultDays();
 
     public static DayOfWeek[] OrderedDays { get; } =
@@ -34,6 +45,10 @@ internal sealed class ControllerBusinessHours
         Enabled = Enabled,
         ClosedMessageMinutes = ClosedMessageMinutes,
         PreOpeningScreensaverMinutes = PreOpeningScreensaverMinutes,
+        ThemeMode = ThemeMode,
+        ScheduledDarkEnabled = ScheduledDarkEnabled,
+        ScheduledDarkDays = ScheduledDarkDays.ToArray(),
+        ScheduledDarkTime = ScheduledDarkTime,
         Days = Days.Select(day => day.Clone()).ToList()
     };
 
@@ -56,6 +71,13 @@ internal sealed class ControllerBusinessHours
         }
         ClosedMessageMinutes = Math.Clamp(ClosedMessageMinutes, 1, 240);
         PreOpeningScreensaverMinutes = Math.Clamp(PreOpeningScreensaverMinutes, 0, 240);
+        if (!Enum.IsDefined(ThemeMode)) ThemeMode = ControllerKioskThemeMode.Auto;
+        ScheduledDarkDays ??= [];
+        ScheduledDarkDays = ScheduledDarkDays
+            .Where(day => (int)day is >= 0 and <= 6)
+            .Distinct()
+            .ToArray();
+        ScheduledDarkTime = NormalizeTime(ScheduledDarkTime);
     }
 
     private static TimeSpan NormalizeTime(TimeSpan value)
@@ -73,6 +95,11 @@ internal sealed class BusinessHoursSyncPackage
     public bool Enabled { get; set; }
     public int ClosedMessageMinutes { get; set; }
     public int PreOpeningScreensaverMinutes { get; set; }
+    public bool IncludesAppearanceSettings { get; set; }
+    public int ThemeMode { get; set; }
+    public bool ScheduledDarkEnabled { get; set; }
+    public int[] ScheduledDarkDays { get; set; } = [];
+    public TimeSpan ScheduledDarkTime { get; set; }
     public List<BusinessHoursSyncItem> Days { get; set; } = [];
 }
 
@@ -96,34 +123,53 @@ internal sealed class ControllerBusinessHoursDialog : Form
     private readonly CheckBox _enabled = new();
     private readonly NumericUpDown _closedMinutes = new();
     private readonly NumericUpDown _preOpeningMinutes = new();
+    private readonly ComboBox _kioskThemeMode = new();
+    private readonly CheckBox _scheduledDarkEnabled = new();
+    private readonly DateTimePicker _scheduledDarkTime = new();
     private readonly Label _status = new();
     private readonly ProgressBar _progress = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 1000 };
     private readonly Dictionary<DayOfWeek, (CheckBox Open, DateTimePicker Starts, DateTimePicker Ends)> _days = [];
+    private readonly Dictionary<DayOfWeek, CheckBox> _scheduledDarkDays = [];
 
     public ControllerBusinessHoursDialog(ControllerState state, string? selectedStationId)
     {
         _state = state;
         _selectedStationId = selectedStationId;
-        Text = "Business Hours";
+        Text = "Business Hours and Kiosk Appearance";
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(650, 670);
-        MinimumSize = new Size(666, 709);
+        ClientSize = new Size(650, 700);
+        MinimumSize = new Size(666, 739);
         MaximizeBox = false;
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(244, 248, 251);
 
         var profile = state.BusinessHoursSnapshot();
+        var tabs = new TabControl
+        {
+            Bounds = new Rectangle(14, 12, 622, 505),
+            Font = new Font("Segoe UI", 10, FontStyle.Bold)
+        };
+        var hoursPage = new TabPage("Business Hours")
+        {
+            BackColor = Color.FromArgb(244, 248, 251), Padding = new Padding(0)
+        };
+        var appearancePage = new TabPage("Kiosk Appearance")
+        {
+            BackColor = Color.FromArgb(244, 248, 251), Padding = new Padding(0)
+        };
+        tabs.TabPages.AddRange([hoursPage, appearancePage]);
+
         _enabled.Text = "Use automatic business hours";
         _enabled.Checked = profile.Enabled;
         _enabled.AutoSize = true;
         _enabled.Font = new Font("Segoe UI", 11, FontStyle.Bold);
         _enabled.ForeColor = Color.FromArgb(117, 68, 154);
-        _enabled.Location = new Point(24, 20);
+        _enabled.Location = new Point(14, 12);
 
         var weekly = new GroupBox
         {
-            Text = "Weekly Hours", Bounds = new Rectangle(20, 58, 610, 278),
+            Text = "Weekly Hours", Bounds = new Rectangle(10, 48, 590, 278),
             Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(8, 119, 189)
         };
         weekly.Controls.AddRange([
@@ -145,7 +191,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
 
         var display = new GroupBox
         {
-            Text = "Closed Display and Pre-Opening", Bounds = new Rectangle(20, 346, 610, 124),
+            Text = "Closed Display and Pre-Opening", Bounds = new Rectangle(10, 336, 590, 124),
             Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(117, 68, 154)
         };
         _closedMinutes.SetBounds(250, 30, 72, 30);
@@ -159,24 +205,95 @@ internal sealed class ControllerBusinessHoursDialog : Form
             LabelAt("minutes before opening (0 = off)", 334, 74, 260)
         ]);
 
-        _status.SetBounds(24, 482, 602, 50);
+        hoursPage.Controls.AddRange([_enabled, weekly, display]);
+
+        var themeGroup = new GroupBox
+        {
+            Text = "Kiosk Theme", Bounds = new Rectangle(10, 18, 590, 132),
+            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(117, 68, 154)
+        };
+        themeGroup.Controls.Add(LabelAt(
+            "Auto follows Windows on each kiosk. Light and Dark override Windows.", 18, 28, 545));
+        themeGroup.Controls.Add(LabelAt("Theme mode:", 18, 76, 125, true));
+        _kioskThemeMode.DropDownStyle = ComboBoxStyle.DropDownList;
+        _kioskThemeMode.Items.AddRange(["Auto (Windows)", "Light", "Dark"]);
+        _kioskThemeMode.SelectedIndex = profile.ThemeMode switch
+        {
+            ControllerKioskThemeMode.Light => 1,
+            ControllerKioskThemeMode.Dark => 2,
+            _ => 0
+        };
+        _kioskThemeMode.Bounds = new Rectangle(150, 74, 210, 30);
+        themeGroup.Controls.Add(_kioskThemeMode);
+
+        var scheduleGroup = new GroupBox
+        {
+            Text = "Scheduled Dark Mode", Bounds = new Rectangle(10, 165, 590, 285),
+            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(8, 119, 189)
+        };
+        _scheduledDarkEnabled.Text = "Switch Light kiosks to Dark on a schedule";
+        _scheduledDarkEnabled.Checked = profile.ScheduledDarkEnabled;
+        _scheduledDarkEnabled.AutoSize = true;
+        _scheduledDarkEnabled.Location = new Point(18, 29);
+        _scheduledDarkEnabled.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _scheduledDarkEnabled.CheckedChanged += (_, _) => UpdateAppearanceEnabledState();
+        var scheduleNote = LabelAt(
+            "The scheduled override ends at the next configured business opening. Auto stays Dark if Windows is still using Dark mode.",
+            18, 58, 545);
+        scheduleNote.Height = 48;
+        scheduleGroup.Controls.AddRange([_scheduledDarkEnabled, scheduleNote, LabelAt("Days:", 18, 113, 60, true)]);
+        var dayChoices = new[]
+        {
+            (DayOfWeek.Monday, "Mon"), (DayOfWeek.Tuesday, "Tue"),
+            (DayOfWeek.Wednesday, "Wed"), (DayOfWeek.Thursday, "Thu"),
+            (DayOfWeek.Friday, "Fri"), (DayOfWeek.Saturday, "Sat"),
+            (DayOfWeek.Sunday, "Sun")
+        };
+        for (var index = 0; index < dayChoices.Length; index++)
+        {
+            var check = new CheckBox
+            {
+                Text = dayChoices[index].Item2,
+                Checked = profile.ScheduledDarkDays.Contains(dayChoices[index].Item1),
+                AutoSize = false,
+                Bounds = new Rectangle(76 + index * 70, 110, 66, 29)
+            };
+            _scheduledDarkDays[dayChoices[index].Item1] = check;
+            scheduleGroup.Controls.Add(check);
+        }
+        scheduleGroup.Controls.Add(LabelAt("Switch to Dark at:", 18, 160, 155, true));
+        _scheduledDarkTime.Format = DateTimePickerFormat.Custom;
+        _scheduledDarkTime.CustomFormat = "h:mm tt";
+        _scheduledDarkTime.ShowUpDown = true;
+        _scheduledDarkTime.Value = DateTime.Today + profile.ScheduledDarkTime;
+        _scheduledDarkTime.Bounds = new Rectangle(180, 159, 145, 30);
+        scheduleGroup.Controls.Add(_scheduledDarkTime);
+        var resultNote = LabelAt(
+            "These settings are published and synced with the Business Hours profile.",
+            18, 211, 545, true);
+        resultNote.Height = 42;
+        scheduleGroup.Controls.Add(resultNote);
+        appearancePage.Controls.AddRange([themeGroup, scheduleGroup]);
+        UpdateAppearanceEnabledState();
+
+        _status.SetBounds(24, 526, 602, 44);
         _status.ForeColor = Color.FromArgb(52, 65, 76);
         _status.Text = DescribeStatus();
-        _progress.SetBounds(24, 536, 602, 16);
+        _progress.SetBounds(24, 574, 602, 16);
         _progress.Maximum = 100;
         _progress.Value = SyncPercent();
 
-        var save = ButtonAt("Save && Publish", 24, 570, 180, Color.FromArgb(118, 196, 66));
-        var selected = ButtonAt("Sync Selected Kiosk", 214, 570, 195, Color.FromArgb(105, 210, 236));
-        var all = ButtonAt("Sync All Kiosks", 419, 570, 207, Color.FromArgb(117, 68, 154), Color.White);
-        var close = ButtonAt("Close", 446, 620, 180, Color.FromArgb(83, 97, 109), Color.White);
+        var save = ButtonAt("Save && Publish", 24, 600, 180, Color.FromArgb(118, 196, 66));
+        var selected = ButtonAt("Sync Selected Kiosk", 214, 600, 195, Color.FromArgb(105, 210, 236));
+        var all = ButtonAt("Sync All Kiosks", 419, 600, 207, Color.FromArgb(117, 68, 154), Color.White);
+        var close = ButtonAt("Close", 446, 650, 180, Color.FromArgb(83, 97, 109), Color.White);
         selected.Enabled = !string.IsNullOrWhiteSpace(selectedStationId);
         save.Click += (_, _) => SaveAndPublish();
         selected.Click += (_, _) => QueueSyncSelected();
         all.Click += (_, _) => QueueSyncAll();
         close.Click += (_, _) => Close();
         _enabled.CheckedChanged += (_, _) => UpdateEnabledState();
-        Controls.AddRange([_enabled, weekly, display, _status, _progress, save, selected, all, close]);
+        Controls.AddRange([tabs, _status, _progress, save, selected, all, close]);
         UpdateEnabledState();
         _refreshTimer.Tick += (_, _) =>
         {
@@ -185,6 +302,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
         };
         Shown += (_, _) => _refreshTimer.Start();
         FormClosed += (_, _) => _refreshTimer.Stop();
+        ControllerTheme.Apply(this);
     }
 
     private void SaveAndPublish()
@@ -193,16 +311,36 @@ internal sealed class ControllerBusinessHoursDialog : Form
         if (profile is null) return;
         _state.SaveBusinessHours(profile);
         _state.QueueCommandForAll(CommandTypes.SyncBusinessHours);
-        RefreshStatus("Business Hours published; all kiosks will sync on their next check-in.");
+        RefreshStatus("Business Hours and kiosk appearance published; all kiosks will sync on their next check-in.");
     }
 
     private ControllerBusinessHours? ReadProfile()
     {
+        var scheduledDays = _scheduledDarkDays
+            .Where(pair => pair.Value.Checked)
+            .Select(pair => pair.Key)
+            .ToArray();
+        if (_scheduledDarkEnabled.Checked && scheduledDays.Length == 0)
+        {
+            MessageBox.Show(this, "Select at least one day for scheduled Dark mode.",
+                "Kiosk Appearance", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return null;
+        }
+
         var profile = new ControllerBusinessHours
         {
             Enabled = _enabled.Checked,
             ClosedMessageMinutes = (int)_closedMinutes.Value,
             PreOpeningScreensaverMinutes = (int)_preOpeningMinutes.Value,
+            ThemeMode = _kioskThemeMode.SelectedIndex switch
+            {
+                1 => ControllerKioskThemeMode.Light,
+                2 => ControllerKioskThemeMode.Dark,
+                _ => ControllerKioskThemeMode.Auto
+            },
+            ScheduledDarkEnabled = _scheduledDarkEnabled.Checked,
+            ScheduledDarkDays = scheduledDays,
+            ScheduledDarkTime = _scheduledDarkTime.Value.TimeOfDay,
             Days = []
         };
         foreach (var day in ControllerBusinessHours.OrderedDays)
@@ -227,13 +365,13 @@ internal sealed class ControllerBusinessHoursDialog : Form
     private void QueueSyncSelected()
     {
         if (_selectedStationId is not null && _state.QueueCommand(_selectedStationId, CommandTypes.SyncBusinessHours))
-            RefreshStatus("Business Hours sync queued for the selected kiosk.");
+            RefreshStatus("Hours and appearance sync queued for the selected kiosk.");
     }
 
     private void QueueSyncAll()
     {
         var count = _state.QueueCommandForAll(CommandTypes.SyncBusinessHours);
-        RefreshStatus($"Business Hours sync queued for {count} kiosk(s).");
+        RefreshStatus($"Hours and appearance sync queued for {count} kiosk(s).");
     }
 
     private void RefreshStatus(string message)
@@ -245,7 +383,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
     private string DescribeStatus()
     {
         var revision = _state.BusinessHoursRevision;
-        if (string.IsNullOrWhiteSpace(revision)) return "No Business Hours profile has been published yet.";
+        if (string.IsNullOrWhiteSpace(revision)) return "No Hours and Appearance profile has been published yet.";
         var kiosks = _state.Snapshot();
         var synced = kiosks.Count(kiosk => kiosk.BusinessHoursSyncRevision == revision);
         var updated = _state.BusinessHoursUpdatedUtc?.ToLocalTime().ToString("MMM d, yyyy h:mm tt") ?? "unknown";
@@ -269,6 +407,13 @@ internal sealed class ControllerBusinessHoursDialog : Form
         }
         _closedMinutes.Enabled = _enabled.Checked;
         _preOpeningMinutes.Enabled = _enabled.Checked;
+    }
+
+    private void UpdateAppearanceEnabledState()
+    {
+        var enabled = _scheduledDarkEnabled.Checked;
+        foreach (var check in _scheduledDarkDays.Values) check.Enabled = enabled;
+        _scheduledDarkTime.Enabled = enabled;
     }
 
     private static Label LabelAt(string text, int x, int y, int width, bool bold = false) => new()

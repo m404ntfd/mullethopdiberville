@@ -271,6 +271,7 @@ internal sealed class ControllerAdvertisementManagerDialog : Form
         };
         RefreshList();
         UpdatePublishStatus();
+        ControllerTheme.Apply(this);
     }
 
     private static Button CreateButton(string text, int x, int width, Color color) => new()
@@ -582,6 +583,7 @@ internal sealed class ControllerAdvertisementEditorDialog : Form
         Controls.AddRange([heading, imageGroup, scheduleGroup, saveButton, cancelButton]);
         FormClosed += (_, _) => _preview.Image?.Dispose();
         LoadWorkingValues();
+        ControllerTheme.Apply(this);
     }
 
     private static Label MakeLabel(string text, int x, int y) => new()

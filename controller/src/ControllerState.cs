@@ -172,7 +172,7 @@ internal sealed class ControllerState
             _data.BusinessHoursRevision = Guid.NewGuid().ToString("N");
             _data.BusinessHoursUpdatedUtc = DateTime.UtcNow;
             SaveLocked();
-            ControllerLog.Write($"Published Business Hours profile {_data.BusinessHoursRevision}.");
+            ControllerLog.Write($"Published Business Hours and kiosk appearance profile {_data.BusinessHoursRevision}.");
         }
     }
 
@@ -187,6 +187,12 @@ internal sealed class ControllerState
                 Enabled = _data.BusinessHours.Enabled,
                 ClosedMessageMinutes = _data.BusinessHours.ClosedMessageMinutes,
                 PreOpeningScreensaverMinutes = _data.BusinessHours.PreOpeningScreensaverMinutes,
+                IncludesAppearanceSettings = true,
+                ThemeMode = (int)_data.BusinessHours.ThemeMode,
+                ScheduledDarkEnabled = _data.BusinessHours.ScheduledDarkEnabled,
+                ScheduledDarkDays = _data.BusinessHours.ScheduledDarkDays
+                    .Select(day => (int)day).ToArray(),
+                ScheduledDarkTime = _data.BusinessHours.ScheduledDarkTime,
                 Days = _data.BusinessHours.Days.Select(day => new BusinessHoursSyncItem
                 {
                     Day = (int)day.Day, IsOpen = day.IsOpen,
@@ -470,6 +476,20 @@ internal sealed class ControllerState
                 Enabled = package.Enabled,
                 ClosedMessageMinutes = package.ClosedMessageMinutes,
                 PreOpeningScreensaverMinutes = package.PreOpeningScreensaverMinutes,
+                ThemeMode = package.IncludesAppearanceSettings && package.ThemeMode is >= 0 and <= 2
+                    ? (ControllerKioskThemeMode)package.ThemeMode
+                    : _data.BusinessHours.ThemeMode,
+                ScheduledDarkEnabled = package.IncludesAppearanceSettings
+                    ? package.ScheduledDarkEnabled
+                    : _data.BusinessHours.ScheduledDarkEnabled,
+                ScheduledDarkDays = package.IncludesAppearanceSettings
+                    ? (package.ScheduledDarkDays ?? [])
+                    .Where(day => day is >= 0 and <= 6)
+                    .Select(day => (DayOfWeek)day).Distinct().ToArray()
+                    : _data.BusinessHours.ScheduledDarkDays.ToArray(),
+                ScheduledDarkTime = package.IncludesAppearanceSettings
+                    ? package.ScheduledDarkTime
+                    : _data.BusinessHours.ScheduledDarkTime,
                 Days = package.Days.Select(item => new ControllerBusinessDayHours
                 {
                     Day = item.Day is >= 0 and <= 6 ? (DayOfWeek)item.Day : DayOfWeek.Monday,
@@ -481,7 +501,7 @@ internal sealed class ControllerState
             _data.BusinessHoursRevision = package.Revision;
             _data.BusinessHoursUpdatedUtc = updatedUtc;
             SaveLocked();
-            ControllerLog.Write($"Applied cloud Business Hours profile {package.Revision}.");
+            ControllerLog.Write($"Applied cloud Business Hours and kiosk appearance profile {package.Revision}.");
         }
     }
 

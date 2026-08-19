@@ -343,14 +343,17 @@ internal sealed partial class KioskForm : Form
     private DateTime? _previewDateTime;
     private DateTime? _previewStartedUtc;
     private string? _dateTimePreviewScriptId;
+    private string? _waiverPageScriptId;
     private DateTime? _businessClosedPeriodStartedUtc;
     private string? _businessClosedPeriodKey;
     private long? _dismissedPreOpeningTicks;
     private DateTime? _preOpeningScreensaverOpeningTime;
+    private bool _lastDarkTheme;
 
     public KioskForm(KioskSettings settings)
     {
         _settings = settings;
+        _lastDarkTheme = KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
 
         Text = "Mullet Hop Waiver Kiosk";
         var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -362,10 +365,10 @@ internal sealed partial class KioskForm : Form
         WindowState = FormWindowState.Maximized;
         TopMost = true;
         KeyPreview = true;
-        BackColor = Color.White;
+        BackColor = KioskTheme.WindowBackground(_lastDarkTheme);
 
         _webView.Dock = DockStyle.Fill;
-        _webView.DefaultBackgroundColor = Color.White;
+        _webView.DefaultBackgroundColor = KioskTheme.WindowBackground(_lastDarkTheme);
 
         _banner.Dock = DockStyle.Top;
         _banner.Height = 48;
@@ -399,7 +402,11 @@ internal sealed partial class KioskForm : Form
             await ResetForNextGuestAsync("completion");
         };
         _retryTimer.Tick += RetryTimer_Tick;
-        _businessHoursTimer.Tick += async (_, _) => await ApplyBusinessHoursStateAsync();
+        _businessHoursTimer.Tick += async (_, _) =>
+        {
+            await ApplyKioskThemeIfChangedAsync();
+            await ApplyBusinessHoursStateAsync();
+        };
         NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
         InitializeRemoteManagement();
 
@@ -481,17 +488,7 @@ internal sealed partial class KioskForm : Form
 
             await _webView.EnsureCoreWebView2Async(environment);
             ConfigureBrowser();
-            var waiverPageScript = ActivityAndCompletionScript.Replace(
-                "__MULLET_HOP_LOGO_DATA_URL__",
-                GetApplicationLogoDataUrl(),
-                StringComparison.Ordinal).Replace(
-                "__MULLET_HOP_PROVIDER_LOGO_DATA_URL__",
-                GetProviderLogoDataUrl(),
-                StringComparison.Ordinal).Replace(
-                "__MULLET_HOP_BACKGROUND_URL__",
-                $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}",
-                StringComparison.Ordinal);
-            await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(waiverPageScript);
+            await InstallWaiverPageScriptAsync();
 
             _browserReady = true;
             _lastActivityUtc = DateTime.UtcNow;
@@ -507,6 +504,60 @@ internal sealed partial class KioskForm : Form
             throw new InvalidOperationException(
                 "Microsoft Edge WebView2 Runtime is missing. Install the Evergreen WebView2 Runtime, then start the kiosk again.");
         }
+    }
+
+    private async Task InstallWaiverPageScriptAsync()
+    {
+        if (_waiverPageScriptId is not null)
+        {
+            _webView.CoreWebView2.RemoveScriptToExecuteOnDocumentCreated(_waiverPageScriptId);
+            _waiverPageScriptId = null;
+        }
+
+        var waiverPageScript = ActivityAndCompletionScript.Replace(
+                "__MULLET_HOP_LOGO_DATA_URL__",
+                GetApplicationLogoDataUrl(),
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_PROVIDER_LOGO_DATA_URL__",
+                GetProviderLogoDataUrl(),
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_BACKGROUND_URL__",
+                $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}",
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_DARK_MODE__",
+                _lastDarkTheme ? "true" : "false",
+                StringComparison.Ordinal);
+        _waiverPageScriptId = await _webView.CoreWebView2
+            .AddScriptToExecuteOnDocumentCreatedAsync(waiverPageScript);
+    }
+
+    private async Task ApplyKioskThemeIfChangedAsync(bool force = false)
+    {
+        var status = KioskTheme.Evaluate(_settings, DateTime.Now);
+        if (!force && (_promptOpen || status.IsDark == _lastDarkTheme)) return;
+
+        var changed = status.IsDark != _lastDarkTheme;
+        _lastDarkTheme = status.IsDark;
+        BackColor = KioskTheme.WindowBackground(_lastDarkTheme);
+        _webView.DefaultBackgroundColor = KioskTheme.WindowBackground(_lastDarkTheme);
+        if (!_browserReady) return;
+
+        await InstallWaiverPageScriptAsync();
+        try
+        {
+            var dark = _lastDarkTheme ? "true" : "false";
+            await _webView.CoreWebView2.ExecuteScriptAsync(
+                "document.body?.classList.toggle('dark-theme', " + dark + ");" +
+                "document.body?.classList.toggle('mullet-hop-dark-theme', " + dark + ");");
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Live kiosk theme update error: " + ex.Message);
+        }
+
+        if (changed)
+            KioskLog.Write("Kiosk appearance changed to " +
+                           (_lastDarkTheme ? "Dark" : "Light") + ". " + status.Description);
     }
 
     private void ConfigureBrowser()
@@ -1411,7 +1462,7 @@ internal sealed partial class KioskForm : Form
             """;
     }
 
-    private static string BuildBusinessClosedHtml(
+    private string BuildBusinessClosedHtml(
         DateTime? nextOpening,
         int? previewSeconds = null)
     {
@@ -1432,9 +1483,11 @@ internal sealed partial class KioskForm : Form
                 "<strong id=\"business-preview-countdown\">" + previewSeconds.Value +
                 "</strong> seconds.</div>"
             : string.Empty;
-        var previewBodyClass = previewSeconds.HasValue
-            ? "business-preview-mode"
-            : string.Empty;
+        var previewBodyClass = string.Join(' ', new[]
+        {
+            previewSeconds.HasValue ? "business-preview-mode" : string.Empty,
+            _lastDarkTheme ? "dark-theme" : string.Empty
+        }.Where(value => value.Length > 0));
         var previewScript = previewSeconds.HasValue
             ? $$"""
               <script>
@@ -1575,6 +1628,28 @@ internal sealed partial class KioskForm : Form
                   line-height: 1.3;
                 }
                 .opening strong { color: #397819; }
+                body.dark-theme {
+                  color: #edf3f7;
+                  background-color: #111820;
+                  background-image:
+                    linear-gradient(rgba(10,16,23,.78), rgba(10,16,23,.78)),
+                    url('{{backgroundUrl}}');
+                }
+                body.dark-theme .card {
+                  background: #1b242e;
+                  border-color: #d6e1e8;
+                  box-shadow: 0 22px 55px rgba(0,0,0,.5);
+                }
+                body.dark-theme h1 { color: #d3a4ee; }
+                body.dark-theme .message {
+                  color: #edf3f7;
+                  background: #273643;
+                }
+                body.dark-theme .opening {
+                  color: #edf3f7;
+                  background: #26372d;
+                }
+                body.dark-theme .opening strong { color: #9ddd83; }
                 @media (max-height: 720px) {
                   .content { padding-top: 20px; padding-bottom: 24px; }
                   .brand { min-height: 78px; }
@@ -1630,7 +1705,7 @@ internal sealed partial class KioskForm : Form
         </html>
         """;
 
-    private static string BuildStationClosedHtml(bool connectionError)
+    private string BuildStationClosedHtml(bool connectionError)
     {
         var backgroundUrl = $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}";
         var logoDataUrl = GetApplicationLogoDataUrl();
@@ -1776,6 +1851,31 @@ internal sealed partial class KioskForm : Form
                   font-weight: 700;
                 }
                 .assistance strong { color: #397819; }
+                body.dark-theme {
+                  color: #edf3f7;
+                  background-color: #111820;
+                  background-image:
+                    linear-gradient(rgba(10,16,23,.78), rgba(10,16,23,.78)),
+                    url('{{backgroundUrl}}');
+                }
+                body.dark-theme .card {
+                  background: #1b242e;
+                  border-color: #d6e1e8;
+                  box-shadow: 0 22px 55px rgba(0,0,0,.5);
+                }
+                body.dark-theme h1,
+                body.dark-theme .message-label { color: #d3a4ee; }
+                body.dark-theme .connection-message,
+                body.dark-theme .closed-message {
+                  color: #edf3f7;
+                  background: #273643;
+                }
+                body.dark-theme .message small { color: #b1bec9; }
+                body.dark-theme .assistance {
+                  color: #edf3f7;
+                  background: #26372d;
+                }
+                body.dark-theme .assistance strong { color: #9ddd83; }
                 @media (max-height: 720px) {
                   .content { padding-top: 20px; padding-bottom: 24px; }
                   .brand { min-height: 80px; }
@@ -1787,7 +1887,7 @@ internal sealed partial class KioskForm : Form
                 }
               </style>
             </head>
-            <body>
+            <body class="{{(_lastDarkTheme ? "dark-theme" : string.Empty)}}">
               <main class="card" aria-labelledby="closed-heading">
                 <div class="stripe"></div>
                 <div class="content">
@@ -1909,7 +2009,8 @@ internal sealed partial class KioskForm : Form
                 </aside>
                 """
             : string.Empty;
-        var bodyClass = hasAdvertisements ? "with-ads" : "no-ads";
+        var bodyClass = (hasAdvertisements ? "with-ads" : "no-ads") +
+                        (_lastDarkTheme ? " dark-theme" : string.Empty);
 
         return $$"""
             <!doctype html>
@@ -2119,6 +2220,33 @@ internal sealed partial class KioskForm : Form
                 .with-ads .content { padding-left: clamp(26px, 3.5vw, 56px); padding-right: clamp(26px, 3.5vw, 56px); }
                 .with-ads h1 { font-size: clamp(42px, 4.4vw, 68px); }
                 .with-ads .logo { width: min(350px, 64vw); }
+                body.dark-theme {
+                  color: #edf3f7;
+                  background-color: #111820;
+                  background-image:
+                    linear-gradient(rgba(10,16,23,.78), rgba(10,16,23,.78)),
+                    url('{{backgroundUrl}}');
+                }
+                body.dark-theme .card,
+                body.dark-theme .ad-panel {
+                  color: #edf3f7;
+                  background: #1b242e;
+                  border-color: #d6e1e8;
+                  box-shadow: 0 22px 55px rgba(0,0,0,.5);
+                }
+                body.dark-theme h1,
+                body.dark-theme .ad-heading h2,
+                body.dark-theme .countdown-number { color: #d3a4ee; }
+                body.dark-theme .complete { color: #5bc6f0; }
+                body.dark-theme .next-step,
+                body.dark-theme .ad-kicker {
+                  color: #edf3f7;
+                  background: #3a3025;
+                }
+                body.dark-theme .next-step strong,
+                body.dark-theme .ad-kicker { color: #ffb36c; }
+                body.dark-theme .countdown { color: #b1bec9; }
+                body.dark-theme .ad-stage { background: #111820; }
                 @media (max-height: 700px) {
                   .content { padding-top: 18px; padding-bottom: 18px; }
                   .logo-wrap { min-height: 80px; }
@@ -2204,7 +2332,7 @@ internal sealed partial class KioskForm : Form
 
         try
         {
-            using var dialog = new PinEntryDialog();
+            using var dialog = new PinEntryDialog(_lastDarkTheme);
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 if (_settings.VerifyPin(dialog.Pin))
@@ -2216,7 +2344,9 @@ internal sealed partial class KioskForm : Form
                             _previewDateTime.HasValue ? GetEffectiveNow() : null,
                             progress => SyncAdvertisementsFromControllerAsync(progress),
                             PreviewBusinessClosedOverlayAsync);
-                        if (settingsDialog.ShowDialog(this) != DialogResult.OK)
+                        var settingsResult = settingsDialog.ShowDialog(this);
+                        await ApplyKioskThemeIfChangedAsync(force: true);
+                        if (settingsResult != DialogResult.OK)
                         {
                             await ResetForNextGuestAsync(
                                 "staff returned to kiosk", showStatus: false);
@@ -2398,6 +2528,7 @@ internal sealed partial class KioskForm : Form
           const kioskLogoSource = '__MULLET_HOP_LOGO_DATA_URL__';
           const providerLogoSource = '__MULLET_HOP_PROVIDER_LOGO_DATA_URL__';
           const kioskBackgroundSource = '__MULLET_HOP_BACKGROUND_URL__';
+          const kioskDarkMode = __MULLET_HOP_DARK_MODE__;
 
           let lastActivityMessage = 0;
           const postActivity = () => {
@@ -3111,6 +3242,57 @@ internal sealed partial class KioskForm : Form
                 font-weight: 800;
                 color: #101820;
               }
+              html:has(body.mullet-hop-dark-theme) { background: #111820; }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme {
+                color: #edf3f7 !important;
+                background-color: #111820 !important;
+                background-image:
+                  linear-gradient(rgba(10,16,23,.78), rgba(10,16,23,.78)),
+                  url('${kioskBackgroundSource}') !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme .mullet-hop-form-card,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme table.mullet-hop-form-card > tbody > tr > td,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme fieldset,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme #mullet-hop-waiver-help,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme .mullet-hop-action-card {
+                color: #edf3f7 !important;
+                background: rgba(27,36,46,.98) !important;
+                border-color: #7f94a6 !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme p,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme label,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme td,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme span,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme div {
+                color: #edf3f7 !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme h1,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme h2 {
+                color: #d3a4ee !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme h3,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme a {
+                color: #5bc6f0 !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme input:not([type='radio']):not([type='checkbox']):not([type='submit']):not([type='button']):not([type='reset']):not([type='hidden']):not([type='image']),
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme select,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme textarea {
+                color: #f5f8fa !important;
+                background: #25313d !important;
+                border-color: #5bc6f0 !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme .mullet-hop-choice-group,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme .choice,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme #mullet-hop-switch-guidance {
+                color: #edf3f7 !important;
+                background: #2b3947 !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme button,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme input[type='submit'],
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme input[type='button'],
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme input[type='reset'] {
+                color: #101820 !important;
+              }
               @media (max-width: 1100px) {
                 body.mullet-hop-waiver-themed,
                 body.mullet-hop-waiver-themed.mullet-hop-has-side-tools {
@@ -3164,6 +3346,7 @@ internal sealed partial class KioskForm : Form
             }
 
             document.body.classList.add('mullet-hop-waiver-themed');
+            document.body.classList.toggle('mullet-hop-dark-theme', kioskDarkMode);
             repairProviderLogo();
             document.querySelectorAll('canvas').forEach(installSignatureTouchBridge);
             const main = document.getElementById('divMain') ||
@@ -3474,6 +3657,10 @@ internal sealed class KioskSettings
     public int PreOpeningScreensaverMinutes { get; set; } = 30;
     public List<KioskBusinessDayHours> BusinessHours { get; set; } =
         KioskBusinessDayHours.CreateDefaults();
+    public KioskThemeMode ThemeMode { get; set; } = KioskThemeMode.Auto;
+    public bool ScheduledDarkEnabled { get; set; }
+    public DayOfWeek[] ScheduledDarkDays { get; set; } = Enum.GetValues<DayOfWeek>();
+    public TimeSpan ScheduledDarkTime { get; set; } = TimeSpan.FromHours(18);
     public bool RemoteManagementEnabled { get; set; }
     public string RemoteControllerUrl { get; set; } = string.Empty;
     public string RemotePairingKey { get; set; } = string.Empty;
@@ -3586,6 +3773,15 @@ internal sealed class KioskSettings
         CompletionUrlKeywords ??= ["success", "complete", "done", "submitted"];
         Advertisements ??= [];
         BusinessHours ??= KioskBusinessDayHours.CreateDefaults();
+        if (!Enum.IsDefined(ThemeMode)) ThemeMode = KioskThemeMode.Auto;
+        ScheduledDarkDays ??= [];
+        ScheduledDarkDays = ScheduledDarkDays
+            .Where(day => (int)day is >= 0 and <= 6)
+            .Distinct()
+            .ToArray();
+        var scheduledDarkTicks = ScheduledDarkTime.Ticks % TimeSpan.TicksPerDay;
+        if (scheduledDarkTicks < 0) scheduledDarkTicks += TimeSpan.TicksPerDay;
+        ScheduledDarkTime = TimeSpan.FromTicks(scheduledDarkTicks);
         var savedBusinessHours = BusinessHours
             .GroupBy(schedule => schedule.Day)
             .ToDictionary(group => group.Key, group => group.First());
@@ -3673,6 +3869,7 @@ internal sealed class PinSetupDialog : Form
         AcceptButton = save;
         CancelButton = cancel;
         Controls.AddRange([heading, note, pinLabel, confirmLabel, _pin, _confirm, save, cancel]);
+        KioskTheme.Apply(this, KioskTheme.WindowsUsesDarkApps());
     }
 
     private void ValidateAndClose()
@@ -3757,6 +3954,12 @@ internal sealed class StaffSettingsDialog : Form
     private readonly NumericUpDown _preOpeningScreensaverMinutes = new();
     private readonly Button _businessHoursSaveButton = new();
     private readonly Label _businessHoursStatus = new();
+    private readonly TabControl _settingsTabs = new();
+    private readonly ComboBox _themeMode = new();
+    private readonly CheckBox _scheduledDarkEnabled = new();
+    private readonly DateTimePicker _scheduledDarkTime = new();
+    private readonly Label _themeStatus = new();
+    private readonly Dictionary<DayOfWeek, CheckBox> _scheduledDarkDays = [];
     private readonly Dictionary<DayOfWeek,
         (CheckBox IsOpen, DateTimePicker Opens, DateTimePicker Closes)> _businessDayControls = [];
 
@@ -3793,22 +3996,24 @@ internal sealed class StaffSettingsDialog : Form
             TextAlign = ContentAlignment.MiddleCenter,
             Bounds = new Rectangle(25, 17, 790, 45)
         };
-        var settingsTabs = new TabControl
-        {
-            Bounds = new Rectangle(20, 76, 800, 560),
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-            Alignment = TabAlignment.Left,
-            DrawMode = TabDrawMode.OwnerDrawFixed,
-            SizeMode = TabSizeMode.Fixed,
-            ItemSize = new Size(42, 185),
-            Padding = new Point(12, 7)
-        };
+        _settingsTabs.Bounds = new Rectangle(20, 76, 800, 560);
+        _settingsTabs.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _settingsTabs.Alignment = TabAlignment.Left;
+        _settingsTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+        _settingsTabs.SizeMode = TabSizeMode.Fixed;
+        _settingsTabs.ItemSize = new Size(42, 185);
+        _settingsTabs.Padding = new Point(12, 7);
         var connectionTab = new TabPage("Connection & Updates")
         {
             BackColor = Color.White,
             Padding = new Padding(8)
         };
         var dateTimeTab = new TabPage("Date & Time")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
+        var appearanceTab = new TabPage("Appearance")
         {
             BackColor = Color.White,
             Padding = new Padding(8)
@@ -3828,26 +4033,29 @@ internal sealed class StaffSettingsDialog : Form
             BackColor = Color.White,
             Padding = new Padding(8)
         };
-        settingsTabs.TabPages.AddRange([
-            connectionTab, dateTimeTab, stationTab, businessHoursTab, staffToolsTab]);
-        settingsTabs.SelectedIndex = Math.Clamp(
-            _lastSelectedTabIndex, 0, settingsTabs.TabPages.Count - 1);
-        settingsTabs.SelectedIndexChanged += (_, _) =>
-            _lastSelectedTabIndex = settingsTabs.SelectedIndex;
-        settingsTabs.DrawItem += (_, e) =>
+        _settingsTabs.TabPages.AddRange([
+            connectionTab, dateTimeTab, appearanceTab, stationTab, businessHoursTab, staffToolsTab]);
+        _settingsTabs.SelectedIndex = Math.Clamp(
+            _lastSelectedTabIndex, 0, _settingsTabs.TabPages.Count - 1);
+        _settingsTabs.SelectedIndexChanged += (_, _) =>
+            _lastSelectedTabIndex = _settingsTabs.SelectedIndex;
+        _settingsTabs.DrawItem += (_, e) =>
         {
-            var selected = e.Index == settingsTabs.SelectedIndex;
+            var selected = e.Index == _settingsTabs.SelectedIndex;
+            var dark = KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
             using var background = new SolidBrush(selected
-                ? Color.FromArgb(238, 250, 255)
-                : Color.FromArgb(247, 247, 247));
+                ? KioskTheme.SelectedNavigation(dark)
+                : KioskTheme.Navigation(dark));
             e.Graphics.FillRectangle(background, e.Bounds);
             var textRectangle = Rectangle.Inflate(e.Bounds, -8, -4);
             TextRenderer.DrawText(
                 e.Graphics,
-                settingsTabs.TabPages[e.Index].Text,
-                settingsTabs.Font,
+                _settingsTabs.TabPages[e.Index].Text,
+                _settingsTabs.Font,
                 textRectangle,
-                selected ? Color.FromArgb(117, 68, 154) : Color.FromArgb(16, 24, 32),
+                selected
+                    ? (dark ? Color.FromArgb(205, 153, 235) : Color.FromArgb(117, 68, 154))
+                    : KioskTheme.PrimaryText(dark),
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
                 TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         };
@@ -3970,6 +4178,119 @@ internal sealed class StaffSettingsDialog : Form
         previewGroup.Controls.AddRange([
             previewNote, dateLabel, timeLabel, _datePicker, _timePicker, previewButton, liveButton]);
         dateTimeTab.Controls.AddRange([currentStatus, previewGroup]);
+
+        var themeGroup = new GroupBox
+        {
+            Text = "Kiosk Theme",
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            ForeColor = Color.FromArgb(117, 68, 154),
+            Bounds = new Rectangle(20, 20, 580, 145)
+        };
+        var themeNote = new Label
+        {
+            AutoSize = false,
+            Text = "Auto follows the Windows app theme. Choosing Light or Dark overrides Windows.",
+            Font = new Font("Segoe UI", 9.5f),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(18, 28, 540, 42)
+        };
+        var themeModeLabel = new Label
+        {
+            Text = "Theme mode:", AutoSize = false,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(18, 85, 130, 30),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        _themeMode.DropDownStyle = ComboBoxStyle.DropDownList;
+        _themeMode.Items.AddRange(["Auto (Windows)", "Light", "Dark"]);
+        _themeMode.SelectedIndex = _settings.ThemeMode switch
+        {
+            KioskThemeMode.Light => 1,
+            KioskThemeMode.Dark => 2,
+            _ => 0
+        };
+        _themeMode.Bounds = new Rectangle(155, 84, 220, 32);
+        themeGroup.Controls.AddRange([themeNote, themeModeLabel, _themeMode]);
+
+        var scheduleThemeGroup = new GroupBox
+        {
+            Text = "Scheduled Dark Mode",
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            ForeColor = Color.FromArgb(8, 119, 189),
+            Bounds = new Rectangle(20, 178, 580, 342)
+        };
+        _scheduledDarkEnabled.Text = "Use a scheduled Dark-mode override";
+        _scheduledDarkEnabled.AutoSize = true;
+        _scheduledDarkEnabled.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _scheduledDarkEnabled.Checked = _settings.ScheduledDarkEnabled;
+        _scheduledDarkEnabled.Location = new Point(18, 30);
+        _scheduledDarkEnabled.CheckedChanged += (_, _) => UpdateScheduledThemeControls();
+        var scheduleThemeNote = new Label
+        {
+            AutoSize = false,
+            Text = "On selected days, a Light kiosk switches to Dark at this time and returns to its Light or Auto setting at the next configured business opening.",
+            Font = new Font("Segoe UI", 9.2f),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(18, 62, 540, 50)
+        };
+        var daysLabel = new Label
+        {
+            Text = "Days:", AutoSize = false, Bounds = new Rectangle(18, 122, 65, 27),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+        };
+        var dayChoices = new[]
+        {
+            (DayOfWeek.Monday, "Mon"), (DayOfWeek.Tuesday, "Tue"),
+            (DayOfWeek.Wednesday, "Wed"), (DayOfWeek.Thursday, "Thu"),
+            (DayOfWeek.Friday, "Fri"), (DayOfWeek.Saturday, "Sat"),
+            (DayOfWeek.Sunday, "Sun")
+        };
+        for (var index = 0; index < dayChoices.Length; index++)
+        {
+            var check = new CheckBox
+            {
+                Text = dayChoices[index].Item2,
+                AutoSize = false,
+                Checked = _settings.ScheduledDarkDays.Contains(dayChoices[index].Item1),
+                Bounds = new Rectangle(82 + index * 67, 119, 65, 29)
+            };
+            _scheduledDarkDays[dayChoices[index].Item1] = check;
+            scheduleThemeGroup.Controls.Add(check);
+        }
+        var darkTimeLabel = new Label
+        {
+            Text = "Switch to Dark at:", AutoSize = false,
+            Bounds = new Rectangle(18, 166, 160, 31),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        _scheduledDarkTime.Format = DateTimePickerFormat.Custom;
+        _scheduledDarkTime.CustomFormat = "h:mm tt";
+        _scheduledDarkTime.ShowUpDown = true;
+        _scheduledDarkTime.Value = DateTime.Today + _settings.ScheduledDarkTime;
+        _scheduledDarkTime.Bounds = new Rectangle(185, 164, 145, 32);
+        _themeStatus.AutoSize = false;
+        _themeStatus.Text = DescribeThemeStatus();
+        _themeStatus.Bounds = new Rectangle(18, 211, 540, 55);
+        _themeStatus.ForeColor = Color.FromArgb(83, 97, 109);
+        _themeStatus.Font = new Font("Segoe UI", 9.2f, FontStyle.Bold);
+        var saveThemeButton = new Button
+        {
+            Text = "Save Appearance",
+            Bounds = new Rectangle(18, 281, 180, 40),
+            BackColor = Color.FromArgb(118, 196, 66),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+        };
+        saveThemeButton.Click += (_, _) => SaveAppearance(saveThemeButton);
+        scheduleThemeGroup.Controls.AddRange([
+            _scheduledDarkEnabled, scheduleThemeNote, daysLabel, darkTimeLabel,
+            _scheduledDarkTime, _themeStatus, saveThemeButton]);
+        appearanceTab.Controls.AddRange([themeGroup, scheduleThemeGroup]);
+        UpdateScheduledThemeControls();
 
         var exitButton = new Button
         {
@@ -4354,7 +4675,74 @@ internal sealed class StaffSettingsDialog : Form
 
         CancelButton = returnButton;
         Controls.AddRange([
-            heading, settingsTabs, exitButton, returnButton]);
+            heading, _settingsTabs, exitButton, returnButton]);
+        KioskTheme.Apply(this, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
+    }
+
+    private void UpdateScheduledThemeControls()
+    {
+        var enabled = _scheduledDarkEnabled.Checked;
+        foreach (var check in _scheduledDarkDays.Values) check.Enabled = enabled;
+        _scheduledDarkTime.Enabled = enabled;
+    }
+
+    private void SaveAppearance(Button saveButton)
+    {
+        var selectedDays = _scheduledDarkDays
+            .Where(pair => pair.Value.Checked)
+            .Select(pair => pair.Key)
+            .ToArray();
+        if (_scheduledDarkEnabled.Checked && selectedDays.Length == 0)
+        {
+            MessageBox.Show(this,
+                "Select at least one day for scheduled Dark mode.",
+                "Appearance", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var oldMode = _settings.ThemeMode;
+        var oldEnabled = _settings.ScheduledDarkEnabled;
+        var oldDays = _settings.ScheduledDarkDays;
+        var oldTime = _settings.ScheduledDarkTime;
+        try
+        {
+            _settings.ThemeMode = _themeMode.SelectedIndex switch
+            {
+                1 => KioskThemeMode.Light,
+                2 => KioskThemeMode.Dark,
+                _ => KioskThemeMode.Auto
+            };
+            _settings.ScheduledDarkEnabled = _scheduledDarkEnabled.Checked;
+            _settings.ScheduledDarkDays = selectedDays;
+            _settings.ScheduledDarkTime = _scheduledDarkTime.Value.TimeOfDay;
+            _settings.Save();
+
+            var status = KioskTheme.Evaluate(_settings, DateTime.Now);
+            _themeStatus.Text = DescribeThemeStatus();
+            KioskTheme.Apply(this, status.IsDark);
+            _settingsTabs.Invalidate();
+            saveButton.Text = "Saved";
+            KioskLog.Write("Kiosk appearance settings were updated. " + status.Description);
+        }
+        catch (Exception ex)
+        {
+            _settings.ThemeMode = oldMode;
+            _settings.ScheduledDarkEnabled = oldEnabled;
+            _settings.ScheduledDarkDays = oldDays;
+            _settings.ScheduledDarkTime = oldTime;
+            saveButton.Text = "Save Appearance";
+            KioskLog.Write("Kiosk appearance settings error: " + ex.Message);
+            MessageBox.Show(this,
+                "The appearance settings could not be saved.\n\n" + ex.Message,
+                "Appearance", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private string DescribeThemeStatus()
+    {
+        var status = KioskTheme.Evaluate(_settings, DateTime.Now);
+        return "Current kiosk appearance: " + (status.IsDark ? "DARK" : "LIGHT") +
+               Environment.NewLine + status.Description;
     }
 
     private static DateTimePicker CreateBusinessTimePicker(TimeSpan time, int x, int y)
@@ -4690,6 +5078,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
             heading, note, _enabled, stationLabel, _stationName, addressLabel, _controllerUrl,
             keyLabel, _pairingKey, showKey, _testButton, _testResult, securityNote, save, cancel]);
         UpdateEnabledState();
+        KioskTheme.Apply(this, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
     }
 
     private static Label MakeLabel(string text, int x, int y) => new()
@@ -4886,6 +5275,7 @@ internal sealed class StaffPasswordChangeDialog : Form
         Controls.AddRange([
             heading, requirement, currentGroup, newGroup, _changeButton, cancelButton]);
         Shown += (_, _) => _currentPassword.Focus();
+        KioskTheme.Apply(this, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
     }
 
     private static TextBox CreatePasswordField()
@@ -5263,6 +5653,7 @@ internal sealed class AdvertisementManagerDialog : Form
             heading, note, _list, _preview, _details, syncGroup,
             addButton, editButton, toggleButton, deleteButton, closeButton]);
         FormClosed += (_, _) => _preview.Image?.Dispose();
+        KioskTheme.Apply(this, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
         RefreshList();
     }
 
@@ -5384,7 +5775,8 @@ internal sealed class AdvertisementManagerDialog : Form
 
     private void AddAdvertisement()
     {
-        using var editor = new AdvertisementEditorDialog();
+        using var editor = new AdvertisementEditorDialog(
+            dark: KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
         if (editor.ShowDialog(this) != DialogResult.OK || editor.Advertisement is null) return;
         _settings.Advertisements.Add(editor.Advertisement);
         if (SaveSettings()) RefreshList(editor.Advertisement.Id);
@@ -5395,7 +5787,8 @@ internal sealed class AdvertisementManagerDialog : Form
         var selected = SelectedAdvertisement;
         if (selected is null) return;
         var oldImage = selected.ImageFileName;
-        using var editor = new AdvertisementEditorDialog(selected);
+        using var editor = new AdvertisementEditorDialog(
+            selected, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
         if (editor.ShowDialog(this) != DialogResult.OK || editor.Advertisement is null) return;
         var index = _settings.Advertisements.FindIndex(ad => ad.Id == selected.Id);
         if (index < 0) return;
@@ -5469,7 +5862,7 @@ internal sealed class AdvertisementEditorDialog : Form
 
     public KioskAdvertisement? Advertisement { get; private set; }
 
-    public AdvertisementEditorDialog(KioskAdvertisement? existing = null)
+    public AdvertisementEditorDialog(KioskAdvertisement? existing = null, bool dark = false)
     {
         _working = existing?.Clone() ?? new KioskAdvertisement();
         Text = existing is null ? "Add Advertisement" : "Edit Advertisement";
@@ -5611,6 +6004,7 @@ internal sealed class AdvertisementEditorDialog : Form
         Controls.AddRange([heading, imageGroup, scheduleGroup, saveButton, cancelButton]);
         FormClosed += (_, _) => _preview.Image?.Dispose();
         LoadWorkingValues();
+        KioskTheme.Apply(this, dark);
     }
 
     private static Label MakeLabel(string text, int x, int y) => new()
@@ -5774,7 +6168,7 @@ internal sealed class PinEntryDialog : Form
     private readonly TextBox _pin = new() { UseSystemPasswordChar = true, MaxLength = 8, Width = 220 };
     public string Pin => _pin.Text;
 
-    public PinEntryDialog()
+    public PinEntryDialog(bool dark = false)
     {
         Text = "Staff Settings";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -5824,6 +6218,7 @@ internal sealed class PinEntryDialog : Form
         ActiveControl = _pin;
         Shown += (_, _) => BeginInvoke(new Action(FocusPasswordField));
         Activated += (_, _) => FocusPasswordField();
+        KioskTheme.Apply(this, dark);
     }
 
     private void FocusPasswordField()

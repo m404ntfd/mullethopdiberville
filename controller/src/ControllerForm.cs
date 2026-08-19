@@ -28,10 +28,12 @@ internal sealed class ControllerForm : Form
     private readonly Button _remoteAccessButton = new();
     private readonly Button _restartControllerButton = new();
     private readonly Button _closeControllerButton = new();
+    private readonly ComboBox _themeSelector = new();
     private readonly Label _controllerUpdateStatus = new();
     private readonly Label _controllerUpdateReady = new();
     private readonly RemoteAccessSettings _remoteSettings = RemoteAccessSettingsStore.Load();
     private CloudSyncService? _cloudSync;
+    private bool _lastResolvedDarkMode;
 
     public ControllerForm()
     {
@@ -58,6 +60,9 @@ internal sealed class ControllerForm : Form
         Controls.Add(setup);
         Controls.Add(header);
 
+        _lastResolvedDarkMode = ControllerTheme.IsDark;
+        ControllerTheme.Apply(this);
+
         _refreshTimer.Tick += (_, _) => RefreshKioskList();
         Shown += async (_, _) =>
         {
@@ -69,6 +74,12 @@ internal sealed class ControllerForm : Form
             _refreshTimer.Stop();
             _cloudSync?.Dispose();
             _server.Dispose();
+        };
+        Activated += (_, _) =>
+        {
+            if (ControllerTheme.Mode == ControllerThemeMode.Auto &&
+                _lastResolvedDarkMode != ControllerTheme.IsDark)
+                ApplyControllerTheme();
         };
     }
 
@@ -231,7 +242,7 @@ internal sealed class ControllerForm : Form
         var panel = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 250,
+            Height = 280,
             Padding = new Padding(12, 8, 12, 8),
             BackColor = Color.White
         };
@@ -314,12 +325,13 @@ internal sealed class ControllerForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         controllerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         _controllerUpdateStatus.Text = $"Version {ControllerUpdater.CurrentVersion} — checking for updates…";
@@ -334,6 +346,40 @@ internal sealed class ControllerForm : Form
         _controllerUpdateReady.ForeColor = Color.FromArgb(196, 28, 28);
         _controllerUpdateReady.Font = new Font("Segoe UI", 10, FontStyle.Bold);
         _controllerUpdateReady.Visible = false;
+
+        var appearancePanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 3, 0, 2)
+        };
+        var appearanceLabel = new Label
+        {
+            Text = "Appearance:",
+            AutoSize = false,
+            Width = 92,
+            Height = 29,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.FromArgb(52, 65, 76),
+            Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
+            Margin = Padding.Empty
+        };
+        _themeSelector.DropDownStyle = ComboBoxStyle.DropDownList;
+        _themeSelector.Width = 170;
+        _themeSelector.Height = 29;
+        _themeSelector.Font = new Font("Segoe UI", 9.2f);
+        _themeSelector.Margin = Padding.Empty;
+        _themeSelector.Items.AddRange(["Auto (Windows)", "Light", "Dark"]);
+        _themeSelector.SelectedIndex = ControllerTheme.Mode switch
+        {
+            ControllerThemeMode.Light => 1,
+            ControllerThemeMode.Dark => 2,
+            _ => 0
+        };
+        _themeSelector.SelectedIndexChanged += (_, _) => ChangeControllerTheme();
+        appearancePanel.Controls.AddRange([appearanceLabel, _themeSelector]);
 
         var controllerButtons = new TableLayoutPanel
         {
@@ -378,7 +424,8 @@ internal sealed class ControllerForm : Form
 
         controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
         controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);
-        controllerLayout.Controls.Add(controllerButtons, 0, 2);
+        controllerLayout.Controls.Add(appearancePanel, 0, 2);
+        controllerLayout.Controls.Add(controllerButtons, 0, 3);
         controllerGroup.Controls.Add(controllerLayout);
 
         sections.Controls.Add(kioskGroup, 0, 0);
@@ -524,13 +571,13 @@ internal sealed class ControllerForm : Form
                 {
                     Tag = kiosk.StationId,
                     ForeColor = kiosk.IsOnline
-                        ? Color.FromArgb(37, 103, 24)
-                        : Color.FromArgb(125, 55, 48),
+                        ? ControllerTheme.OnlineText
+                        : ControllerTheme.OfflineText,
                     BackColor = !kiosk.IsOnline
-                        ? Color.FromArgb(255, 240, 237)
+                        ? ControllerTheme.OfflineRow
                         : kiosk.StationClosed
-                            ? Color.FromArgb(255, 248, 231)
-                            : Color.White
+                            ? ControllerTheme.ClosedRow
+                            : ControllerTheme.OnlineRow
                 };
                 item.SubItems.Add(kiosk.StationName);
                 item.SubItems.Add(kiosk.MachineName);
@@ -742,7 +789,27 @@ internal sealed class ControllerForm : Form
         prompt.AcceptButton = installNow;
         prompt.CancelButton = installLater;
         prompt.Controls.AddRange([updateMessage, installNow, installLater]);
+        ControllerTheme.Apply(prompt);
         return prompt.ShowDialog(this) == DialogResult.Yes;
+    }
+
+    private void ChangeControllerTheme()
+    {
+        var mode = _themeSelector.SelectedIndex switch
+        {
+            1 => ControllerThemeMode.Light,
+            2 => ControllerThemeMode.Dark,
+            _ => ControllerThemeMode.Auto
+        };
+        ControllerTheme.SetMode(mode);
+        ApplyControllerTheme();
+    }
+
+    private void ApplyControllerTheme()
+    {
+        _lastResolvedDarkMode = ControllerTheme.IsDark;
+        ControllerTheme.Apply(this);
+        RefreshKioskList();
     }
 
     private ManagedKiosk? SelectedKiosk()
