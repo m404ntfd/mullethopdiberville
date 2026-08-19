@@ -477,6 +477,7 @@ internal sealed class StatusLight : Control
     {
         _onColor = onColor;
         _offColor = offColor;
+        SetStyle(ControlStyles.SupportsTransparentBackColor, true);
         DoubleBuffered = true;
         MinimumSize = new Size(38, 38);
         BackColor = Color.Transparent;
