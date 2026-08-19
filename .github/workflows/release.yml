@@ -73,7 +73,7 @@ jobs:
             -p:DebugType=None `
             --output publish
 
-      - name: Verify packaged screensaver video
+      - name: Verify packaged kiosk media
         shell: pwsh
         run: |
           $screensaverPath = "publish/MulletHopScreensaver.mp4"
@@ -87,6 +87,18 @@ jobs:
           }
 
           Write-Host "Screensaver video included: $($screensaver.Length) bytes."
+
+          $backgroundPath = "publish/MulletHopKioskBackground.jpg"
+          if (-not (Test-Path -LiteralPath $backgroundPath -PathType Leaf)) {
+            throw "The published kiosk is missing $backgroundPath."
+          }
+
+          $background = Get-Item -LiteralPath $backgroundPath
+          if ($background.Length -lt 100KB) {
+            throw "The published kiosk background is unexpectedly small."
+          }
+
+          Write-Host "Kiosk background included: $($background.Length) bytes."
 
       - name: Publish kiosk controller
         shell: pwsh

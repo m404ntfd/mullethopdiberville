@@ -245,6 +245,7 @@ internal sealed partial class KioskForm : Form
     private const string AdvertisementVirtualHost = "mullethop-ads.local";
     private const string ScreensaverVirtualHost = "mullethop-kiosk.local";
     private const string ScreensaverFileName = "MulletHopScreensaver.mp4";
+    private const string KioskBackgroundFileName = "MulletHopKioskBackground.jpg";
     private const string LogoUrl =
         "https://www.coastalmississippi.com/imager/files_idss_com/C537/images/listings/Mullet-Hop-eea044b35056a36_e45adf5f6bc0c5c2a30a39868f44eab6.png";
 
@@ -412,6 +413,9 @@ internal sealed partial class KioskForm : Form
                 StringComparison.Ordinal).Replace(
                 "__MULLET_HOP_PROVIDER_LOGO_DATA_URL__",
                 GetProviderLogoDataUrl(),
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_BACKGROUND_URL__",
+                $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}",
                 StringComparison.Ordinal);
             await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(waiverPageScript);
 
@@ -1016,6 +1020,7 @@ internal sealed partial class KioskForm : Form
 
     private static string BuildStationClosedHtml(bool connectionError)
     {
+        var backgroundUrl = $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}";
         var logoDataUrl = GetApplicationLogoDataUrl();
         var logoMarkup = string.IsNullOrWhiteSpace(logoDataUrl)
             ? "<div class=\"logo-fallback\">MULLET HOP</div>"
@@ -1057,12 +1062,14 @@ internal sealed partial class KioskForm : Form
                 body {
                   font-family: 'Open Sans', 'Segoe UI', Arial, sans-serif;
                   color: var(--ink);
-                  background:
-                    radial-gradient(circle at 8% 12%, rgba(118,196,66,.34) 0 8%, transparent 8.4%),
-                    radial-gradient(circle at 92% 16%, rgba(0,164,214,.32) 0 9%, transparent 9.4%),
-                    radial-gradient(circle at 88% 88%, rgba(117,68,154,.30) 0 11%, transparent 11.4%),
-                    radial-gradient(circle at 12% 88%, rgba(245,130,32,.27) 0 7%, transparent 7.4%),
-                    linear-gradient(135deg, #f7fff2 0%, #eefaff 50%, #faf3ff 100%);
+                  background-color: #eefaff;
+                  background-image:
+                    linear-gradient(rgba(247,252,255,.18), rgba(247,252,255,.18)),
+                    url('{{backgroundUrl}}');
+                  background-position: center;
+                  background-size: cover;
+                  background-repeat: no-repeat;
+                  background-attachment: fixed;
                   display: grid;
                   place-items: center;
                   padding: 28px;
@@ -1240,6 +1247,7 @@ internal sealed partial class KioskForm : Form
 
     private string BuildThankYouHtml(DateTime? scheduleTimeOverride = null)
     {
+        var backgroundUrl = $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}";
         var resetSeconds = Math.Max(12, _settings.CompletionResetSeconds);
         var effectiveNow = scheduleTimeOverride ?? GetEffectiveNow();
         var activeAdvertisements = new List<string>();
@@ -1316,12 +1324,14 @@ internal sealed partial class KioskForm : Form
                 body {
                   font-family: 'Open Sans', Arial, sans-serif;
                   color: var(--ink);
-                  background:
-                    radial-gradient(circle at 8% 12%, rgba(118,196,66,.34) 0 8%, transparent 8.4%),
-                    radial-gradient(circle at 92% 16%, rgba(0,164,214,.32) 0 9%, transparent 9.4%),
-                    radial-gradient(circle at 88% 88%, rgba(117,68,154,.30) 0 11%, transparent 11.4%),
-                    radial-gradient(circle at 12% 88%, rgba(245,130,32,.27) 0 7%, transparent 7.4%),
-                    linear-gradient(135deg, #f7fff2 0%, #eefaff 50%, #faf3ff 100%);
+                  background-color: #eefaff;
+                  background-image:
+                    linear-gradient(rgba(247,252,255,.18), rgba(247,252,255,.18)),
+                    url('{{backgroundUrl}}');
+                  background-position: center;
+                  background-size: cover;
+                  background-repeat: no-repeat;
+                  background-attachment: fixed;
                   display: grid;
                   place-items: center;
                   padding: 26px;
@@ -1765,6 +1775,7 @@ internal sealed partial class KioskForm : Form
           window.__mulletHopKioskInstalled = true;
           const kioskLogoSource = '__MULLET_HOP_LOGO_DATA_URL__';
           const providerLogoSource = '__MULLET_HOP_PROVIDER_LOGO_DATA_URL__';
+          const kioskBackgroundSource = '__MULLET_HOP_BACKGROUND_URL__';
 
           let lastActivityMessage = 0;
           const postActivity = () => {
@@ -2078,11 +2089,14 @@ internal sealed partial class KioskForm : Form
                 margin: 0 !important;
                 padding: clamp(22px, 4vw, 48px) 24px 80px !important;
                 box-sizing: border-box;
-                background:
-                  radial-gradient(circle at 9% 12%, rgba(118,196,66,.22) 0 74px, transparent 76px),
-                  radial-gradient(circle at 92% 9%, rgba(0,164,214,.20) 0 92px, transparent 94px),
-                  radial-gradient(circle at 86% 88%, rgba(117,68,154,.16) 0 108px, transparent 110px),
-                  linear-gradient(135deg, #f7fff2 0%, #eefaff 52%, #faf3ff 100%) !important;
+                background-color: #eefaff !important;
+                background-image:
+                  linear-gradient(rgba(247,252,255,.18), rgba(247,252,255,.18)),
+                  url('${kioskBackgroundSource}') !important;
+                background-position: center top !important;
+                background-size: cover !important;
+                background-repeat: no-repeat !important;
+                background-attachment: fixed !important;
                 color: #101820 !important;
                 font-family: 'Open Sans', Arial, sans-serif !important;
                 font-size: 17px;

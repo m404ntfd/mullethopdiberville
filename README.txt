@@ -206,6 +206,10 @@ WHAT THE KIOSK DOES
   continuous drag events expected by the waiver's signature pad.
 * Replaces the broken LilYPad header image with the full transparent Mullet Hop
   logo and embeds a clearer fish-and-springs image for the kiosk's compact logo.
+* Uses a bright, softened Mullet Hop background across the live waiver,
+  thank-you screen, and both closed pages. Orange trampoline energy is balanced
+  with the park's blue and lime padding colors while the center remains pale so
+  form text and controls stay easy to read.
 * Plays the packaged Mullet Hop video as a full-screen, looping screensaver after
   the staff-selected period without screen or keyboard activity. The first touch
   or keypress clears the prior session and loads a fresh waiver starting page.
