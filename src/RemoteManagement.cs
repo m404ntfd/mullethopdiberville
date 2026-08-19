@@ -100,11 +100,12 @@ internal sealed partial class KioskForm
         if (_advertisementSyncInProgress)
             return new AdvertisementSyncResult(false, "An advertisement sync is already running.", 0);
 
+        var configurationError = string.Empty;
         if (!_settings.RemoteManagementEnabled ||
             !RemoteManagementProtocol.IsConfigurationValid(
                 _settings.RemoteControllerUrl,
                 _settings.RemotePairingKey,
-                out var configurationError))
+                out configurationError))
         {
             var localFallback = _settings.AdvertisementLastSyncUtc.HasValue
                 ? " The kiosk will keep using the local catalog saved during the last successful sync on " +
