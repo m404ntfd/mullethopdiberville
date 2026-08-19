@@ -142,9 +142,13 @@ jobs:
       - name: Verify POS controller startup
         shell: pwsh
         run: |
-          & "pos-publish/MulletHopPosController.exe" --startup-smoke-test
-          if ($LASTEXITCODE -ne 0) {
-            throw "The POS Controller startup smoke test failed with exit code $LASTEXITCODE."
+          $process = Start-Process `
+            -FilePath "pos-publish/MulletHopPosController.exe" `
+            -ArgumentList "--startup-smoke-test" `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "The POS Controller startup smoke test failed with exit code $($process.ExitCode)."
           }
 
       - name: Install matching Velopack command-line tool
