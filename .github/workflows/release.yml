@@ -166,6 +166,26 @@ jobs:
           if ($matchingAsset.Count -gt 0) {
             $needsPack = $false
             Write-Host "Controller $currentVersion is already packaged; reusing its release files."
+
+            $controllerAssets = @(
+              $latestRelease.assets | Where-Object {
+                $_.name -eq "assets.controller.json" -or
+                $_.name -eq "releases.controller.json" -or
+                $_.name -like "MulletHop.KioskController-*"
+              }
+            )
+            New-Item -ItemType Directory -Path ControllerReleases -Force | Out-Null
+
+            foreach ($asset in $controllerAssets) {
+              $destination = Join-Path "ControllerReleases" $asset.name
+              if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
+                Write-Host "Downloading reusable controller asset $($asset.name)."
+                Invoke-WebRequest `
+                  -Uri $asset.browser_download_url `
+                  -Headers @{ Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}" } `
+                  -OutFile $destination
+              }
+            }
           }
 
           "needs_pack=$($needsPack.ToString().ToLowerInvariant())" |
