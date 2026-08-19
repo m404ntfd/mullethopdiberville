@@ -25,9 +25,12 @@ Settings button does. There is no settings shortcut key.
 4. Create a 4–8 digit Settings passcode on the first launch.
 5. Select **Settings** and enter that passcode.
 6. Copy the controller address and pairing key from the main Kiosk Controller.
-7. Select **Pull Devices Now**. Paired devices are automatically added to the
-   next open Kiosk 1–4 position. Change the number assignments if needed.
-8. Save Settings.
+7. Select **Connect & Remember**. The verified controller address and pairing
+   key are saved immediately. Paired devices are automatically added to the next
+   open Kiosk 1–4 position. Change the number assignments if needed.
+8. Select **Save Kiosk Assignments** inside the assignment section to confirm
+   and save the Kiosk 1–4 positions immediately. **Save Settings** also saves all
+   connection, assignment, and passcode changes.
 
 The POS Controller talks to the on-site Kiosk Controller over TCP 47832 using
 the existing signed local-network connection. It does not open a listening port
@@ -39,6 +42,8 @@ While the dashboard is running, it continues pulling the paired-device list.
 New devices are automatically saved in the next open position without changing
 the numbers of kiosks that were already assigned. When all four positions are
 filled, additional devices remain available in Settings for manual reassignment.
+The last known kiosk name and machine name are also remembered, so an assigned
+position remains identifiable while either the kiosk or controller is offline.
 
 ## Updates and saved data
 
@@ -49,3 +54,8 @@ the program asks whether to install it. If installation is postponed, the button
 changes to **Install Update** until the downloaded update is installed. Its
 passcode and kiosk assignments are stored separately from both the Waiver Kiosk
 and Kiosk Controller settings.
+
+POS Controller version 1.1.1 immediately remembers every verified controller
+connection and preserves the identity and Kiosk 1–4 position of each linked
+waiver station. Use the visible **Settings** button in the upper-right corner to
+change the controller address, pairing key, assignments, or Settings passcode.
