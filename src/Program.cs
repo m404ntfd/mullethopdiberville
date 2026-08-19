@@ -244,6 +244,23 @@ internal readonly record struct BusinessHoursStatus(
 
 internal static class BusinessHoursCalculator
 {
+    public static DateTime? FindNextOpening(KioskSettings settings, DateTime now)
+    {
+        for (var dayOffset = 0; dayOffset <= 7; dayOffset++)
+        {
+            var date = now.Date.AddDays(dayOffset);
+            var schedule = settings.BusinessHours.First(item => item.Day == date.DayOfWeek);
+            if (!schedule.IsOpen)
+                continue;
+
+            var candidate = date + schedule.OpenTime;
+            if (candidate > now)
+                return candidate;
+        }
+
+        return null;
+    }
+
     public static BusinessHoursStatus Evaluate(KioskSettings settings, DateTime now)
     {
         if (!settings.BusinessHoursEnabled)
@@ -258,21 +275,7 @@ internal static class BusinessHoursCalculator
                 now.Date + today.CloseTime);
         }
 
-        DateTime? nextOpening = null;
-        for (var dayOffset = 0; dayOffset <= 7; dayOffset++)
-        {
-            var date = now.Date.AddDays(dayOffset);
-            var schedule = settings.BusinessHours.First(item => item.Day == date.DayOfWeek);
-            if (!schedule.IsOpen)
-                continue;
-
-            var candidate = date + schedule.OpenTime;
-            if (candidate > now)
-            {
-                nextOpening = candidate;
-                break;
-            }
-        }
+        var nextOpening = FindNextOpening(settings, now);
 
         if (nextOpening.HasValue && settings.PreOpeningScreensaverMinutes > 0 &&
             nextOpening.Value - now <=
@@ -1140,7 +1143,7 @@ internal sealed partial class KioskForm : Form
         _webView.Enabled = enabled;
     }
 
-    private void ShowBusinessClosedPage(DateTime? nextOpening)
+    private void ShowBusinessClosedPage(DateTime? nextOpening, int? previewSeconds = null)
     {
         if (!_browserReady)
             return;
@@ -1156,8 +1159,35 @@ internal sealed partial class KioskForm : Form
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
-        _webView.CoreWebView2.NavigateToString(BuildBusinessClosedHtml(nextOpening));
-        KioskLog.Write("The scheduled Business Closed page was displayed.");
+        _webView.CoreWebView2.NavigateToString(
+            BuildBusinessClosedHtml(nextOpening, previewSeconds));
+        KioskLog.Write(previewSeconds.HasValue
+            ? "The staff Business Closed preview was displayed."
+            : "The scheduled Business Closed page was displayed.");
+    }
+
+    private async Task PreviewBusinessClosedPageAsync()
+    {
+        const int previewSeconds = 10;
+        var nextOpening = BusinessHoursCalculator.FindNextOpening(
+            _settings,
+            GetEffectiveNow());
+
+        ShowBusinessClosedPage(nextOpening, previewSeconds);
+        TopMost = true;
+        Activate();
+        _webView.Focus();
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(previewSeconds));
+            KioskLog.Write("The staff Business Closed preview ended after 10 seconds.");
+        }
+        finally
+        {
+            if (!_allowExit)
+                TopMost = false;
+        }
     }
 
     private void ShowBlackoutPage(bool manual = false)
@@ -1337,7 +1367,9 @@ internal sealed partial class KioskForm : Form
             """;
     }
 
-    private static string BuildBusinessClosedHtml(DateTime? nextOpening)
+    private static string BuildBusinessClosedHtml(
+        DateTime? nextOpening,
+        int? previewSeconds = null)
     {
         var backgroundUrl = $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}";
         var logoDataUrl = GetApplicationLogoDataUrl();
@@ -1350,6 +1382,31 @@ internal sealed partial class KioskForm : Form
                     nextOpening.Value.ToString("dddd, MMMM d 'at' h:mm tt")) +
                 ".</strong></p>"
             : "<p class=\"opening\">Please check with the front desk for our next opening time.</p>";
+        var previewMarkup = previewSeconds.HasValue
+            ? "<div class=\"business-preview-banner\" role=\"status\" aria-live=\"polite\">" +
+                "THIS IS A PREVIEW &mdash; Returning to Staff Settings in " +
+                "<strong id=\"business-preview-countdown\">" + previewSeconds.Value +
+                "</strong> seconds.</div>"
+            : string.Empty;
+        var previewBodyClass = previewSeconds.HasValue
+            ? "business-preview-mode"
+            : string.Empty;
+        var previewScript = previewSeconds.HasValue
+            ? $$"""
+              <script>
+                (() => {
+                  let remaining = {{previewSeconds.Value}};
+                  const countdown = document.getElementById('business-preview-countdown');
+                  const tick = () => {
+                    remaining = Math.max(0, remaining - 1);
+                    if (countdown) countdown.textContent = String(remaining);
+                    if (remaining > 0) window.setTimeout(tick, 1000);
+                  };
+                  window.setTimeout(tick, 1000);
+                })();
+              </script>
+              """
+            : string.Empty;
 
         return $$"""
             <!doctype html>
@@ -1381,6 +1438,33 @@ internal sealed partial class KioskForm : Form
                   background-position: center;
                   background-size: cover;
                 }
+                .business-preview-banner {
+                  position: fixed;
+                  z-index: 20;
+                  top: 0;
+                  left: 0;
+                  right: 0;
+                  min-height: 64px;
+                  display: grid;
+                  place-items: center;
+                  padding: 12px 28px;
+                  border-bottom: 4px solid var(--ink);
+                  background: var(--purple);
+                  color: #fff;
+                  box-shadow: 0 8px 22px rgba(16,24,32,.24);
+                  font-size: clamp(20px, 2.2vw, 32px);
+                  line-height: 1.2;
+                  font-weight: 800;
+                  letter-spacing: .4px;
+                  text-align: center;
+                }
+                .business-preview-banner strong {
+                  display: inline-grid;
+                  min-width: 1.5em;
+                  color: #ffe36e;
+                  font-size: 1.15em;
+                }
+                body.business-preview-mode { padding-top: 96px; }
                 .card {
                   width: min(980px, 94vw);
                   max-height: 94vh;
@@ -1458,7 +1542,8 @@ internal sealed partial class KioskForm : Form
                 }
               </style>
             </head>
-            <body>
+            <body class="{{previewBodyClass}}">
+              {{previewMarkup}}
               <main class="card" aria-labelledby="business-closed-heading">
                 <div class="stripe"></div>
                 <div class="content">
@@ -1469,6 +1554,7 @@ internal sealed partial class KioskForm : Form
                   {{openingMarkup}}
                 </div>
               </main>
+              {{previewScript}}
             </body>
             </html>
             """;
@@ -2115,6 +2201,9 @@ internal sealed partial class KioskForm : Form
                                     staffPreview: true,
                                     scheduleTimeOverride: settingsDialog.SelectedDateTime);
                                 return;
+                            case StaffSettingsAction.PreviewBusinessClosedPage:
+                                await PreviewBusinessClosedPageAsync();
+                                continue;
                             case StaffSettingsAction.ToggleStationClosed:
                                 try
                                 {
@@ -3592,6 +3681,7 @@ internal enum StaffSettingsAction
     PreviewDateTime,
     UseLiveDateTime,
     PreviewThankYouPage,
+    PreviewBusinessClosedPage,
     ToggleStationClosed,
     StartBusinessBlackout
 }
@@ -4119,16 +4209,28 @@ internal sealed class StaffSettingsDialog : Form
             preOpeningLabel, _preOpeningScreensaverMinutes, preOpeningSuffix]);
 
         _businessHoursSaveButton.Text = "Save Business Hours";
-        _businessHoursSaveButton.Bounds = new Rectangle(20, 478, 210, 38);
+        _businessHoursSaveButton.Bounds = new Rectangle(20, 478, 180, 38);
         _businessHoursSaveButton.BackColor = Color.FromArgb(118, 196, 66);
         _businessHoursSaveButton.FlatStyle = FlatStyle.Flat;
         _businessHoursSaveButton.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         _businessHoursSaveButton.Click += (_, _) => SaveBusinessHours();
 
+        var previewClosedButton = new Button
+        {
+            Text = "Preview Closed Screen",
+            Bounds = new Rectangle(210, 478, 180, 38),
+            BackColor = Color.FromArgb(105, 210, 236),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 9.2f, FontStyle.Bold)
+        };
+        previewClosedButton.Click += (_, _) =>
+            Complete(StaffSettingsAction.PreviewBusinessClosedPage);
+
         var startBlackoutButton = new Button
         {
             Text = "Start Blackout Now",
-            Bounds = new Rectangle(385, 478, 200, 38),
+            Bounds = new Rectangle(400, 478, 185, 38),
             BackColor = Color.Black,
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
@@ -4137,7 +4239,8 @@ internal sealed class StaffSettingsDialog : Form
         startBlackoutButton.Click += (_, _) => Complete(StaffSettingsAction.StartBusinessBlackout);
         businessHoursTab.Controls.AddRange([
             _businessHoursEnabled, _businessHoursStatus, weeklyHoursGroup,
-            automationGroup, _businessHoursSaveButton, startBlackoutButton]);
+            automationGroup, _businessHoursSaveButton, previewClosedButton,
+            startBlackoutButton]);
         UpdateBusinessHoursControlState();
 
         var staffToolsGroup = new GroupBox
