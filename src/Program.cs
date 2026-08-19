@@ -1143,7 +1143,7 @@ internal sealed partial class KioskForm : Form
         _webView.Enabled = enabled;
     }
 
-    private void ShowBusinessClosedPage(DateTime? nextOpening, int? previewSeconds = null)
+    private void ShowBusinessClosedPage(DateTime? nextOpening)
     {
         if (!_browserReady)
             return;
@@ -1159,32 +1159,76 @@ internal sealed partial class KioskForm : Form
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
-        _webView.CoreWebView2.NavigateToString(
-            BuildBusinessClosedHtml(nextOpening, previewSeconds));
-        KioskLog.Write(previewSeconds.HasValue
-            ? "The staff Business Closed preview was displayed."
-            : "The scheduled Business Closed page was displayed.");
+        _webView.CoreWebView2.NavigateToString(BuildBusinessClosedHtml(nextOpening));
+        KioskLog.Write("The scheduled Business Closed page was displayed.");
     }
 
-    private async Task PreviewBusinessClosedPageAsync()
+    private async Task PreviewBusinessClosedOverlayAsync()
     {
         const int previewSeconds = 10;
         var nextOpening = BusinessHoursCalculator.FindNextOpening(
             _settings,
             GetEffectiveNow());
+        using var previewWebView = new WebView2
+        {
+            Dock = DockStyle.Fill,
+            DefaultBackgroundColor = Color.White,
+            TabStop = false
+        };
 
-        ShowBusinessClosedPage(nextOpening, previewSeconds);
+        Controls.Add(previewWebView);
+        previewWebView.BringToFront();
         TopMost = true;
         Activate();
-        _webView.Focus();
 
         try
         {
+            await previewWebView.EnsureCoreWebView2Async(
+                _webView.CoreWebView2.Environment);
+
+            var core = previewWebView.CoreWebView2;
+            var browserSettings = core.Settings;
+            browserSettings.AreDefaultContextMenusEnabled = false;
+            browserSettings.AreDevToolsEnabled = false;
+            browserSettings.AreBrowserAcceleratorKeysEnabled = false;
+            browserSettings.IsStatusBarEnabled = false;
+            browserSettings.IsZoomControlEnabled = false;
+            browserSettings.IsPinchZoomEnabled = false;
+            browserSettings.IsSwipeNavigationEnabled = false;
+            browserSettings.AreHostObjectsAllowed = false;
+            browserSettings.IsBuiltInErrorPageEnabled = false;
+            core.SetVirtualHostNameToFolderMapping(
+                ScreensaverVirtualHost,
+                AppContext.BaseDirectory,
+                CoreWebView2HostResourceAccessKind.DenyCors);
+            core.NewWindowRequested += (_, e) => e.Handled = true;
+            core.DownloadStarting += (_, e) => e.Cancel = true;
+            core.PermissionRequested += (_, e) =>
+                e.State = CoreWebView2PermissionState.Deny;
+
+            var navigationCompleted = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            core.NavigationCompleted += (_, e) =>
+            {
+                if (e.IsSuccess)
+                    navigationCompleted.TrySetResult(true);
+                else
+                    navigationCompleted.TrySetException(new InvalidOperationException(
+                        "The Business Closed preview page could not be displayed."));
+            };
+            core.NavigateToString(
+                BuildBusinessClosedHtml(nextOpening, previewSeconds));
+            await navigationCompleted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+            KioskLog.Write(
+                "The staff Business Closed preview was displayed over the current kiosk page.");
             await Task.Delay(TimeSpan.FromSeconds(previewSeconds));
-            KioskLog.Write("The staff Business Closed preview ended after 10 seconds.");
+            KioskLog.Write(
+                "The staff Business Closed preview ended and the previous kiosk page was restored.");
         }
         finally
         {
+            Controls.Remove(previewWebView);
             if (!_allowExit)
                 TopMost = false;
         }
@@ -2170,7 +2214,8 @@ internal sealed partial class KioskForm : Form
                         using var settingsDialog = new StaffSettingsDialog(
                             _settings,
                             _previewDateTime.HasValue ? GetEffectiveNow() : null,
-                            progress => SyncAdvertisementsFromControllerAsync(progress));
+                            progress => SyncAdvertisementsFromControllerAsync(progress),
+                            PreviewBusinessClosedOverlayAsync);
                         if (settingsDialog.ShowDialog(this) != DialogResult.OK)
                         {
                             await ResetForNextGuestAsync(
@@ -2201,9 +2246,6 @@ internal sealed partial class KioskForm : Form
                                     staffPreview: true,
                                     scheduleTimeOverride: settingsDialog.SelectedDateTime);
                                 return;
-                            case StaffSettingsAction.PreviewBusinessClosedPage:
-                                await PreviewBusinessClosedPageAsync();
-                                continue;
                             case StaffSettingsAction.ToggleStationClosed:
                                 try
                                 {
@@ -3681,7 +3723,6 @@ internal enum StaffSettingsAction
     PreviewDateTime,
     UseLiveDateTime,
     PreviewThankYouPage,
-    PreviewBusinessClosedPage,
     ToggleStationClosed,
     StartBusinessBlackout
 }
@@ -3694,6 +3735,7 @@ internal sealed class StaffSettingsDialog : Form
     private readonly string _connectionTestUrl;
     private readonly Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>>
         _syncAdvertisements;
+    private readonly Func<Task> _previewBusinessClosed;
     private readonly Button _connectionButton = new();
     private readonly Label _connectionResult = new();
     private readonly Button _updateButton = new();
@@ -3716,10 +3758,12 @@ internal sealed class StaffSettingsDialog : Form
     public StaffSettingsDialog(
         KioskSettings settings,
         DateTime? activePreview,
-        Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>> syncAdvertisements)
+        Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>> syncAdvertisements,
+        Func<Task> previewBusinessClosed)
     {
         _settings = settings;
         _syncAdvertisements = syncAdvertisements;
+        _previewBusinessClosed = previewBusinessClosed;
         _connectionTestUrl = settings.StartUrl;
         Text = "Mullet Hop Staff Settings";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -4224,8 +4268,36 @@ internal sealed class StaffSettingsDialog : Form
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 9.2f, FontStyle.Bold)
         };
-        previewClosedButton.Click += (_, _) =>
-            Complete(StaffSettingsAction.PreviewBusinessClosedPage);
+        previewClosedButton.Click += async (_, _) =>
+        {
+            previewClosedButton.Enabled = false;
+            var previousOpacity = Opacity;
+            try
+            {
+                TopMost = false;
+                Opacity = 0;
+                await Task.Yield();
+                await _previewBusinessClosed();
+            }
+            catch (Exception ex)
+            {
+                Opacity = previousOpacity;
+                TopMost = true;
+                KioskLog.Write("Business Closed preview error: " +
+                    ex.GetType().Name + " - " + ex.Message);
+                MessageBox.Show(this,
+                    "The Business Closed preview could not be displayed.\n\n" + ex.Message,
+                    "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                Opacity = previousOpacity;
+                TopMost = true;
+                previewClosedButton.Enabled = true;
+                Activate();
+                BringToFront();
+            }
+        };
 
         var startBlackoutButton = new Button
         {
