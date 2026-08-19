@@ -137,8 +137,10 @@ jobs:
           }
 
       - name: Download prior controller release information
+        id: controller_feed
         shell: pwsh
         run: |
+          $needsPack = $true
           try {
             vpk download github `
               --repoUrl https://github.com/${{ github.repository }} `
@@ -150,6 +152,25 @@ jobs:
             Write-Host "No earlier controller update feed exists. Building the first full controller installer."
             New-Item -ItemType Directory -Path ControllerReleases -Force | Out-Null
           }
+
+          $feedPath = "ControllerReleases/releases.controller.json"
+          if (Test-Path -LiteralPath $feedPath -PathType Leaf) {
+            $feed = Get-Content -LiteralPath $feedPath -Raw | ConvertFrom-Json
+            $currentVersion = "${{ steps.controller_version.outputs.value }}"
+            $matchingRelease = @(
+              $feed.Assets | Where-Object {
+                $_.Type -eq "Full" -and $_.Version -eq $currentVersion
+              }
+            )
+
+            if ($matchingRelease.Count -gt 0) {
+              $needsPack = $false
+              Write-Host "Controller $currentVersion is already packaged; reusing its release files."
+            }
+          }
+
+          "needs_pack=$($needsPack.ToString().ToLowerInvariant())" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build Velopack installer and update packages
         shell: pwsh
@@ -167,6 +188,7 @@ jobs:
             --outputDir Releases
 
       - name: Build controller Velopack installer and update packages
+        if: steps.controller_feed.outputs.needs_pack == 'true'
         shell: pwsh
         run: |
           vpk pack `
