@@ -8,7 +8,9 @@ the same private network as the waiver kiosks. It provides:
 * Open All and Close All controls.
 * A non-installing update check per selected kiosk.
 * An install-update command per selected kiosk.
-* A lower-right Controller Program section with update, restart, and close controls.
+* A central scheduled-advertisement catalog with automatic kiosk synchronization.
+* A lower-right Controller Program section with update, ad-management, restart,
+  and close controls.
 * Queued commands: if a kiosk is temporarily offline, the newest command waits
   until that kiosk reconnects.
 
@@ -82,10 +84,32 @@ confirmation. Offline stations retain the latest queued command and carry it out
 when they reconnect.
 
 The lower-right Controller Program section checks for controller updates and
-provides Restart and Close buttons. If a downloaded update is waiting, Restart
+provides Manage Ads, Restart, and Close buttons. If a downloaded update is waiting, Restart
 offers to install it. Closing the controller does not change a kiosk's current
 open/closed state, but new remote commands are unavailable until the controller
 starts again.
+
+
+MANAGE AND SYNC ADVERTISEMENTS
+------------------------------
+
+Select Manage Ads in the lower-right Controller Program section. The manager
+uses the same JPG, one-time date range, weekly schedule, and enable/disable
+options as the kiosk. Every saved change publishes a new catalog. Connected
+kiosks running version 2.2.0 or newer automatically download it on their next
+check-in. Sync All Kiosks republishes the current catalog when staff want to
+force a fresh synchronization without changing an ad.
+
+The Kiosk Sync Status box and progress bar show how many known kiosks have
+reported the current catalog revision. Each kiosk also shows its last ad-sync
+time in the dashboard. On an individual kiosk, Staff Settings → Manage
+Advertisements includes transfer progress, the last successful sync time, and a
+Sync Ads Now button. Advertisement transfers stay on the private local network
+and use the same signed pairing-key connection as other controller requests.
+
+Each kiosk keeps the complete last successful catalog locally. If the manager
+PC is offline, unavailable, or moved to a different address, the kiosk continues
+using the saved JPG files and schedules until a later sync succeeds.
 
 
 NETWORK NOTES

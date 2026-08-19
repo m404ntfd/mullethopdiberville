@@ -455,6 +455,7 @@ internal sealed partial class KioskForm : Form
         core.Profile.IsPasswordAutosaveEnabled = false;
         core.Profile.IsGeneralAutofillEnabled = false;
 
+        AdvertisementFiles.RecoverInterruptedSync(_settings);
         Directory.CreateDirectory(KioskSettings.AdvertisementsDirectory);
         core.SetVirtualHostNameToFolderMapping(
             AdvertisementVirtualHost,
@@ -1600,7 +1601,9 @@ internal sealed partial class KioskForm : Form
                     while (!_allowExit)
                     {
                         using var settingsDialog = new StaffSettingsDialog(
-                            _settings, _previewDateTime.HasValue ? GetEffectiveNow() : null);
+                            _settings,
+                            _previewDateTime.HasValue ? GetEffectiveNow() : null,
+                            progress => SyncAdvertisementsFromControllerAsync(progress));
                         if (settingsDialog.ShowDialog(this) != DialogResult.OK)
                         {
                             await ResetForNextGuestAsync(
@@ -2623,7 +2626,6 @@ internal sealed partial class KioskForm : Form
               const email = (sessionStorage.getItem('mullet-hop-waiver-email') || '').trim();
               const hasRememberedChoice = originalChoice === 'just-me' || originalChoice === 'family';
               const targetChoice = originalChoice === 'family' ? 'just-me' : 'family';
-              const targetLabel = targetChoice === 'family' ? 'Me and My Kids!' : 'Just Me';
 
               const switchCard = document.createElement('aside');
               switchCard.id = 'mullet-hop-switch-card';
@@ -2638,9 +2640,7 @@ internal sealed partial class KioskForm : Form
                 <button type='button' id='mullet-hop-switch-button'>Start a New Waiver</button>
               `;
               switchCard.querySelector('button').addEventListener('click', () => {
-                const question = hasRememberedChoice
-                  ? `Restart this waiver for "${targetLabel}"? Information already entered on this form will be cleared.`
-                  : 'Return to the starting page? Information already entered on this form will be cleared.';
+                const question = 'Restart this waiver? Information already entered on this form will be cleared.';
                 if (!window.confirm(question)) return;
                 if (hasRememberedChoice && email) {
                   window.chrome.webview.postMessage(JSON.stringify({
@@ -2817,6 +2817,10 @@ internal sealed class KioskSettings
     public string RemoteLastCommandId { get; set; } = string.Empty;
     public bool RemoteLastCommandSuccess { get; set; }
     public string RemoteLastCommandMessage { get; set; } = string.Empty;
+    public string AdvertisementSyncRevision { get; set; } = string.Empty;
+    public DateTime? AdvertisementLastSyncUtc { get; set; }
+    public string AdvertisementLastSyncStatus { get; set; } =
+        "Advertisements have not been synced with the kiosk manager.";
 
     public string[] CompletionUrlKeywords { get; set; } =
         ["success", "complete", "completed", "confirmation", "finished", "done", "submitted", "thankyou", "thank-you"];
@@ -2920,6 +2924,10 @@ internal sealed class KioskSettings
             : StationName.Trim();
         RemoteLastCommandId ??= string.Empty;
         RemoteLastCommandMessage ??= string.Empty;
+        AdvertisementSyncRevision ??= string.Empty;
+        AdvertisementLastSyncStatus = string.IsNullOrWhiteSpace(AdvertisementLastSyncStatus)
+            ? "Advertisements have not been synced with the kiosk manager."
+            : AdvertisementLastSyncStatus.Trim();
         foreach (var advertisement in Advertisements)
             advertisement.Normalize();
         IdleTimeoutMinutes = Math.Clamp(IdleTimeoutMinutes, 1, 60);
@@ -3046,6 +3054,8 @@ internal sealed class StaffSettingsDialog : Form
 
     private readonly KioskSettings _settings;
     private readonly string _connectionTestUrl;
+    private readonly Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>>
+        _syncAdvertisements;
     private readonly Button _connectionButton = new();
     private readonly Label _connectionResult = new();
     private readonly Button _updateButton = new();
@@ -3058,9 +3068,13 @@ internal sealed class StaffSettingsDialog : Form
     public StaffSettingsAction SelectedAction { get; private set; }
     public DateTime SelectedDateTime => _datePicker.Value.Date + _timePicker.Value.TimeOfDay;
 
-    public StaffSettingsDialog(KioskSettings settings, DateTime? activePreview)
+    public StaffSettingsDialog(
+        KioskSettings settings,
+        DateTime? activePreview,
+        Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>> syncAdvertisements)
     {
         _settings = settings;
+        _syncAdvertisements = syncAdvertisements;
         _connectionTestUrl = settings.StartUrl;
         Text = "Mullet Hop Staff Settings";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -3153,7 +3167,7 @@ internal sealed class StaffSettingsDialog : Form
         _connectionResult.ForeColor = Color.FromArgb(83, 97, 109);
         _connectionResult.TextAlign = ContentAlignment.MiddleLeft;
         _connectionResult.Bounds = new Rectangle(198, 70, 355, 38);
-        _updateButton.Text = "Check for Kiosk Update";
+        _updateButton.Text = "Check for Updates";
         _updateButton.Bounds = new Rectangle(18, 126, 165, 38);
         _updateButton.BackColor = Color.FromArgb(118, 196, 66);
         _updateButton.FlatStyle = FlatStyle.Flat;
@@ -3256,7 +3270,8 @@ internal sealed class StaffSettingsDialog : Form
         {
             using var advertisementsDialog = new AdvertisementManagerDialog(
                 _settings,
-                activePreview.HasValue ? SelectedDateTime : null);
+                activePreview.HasValue ? SelectedDateTime : null,
+                _syncAdvertisements);
             advertisementsDialog.ShowDialog(this);
         };
         var thankYouPreviewButton = new Button
@@ -3987,6 +4002,54 @@ internal sealed class StaffPasswordChangeDialog : Form
 
 internal static class AdvertisementFiles
 {
+    public static void RecoverInterruptedSync(KioskSettings settings)
+    {
+        try
+        {
+            var backup = Directory.Exists(KioskSettings.DataDirectory)
+                ? Directory.GetDirectories(
+                        KioskSettings.DataDirectory,
+                        "Advertisements.backup-*",
+                        SearchOption.TopDirectoryOnly)
+                    .Select(path => new DirectoryInfo(path))
+                    .OrderByDescending(info => info.LastWriteTimeUtc)
+                    .FirstOrDefault()
+                : null;
+            if (backup is null)
+                return;
+
+            if (Directory.Exists(KioskSettings.AdvertisementsDirectory))
+            {
+                var referencedFiles = settings.Advertisements
+                    .Select(advertisement => Path.GetFileName(advertisement.ImageFileName))
+                    .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+                    .ToArray();
+                var currentCatalogMatches = referencedFiles.All(fileName =>
+                    File.Exists(Path.Combine(KioskSettings.AdvertisementsDirectory, fileName)));
+                if (currentCatalogMatches)
+                    return;
+
+                var backupCatalogMatches = referencedFiles.All(fileName =>
+                    File.Exists(Path.Combine(backup.FullName, fileName)));
+                if (!backupCatalogMatches)
+                    return;
+
+                var interruptedDirectory = Path.Combine(
+                    KioskSettings.DataDirectory,
+                    "Advertisements.incomplete-" + Guid.NewGuid().ToString("N"));
+                Directory.Move(KioskSettings.AdvertisementsDirectory, interruptedDirectory);
+            }
+
+            Directory.Move(backup.FullName, KioskSettings.AdvertisementsDirectory);
+            KioskLog.Write("Recovered the last local advertisement catalog after an interrupted sync.");
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Advertisement sync recovery error: " +
+                ex.GetType().Name + " - " + ex.Message);
+        }
+    }
+
     public static string ImportJpeg(string sourcePath)
     {
         var info = new FileInfo(sourcePath);
@@ -4033,14 +4096,24 @@ internal sealed class AdvertisementManagerDialog : Form
 {
     private readonly KioskSettings _settings;
     private readonly DateTime? _previewNow;
+    private readonly Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>>
+        _syncAdvertisements;
     private readonly ListView _list = new();
     private readonly PictureBox _preview = new();
     private readonly Label _details = new();
+    private readonly Label _syncStatus = new();
+    private readonly Label _lastSync = new();
+    private readonly ProgressBar _syncProgress = new();
+    private readonly Button _syncButton = new();
 
-    public AdvertisementManagerDialog(KioskSettings settings, DateTime? previewNow)
+    public AdvertisementManagerDialog(
+        KioskSettings settings,
+        DateTime? previewNow,
+        Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>> syncAdvertisements)
     {
         _settings = settings;
         _previewNow = previewNow;
+        _syncAdvertisements = syncAdvertisements;
         Text = "Manage Thank-You Page Advertisements";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
@@ -4048,7 +4121,7 @@ internal sealed class AdvertisementManagerDialog : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
-        ClientSize = new Size(960, 650);
+        ClientSize = new Size(960, 730);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.White;
 
@@ -4071,7 +4144,7 @@ internal sealed class AdvertisementManagerDialog : Form
             Bounds = new Rectangle(25, 51, 890, 25)
         };
 
-        _list.Bounds = new Rectangle(25, 82, 620, 480);
+        _list.Bounds = new Rectangle(25, 82, 620, 355);
         _list.View = View.Details;
         _list.FullRowSelect = true;
         _list.MultiSelect = false;
@@ -4088,9 +4161,49 @@ internal sealed class AdvertisementManagerDialog : Form
         _preview.SizeMode = PictureBoxSizeMode.Zoom;
         _preview.BackColor = Color.FromArgb(247, 251, 253);
         _details.AutoSize = false;
-        _details.Bounds = new Rectangle(675, 345, 250, 125);
+        _details.Bounds = new Rectangle(675, 345, 250, 90);
         _details.ForeColor = Color.FromArgb(16, 24, 32);
         _details.Font = new Font("Segoe UI", 9.5f);
+
+        var syncGroup = new GroupBox
+        {
+            Text = "Kiosk Manager Advertisement Sync",
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            ForeColor = Color.FromArgb(8, 119, 189),
+            Bounds = new Rectangle(25, 455, 900, 165)
+        };
+        _syncStatus.AutoSize = false;
+        _syncStatus.Text = _settings.AdvertisementLastSyncStatus;
+        _syncStatus.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _syncStatus.ForeColor = Color.FromArgb(52, 65, 76);
+        _syncStatus.Bounds = new Rectangle(18, 27, 640, 40);
+        _lastSync.AutoSize = false;
+        _lastSync.Font = new Font("Segoe UI", 9.5f);
+        _lastSync.ForeColor = Color.FromArgb(83, 97, 109);
+        _lastSync.Bounds = new Rectangle(18, 67, 640, 28);
+        _syncProgress.Minimum = 0;
+        _syncProgress.Maximum = 100;
+        _syncProgress.Style = ProgressBarStyle.Continuous;
+        _syncProgress.Bounds = new Rectangle(18, 105, 640, 24);
+        _syncButton.Text = "Sync Ads Now";
+        _syncButton.Bounds = new Rectangle(680, 48, 195, 52);
+        _syncButton.BackColor = Color.FromArgb(117, 68, 154);
+        _syncButton.ForeColor = Color.White;
+        _syncButton.FlatStyle = FlatStyle.Flat;
+        _syncButton.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        _syncButton.Click += async (_, _) => await SyncNowAsync();
+        var syncNote = new Label
+        {
+            AutoSize = false,
+            Text = "Manager changes also sync automatically while this kiosk is connected.",
+            Font = new Font("Segoe UI", 8.5f),
+            ForeColor = Color.FromArgb(83, 97, 109),
+            Bounds = new Rectangle(680, 105, 195, 38),
+            TextAlign = ContentAlignment.TopCenter
+        };
+        syncGroup.Controls.AddRange([
+            _syncStatus, _lastSync, _syncProgress, _syncButton, syncNote]);
+        RefreshSyncStatus();
 
         var addButton = CreateButton("Add Advertisement", 25, Color.FromArgb(118, 196, 66));
         addButton.Click += (_, _) => AddAdvertisement();
@@ -4104,7 +4217,7 @@ internal sealed class AdvertisementManagerDialog : Form
         var closeButton = new Button
         {
             Text = "Close",
-            Bounds = new Rectangle(805, 584, 120, 42),
+            Bounds = new Rectangle(805, 655, 120, 42),
             DialogResult = DialogResult.OK,
             BackColor = Color.FromArgb(238, 250, 255),
             FlatStyle = FlatStyle.Flat,
@@ -4114,7 +4227,7 @@ internal sealed class AdvertisementManagerDialog : Form
         AcceptButton = closeButton;
         CancelButton = closeButton;
         Controls.AddRange([
-            heading, note, _list, _preview, _details,
+            heading, note, _list, _preview, _details, syncGroup,
             addButton, editButton, toggleButton, deleteButton, closeButton]);
         FormClosed += (_, _) => _preview.Image?.Dispose();
         RefreshList();
@@ -4123,14 +4236,64 @@ internal sealed class AdvertisementManagerDialog : Form
     private static Button CreateButton(string text, int x, Color color) => new()
     {
         Text = text,
-        Bounds = new Rectangle(x, 584, 120, 42),
+        Bounds = new Rectangle(x, 655, 120, 42),
         BackColor = color,
         FlatStyle = FlatStyle.Flat,
         Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
     };
 
     private KioskAdvertisement? SelectedAdvertisement =>
-        _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as KioskAdvertisement : null;
+            _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as KioskAdvertisement : null;
+
+    private async Task SyncNowAsync()
+    {
+        _syncButton.Enabled = false;
+        _syncProgress.Value = 0;
+        _syncStatus.Text = "Starting advertisement sync…";
+        _syncStatus.ForeColor = Color.FromArgb(8, 119, 189);
+        try
+        {
+            var progress = new Progress<AdvertisementSyncProgress>(update =>
+            {
+                if (IsDisposed) return;
+                _syncProgress.Value = Math.Clamp(update.Percent, 0, 100);
+                _syncStatus.Text = update.Message;
+            });
+            var result = await _syncAdvertisements(progress);
+            if (IsDisposed) return;
+
+            RefreshSyncStatus();
+            if (result.Success)
+            {
+                _syncProgress.Value = 100;
+                _syncStatus.ForeColor = Color.FromArgb(54, 128, 27);
+                RefreshList();
+            }
+            else
+            {
+                _syncProgress.Value = 0;
+                _syncStatus.Text = result.Message;
+                _syncStatus.ForeColor = Color.FromArgb(180, 35, 24);
+                MessageBox.Show(this, result.Message, "Advertisement Sync",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+        finally
+        {
+            if (!IsDisposed)
+                _syncButton.Enabled = true;
+        }
+    }
+
+    private void RefreshSyncStatus()
+    {
+        _syncStatus.Text = _settings.AdvertisementLastSyncStatus;
+        _lastSync.Text = _settings.AdvertisementLastSyncUtc.HasValue
+            ? "Last successful sync: " +
+              _settings.AdvertisementLastSyncUtc.Value.ToLocalTime()
+                  .ToString("MMM d, yyyy h:mm:ss tt")
+            : "Last successful sync: Never";
+    }
 
     private void RefreshList(string? selectId = null)
     {

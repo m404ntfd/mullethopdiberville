@@ -20,11 +20,14 @@ internal sealed class KioskCheckInRequest
     public string LastCommandId { get; set; } = string.Empty;
     public bool LastCommandSuccess { get; set; }
     public string LastCommandMessage { get; set; } = string.Empty;
+    public string AdvertisementSyncRevision { get; set; } = string.Empty;
+    public DateTime? AdvertisementLastSyncUtc { get; set; }
 }
 
 internal sealed class KioskCheckInResponse
 {
     public KioskCommand? Command { get; set; }
+    public string AdvertisementRevision { get; set; } = string.Empty;
 }
 
 internal sealed class KioskCommand
@@ -54,6 +57,8 @@ internal sealed class ManagedKiosk
     public string LastIpAddress { get; set; } = string.Empty;
     public string LastResult { get; set; } = "Waiting for the first command.";
     public bool LastResultSuccess { get; set; } = true;
+    public string AdvertisementSyncRevision { get; set; } = string.Empty;
+    public DateTime? AdvertisementLastSyncUtc { get; set; }
     public KioskCommand? PendingCommand { get; set; }
 
     public bool IsOnline => DateTime.UtcNow - LastSeenUtc < TimeSpan.FromSeconds(18);
@@ -69,6 +74,8 @@ internal sealed class ManagedKiosk
         LastIpAddress = LastIpAddress,
         LastResult = LastResult,
         LastResultSuccess = LastResultSuccess,
+        AdvertisementSyncRevision = AdvertisementSyncRevision,
+        AdvertisementLastSyncUtc = AdvertisementLastSyncUtc,
         PendingCommand = PendingCommand?.Clone()
     };
 }
@@ -77,6 +84,9 @@ internal sealed class ControllerData
 {
     public string PairingKey { get; set; } = string.Empty;
     public List<ManagedKiosk> Kiosks { get; set; } = [];
+    public List<ControllerAdvertisement> Advertisements { get; set; } = [];
+    public string AdvertisementRevision { get; set; } = string.Empty;
+    public DateTime? AdvertisementUpdatedUtc { get; set; }
 }
 
 internal sealed class ControllerState
@@ -108,12 +118,99 @@ internal sealed class ControllerState
         }
     }
 
+    public string AdvertisementRevision
+    {
+        get
+        {
+            lock (_gate)
+                return _data.AdvertisementRevision;
+        }
+    }
+
+    public DateTime? AdvertisementUpdatedUtc
+    {
+        get
+        {
+            lock (_gate)
+                return _data.AdvertisementUpdatedUtc;
+        }
+    }
+
     public IReadOnlyList<ManagedKiosk> Snapshot()
     {
         lock (_gate)
             return _data.Kiosks.Select(kiosk => kiosk.Clone())
                 .OrderBy(kiosk => kiosk.StationName, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
+    }
+
+    public IReadOnlyList<ControllerAdvertisement> AdvertisementSnapshot()
+    {
+        lock (_gate)
+            return _data.Advertisements.Select(advertisement => advertisement.Clone())
+                .OrderBy(advertisement => advertisement.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+    }
+
+    public void SaveAdvertisements(IEnumerable<ControllerAdvertisement> advertisements)
+    {
+        lock (_gate)
+        {
+            var normalized = advertisements.Select(advertisement => advertisement.Clone()).ToList();
+            foreach (var advertisement in normalized)
+                advertisement.Normalize();
+
+            _data.Advertisements = normalized;
+            _data.AdvertisementRevision = Guid.NewGuid().ToString("N");
+            _data.AdvertisementUpdatedUtc = DateTime.UtcNow;
+            SaveLocked();
+            ControllerLog.Write(
+                $"Published advertisement catalog {_data.AdvertisementRevision} with {normalized.Count} ad(s).");
+        }
+    }
+
+    public AdvertisementSyncPackage CreateAdvertisementSyncPackage()
+    {
+        lock (_gate)
+        {
+            var package = new AdvertisementSyncPackage
+            {
+                Revision = _data.AdvertisementRevision,
+                GeneratedUtc = DateTime.UtcNow
+            };
+
+            if (string.IsNullOrWhiteSpace(package.Revision))
+                return package;
+
+            foreach (var advertisement in _data.Advertisements)
+            {
+                var path = ControllerAdvertisementFiles.GetSafePath(advertisement.ImageFileName);
+                if (path is null || !File.Exists(path))
+                {
+                    ControllerLog.Write(
+                        $"Manager advertisement image is missing for {advertisement.Name}.");
+                    throw new FileNotFoundException(
+                        $"The manager advertisement image for {advertisement.Name} is missing.");
+                }
+
+                package.Advertisements.Add(new AdvertisementSyncItem
+                {
+                    Id = advertisement.Id,
+                    Name = advertisement.Name,
+                    ImageFileName = advertisement.ImageFileName,
+                    ImageBase64 = Convert.ToBase64String(File.ReadAllBytes(path)),
+                    Enabled = advertisement.Enabled,
+                    ScheduleType = (int)advertisement.ScheduleType,
+                    StartDateTime = advertisement.StartDateTime,
+                    EndDateTime = advertisement.EndDateTime,
+                    DaysOfWeek = advertisement.DaysOfWeek.Select(day => (int)day).ToArray(),
+                    DailyStartTime = advertisement.DailyStartTime,
+                    DailyEndTime = advertisement.DailyEndTime
+                });
+            }
+
+            return package;
+        }
     }
 
     public KioskCommand? ProcessCheckIn(KioskCheckInRequest request, string ipAddress)
@@ -135,6 +232,9 @@ internal sealed class ControllerState
             kiosk.StationClosed = request.StationClosed;
             kiosk.LastSeenUtc = DateTime.UtcNow;
             kiosk.LastIpAddress = Clean(ipAddress, string.Empty, 80);
+            kiosk.AdvertisementSyncRevision = Clean(
+                request.AdvertisementSyncRevision, string.Empty, 80);
+            kiosk.AdvertisementLastSyncUtc = request.AdvertisementLastSyncUtc;
 
             if (kiosk.PendingCommand is not null &&
                 string.Equals(kiosk.PendingCommand.Id, request.LastCommandId, StringComparison.Ordinal))
@@ -203,6 +303,10 @@ internal sealed class ControllerState
             var data = JsonSerializer.Deserialize<ControllerData>(File.ReadAllText(_dataPath), JsonOptions)
                        ?? new ControllerData();
             data.Kiosks ??= [];
+            data.Advertisements ??= [];
+            data.AdvertisementRevision ??= string.Empty;
+            foreach (var advertisement in data.Advertisements)
+                advertisement.Normalize();
             return data;
         }
         catch (Exception ex)

@@ -54,7 +54,7 @@ program starts. When a newer release is available, the kiosk downloads it,
 installs it, and restarts automatically before opening for guests.
 
 Staff can also press Ctrl + Alt + Shift + F12, open Staff Settings, and select
-"Check for Kiosk Update." Update failures are written to the normal kiosk log
+"Check for Updates." Update failures are written to the normal kiosk log
 and do not prevent the waiver from opening.
 
 The first upgrade from the older script-built kiosk to version 2.0.0 cannot be
@@ -119,6 +119,8 @@ and Ads & Staff Tools tabs.
 * Preview the waiver using a selected browser date and time.
 * Return a date/time preview to the live date and time.
 * Add, edit, enable, disable, or delete scheduled JPG advertisements.
+* View kiosk-manager advertisement sync status and progress, see the last
+  successful sync time, or start a manual sync.
 * Preview the complete thank-you page with all ads active for the current or
   staff-previewed date and time.
 * Turn the guest-facing "Waiver Station Closed" page on or off. This setting is
@@ -173,6 +175,19 @@ Select "Preview Thank-You Page" in Staff Settings to display the exact completio
 screen guests will see. Advertisement schedules are evaluated using the date and
 time currently shown in Staff Settings, including a future preview time. The
 normal thank-you countdown returns the kiosk to a fresh waiver automatically.
+
+When the kiosk is paired with version 1.3.0 or newer of the Kiosk Controller,
+the controller's Manage Ads window becomes the shared advertisement source.
+Adding, editing, enabling, disabling, or deleting a manager ad publishes a new
+catalog. Connected kiosks automatically download the changed catalog. Staff can
+also use Sync Ads Now in the kiosk advertisement window. The sync section shows
+transfer progress, the result, and the last successful sync time.
+
+Every successful sync is saved as a complete local catalog, including the JPG
+files and all schedules. If the kiosk manager is offline or cannot be found, the
+kiosk continues displaying that last synced local catalog. A failed sync never
+clears the saved ads. A later successful manager sync replaces the local catalog
+with the newly published manager catalog.
 
 
 WHAT THE KIOSK DOES
@@ -336,7 +351,7 @@ The repository includes .github/workflows/release.yml. To publish a new version:
 4. Choose "Publish Kiosk Update" and select "Run workflow."
 5. Wait for the workflow to finish successfully. It creates a public GitHub
    Release containing the Setup program and Velopack update packages.
-6. Restart a kiosk, or use "Check for Kiosk Update" in Staff Settings.
+6. Restart a kiosk, or use "Check for Updates" in Staff Settings.
 
 The workflow uses GitHub's built-in GITHUB_TOKEN only while publishing the
 release. No token is compiled into or stored on the kiosk computer.

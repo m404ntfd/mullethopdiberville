@@ -22,6 +22,7 @@ internal sealed class ControllerForm : Form
     private readonly Button _checkUpdateButton = new();
     private readonly Button _installUpdateButton = new();
     private readonly Button _controllerUpdateButton = new();
+    private readonly Button _manageAdsButton = new();
     private readonly Button _restartControllerButton = new();
     private readonly Button _closeControllerButton = new();
     private readonly Label _controllerUpdateStatus = new();
@@ -315,23 +316,32 @@ internal sealed class ControllerForm : Form
         var controllerButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            ColumnCount = 4,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
         ConfigureTableActionButton(_controllerUpdateButton, "Check Updates", Color.FromArgb(8, 119, 189), Color.White);
+        ConfigureTableActionButton(_manageAdsButton, "Manage Ads", Color.FromArgb(117, 68, 154), Color.White);
         ConfigureTableActionButton(_restartControllerButton, "Restart", Color.FromArgb(245, 130, 32));
         ConfigureTableActionButton(_closeControllerButton, "Close", Color.FromArgb(180, 35, 24), Color.White);
         _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync(showUpToDateMessage: true);
+        _manageAdsButton.Click += (_, _) =>
+        {
+            using var advertisements = new ControllerAdvertisementManagerDialog(_state);
+            advertisements.ShowDialog(this);
+            RefreshKioskList();
+        };
         _restartControllerButton.Click += (_, _) => RestartController();
         _closeControllerButton.Click += (_, _) => CloseController();
         controllerButtons.Controls.Add(_controllerUpdateButton, 0, 0);
-        controllerButtons.Controls.Add(_restartControllerButton, 1, 0);
-        controllerButtons.Controls.Add(_closeControllerButton, 2, 0);
+        controllerButtons.Controls.Add(_manageAdsButton, 1, 0);
+        controllerButtons.Controls.Add(_restartControllerButton, 2, 0);
+        controllerButtons.Controls.Add(_closeControllerButton, 3, 0);
 
         controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
         controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);
@@ -355,14 +365,15 @@ internal sealed class ControllerForm : Form
         _kioskList.GridLines = true;
         _kioskList.BackColor = Color.White;
         _kioskList.BorderStyle = BorderStyle.FixedSingle;
-        _kioskList.Columns.Add("Status", 85);
-        _kioskList.Columns.Add("Kiosk Name", 170);
-        _kioskList.Columns.Add("PC Name", 145);
-        _kioskList.Columns.Add("Version", 80);
-        _kioskList.Columns.Add("Guest Screen", 105);
-        _kioskList.Columns.Add("Command / Result", 365);
-        _kioskList.Columns.Add("Last Seen", 115);
-        _kioskList.Columns.Add("IP Address", 125);
+        _kioskList.Columns.Add("Status", 80);
+        _kioskList.Columns.Add("Kiosk Name", 150);
+        _kioskList.Columns.Add("PC Name", 120);
+        _kioskList.Columns.Add("Version", 70);
+        _kioskList.Columns.Add("Guest", 90);
+        _kioskList.Columns.Add("Ads Synced", 125);
+        _kioskList.Columns.Add("Command / Result", 295);
+        _kioskList.Columns.Add("Last Seen", 105);
+        _kioskList.Columns.Add("IP Address", 120);
         _kioskList.SelectedIndexChanged += (_, _) => UpdateActionButtons();
         _kioskList.DoubleClick += (_, _) =>
         {
@@ -430,6 +441,7 @@ internal sealed class ControllerForm : Form
                 item.SubItems.Add(kiosk.MachineName);
                 item.SubItems.Add(kiosk.Version);
                 item.SubItems.Add(kiosk.StationClosed ? "Closed" : "Open");
+                item.SubItems.Add(FormatAdvertisementSync(kiosk));
                 item.SubItems.Add(commandText);
                 item.SubItems.Add(FormatLastSeen(kiosk.LastSeenUtc));
                 item.SubItems.Add(kiosk.LastIpAddress);
@@ -682,6 +694,20 @@ internal sealed class ControllerForm : Form
         if (age < TimeSpan.FromMinutes(1)) return $"{Math.Max(1, (int)age.TotalSeconds)} sec ago";
         if (age < TimeSpan.FromHours(1)) return $"{(int)age.TotalMinutes} min ago";
         return value.ToLocalTime().ToString("MMM d h:mm tt");
+    }
+
+    private string FormatAdvertisementSync(ManagedKiosk kiosk)
+    {
+        if (string.IsNullOrWhiteSpace(_state.AdvertisementRevision))
+            return "Not published";
+        if (!string.Equals(
+                kiosk.AdvertisementSyncRevision,
+                _state.AdvertisementRevision,
+                StringComparison.Ordinal))
+            return "Pending";
+        return kiosk.AdvertisementLastSyncUtc.HasValue
+            ? kiosk.AdvertisementLastSyncUtc.Value.ToLocalTime().ToString("MMM d h:mm tt")
+            : "Synced";
     }
 
     private static IEnumerable<string> GetControllerAddresses()
