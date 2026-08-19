@@ -10,7 +10,100 @@ internal static class KioskDiscoveryProtocol
     public const int ControllerPort = 47832;
     public const string ControllerBasePath = "/mullethop/";
     public const string AnnouncementPath = "api/discovery/announce";
+    private const string ManualSetupPrefix = "MHK1:";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public static string CreateManualSetupCode(
+        string controllerAddress,
+        string pairingKey,
+        string controllerName)
+    {
+        var payload = new KioskManualSetupPayload
+        {
+            ControllerAddress = NormalizeControllerAddress(controllerAddress),
+            PairingKey = ValidatePairingKey(pairingKey),
+            ControllerName = CleanControllerName(controllerName)
+        };
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
+        return ManualSetupPrefix + Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    public static KioskManualSetupPayload ParseManualSetupCode(string value)
+    {
+        value = value?.Trim() ?? string.Empty;
+        if (!value.StartsWith(ManualSetupPrefix, StringComparison.OrdinalIgnoreCase) ||
+            value.Length is < 20 or > 4_096)
+        {
+            throw new InvalidDataException(
+                "The manual setup code is not a valid Mullet Hop kiosk code.");
+        }
+
+        try
+        {
+            var encoded = value[ManualSetupPrefix.Length..]
+                .Replace('-', '+')
+                .Replace('_', '/');
+            encoded = encoded.PadRight(encoded.Length + ((4 - encoded.Length % 4) % 4), '=');
+            var bytes = Convert.FromBase64String(encoded);
+            var payload = JsonSerializer.Deserialize<KioskManualSetupPayload>(bytes, JsonOptions)
+                          ?? throw new InvalidDataException("The manual setup code was empty.");
+            payload.ControllerAddress = NormalizeControllerAddress(payload.ControllerAddress);
+            payload.PairingKey = ValidatePairingKey(payload.PairingKey);
+            payload.ControllerName = CleanControllerName(payload.ControllerName);
+            return payload;
+        }
+        catch (FormatException ex)
+        {
+            throw new InvalidDataException("The manual setup code is damaged or incomplete.", ex);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("The manual setup code could not be read.", ex);
+        }
+    }
+
+    private static string NormalizeControllerAddress(string value)
+    {
+        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri) ||
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+            uri.Port != ControllerPort ||
+            !string.Equals(
+                uri.AbsolutePath.TrimEnd('/'),
+                ControllerBasePath.TrimEnd('/'),
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment))
+        {
+            throw new InvalidDataException("The controller address in the setup code is invalid.");
+        }
+
+        return new UriBuilder(uri)
+        {
+            Path = ControllerBasePath,
+            Query = string.Empty,
+            Fragment = string.Empty
+        }.Uri.AbsoluteUri;
+    }
+
+    private static string ValidatePairingKey(string value)
+    {
+        value = value?.Trim() ?? string.Empty;
+        if (value.Length is < 16 or > 1_000)
+            throw new InvalidDataException("The controller pairing key is missing or incomplete.");
+        return value;
+    }
+
+    private static string CleanControllerName(string value)
+    {
+        value = string.IsNullOrWhiteSpace(value) ? "Kiosk Controller" : value.Trim();
+        if (value.Length > 200)
+            throw new InvalidDataException("The controller computer name is too long.");
+        return value;
+    }
 
     public static ECDiffieHellman CreateKioskKey() =>
         ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -164,6 +257,13 @@ internal static class KioskDiscoveryProtocol
             CryptographicOperations.ZeroMemory(sharedSecret);
         }
     }
+}
+
+internal sealed class KioskManualSetupPayload
+{
+    public string ControllerAddress { get; set; } = string.Empty;
+    public string PairingKey { get; set; } = string.Empty;
+    public string ControllerName { get; set; } = string.Empty;
 }
 
 internal sealed class KioskDiscoveryAnnouncement
