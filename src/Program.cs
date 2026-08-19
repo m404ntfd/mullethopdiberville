@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using MulletHop.KioskDiscovery;
 using Velopack;
 using Velopack.Sources;
 
@@ -5058,6 +5059,14 @@ internal sealed class RemoteManagementSettingsDialog : Form
     private readonly KioskSettings _settings;
     private readonly CheckBox _enabled = new();
     private readonly TextBox _stationName = new();
+    private readonly TextBox _manualSetupCode = new();
+    private readonly Label _manualStatus = new();
+    private readonly Button _connectManual = new();
+    private readonly Label _connectionValue = new();
+    private readonly Label _adapterValue = new();
+    private readonly Label _ipValue = new();
+    private readonly Label _subnetValue = new();
+    private readonly Label _gatewayValue = new();
 
     public RemoteManagementSettingsDialog(KioskSettings settings)
     {
@@ -5069,7 +5078,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
-        ClientSize = new Size(640, 390);
+        ClientSize = new Size(760, 720);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.White;
 
@@ -5080,15 +5089,15 @@ internal sealed class RemoteManagementSettingsDialog : Form
             Font = new Font("Segoe UI", 20, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
             TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(25, 16, 590, 45)
+            Bounds = new Rectangle(25, 14, 710, 42)
         };
         var note = new Label
         {
             AutoSize = false,
-            Text = "Turn on remote control and give this kiosk a name. After you save, the kiosk will appear under Discover Kiosks on a controller computer on the same network.",
+            Text = "Turn on remote control and give this kiosk a name. Use automatic discovery normally, or use the manual setup code if discovery cannot find this computer.",
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = Color.FromArgb(52, 65, 76),
-            Bounds = new Rectangle(38, 64, 564, 68)
+            Bounds = new Rectangle(48, 55, 664, 55)
         };
 
         _enabled.Text = "Enable remote control and network discovery for this kiosk";
@@ -5096,26 +5105,95 @@ internal sealed class RemoteManagementSettingsDialog : Form
         _enabled.AutoSize = true;
         _enabled.Font = new Font("Segoe UI", 10, FontStyle.Bold);
         _enabled.ForeColor = Color.FromArgb(8, 119, 189);
-        _enabled.Location = new Point(45, 148);
+        _enabled.Location = new Point(35, 117);
 
-        var stationLabel = MakeLabel("Kiosk Name:", 45, 205);
+        var stationLabel = MakeLabel("Kiosk Name:", 35, 164);
         _stationName.Text = settings.StationName;
         _stationName.MaxLength = 60;
-        _stationName.Bounds = new Rectangle(180, 199, 400, 32);
+        _stationName.Bounds = new Rectangle(170, 158, 555, 32);
 
-        var securityNote = new Label
+        var networkGroup = new GroupBox
+        {
+            Text = "Current Device and Network Connection",
+            Bounds = new Rectangle(30, 202, 700, 190),
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            ForeColor = Color.FromArgb(8, 119, 189)
+        };
+        ConfigureNetworkValue(_connectionValue, 168, 27, 500);
+        ConfigureNetworkValue(_adapterValue, 168, 55, 500);
+        ConfigureNetworkValue(_ipValue, 168, 83, 210);
+        ConfigureNetworkValue(_subnetValue, 510, 83, 158);
+        ConfigureNetworkValue(_gatewayValue, 168, 111, 210);
+        var deviceIdValue = new Label
         {
             AutoSize = false,
-            Text = "On the controller, select Discover Kiosks and request to add this kiosk. Approve the confirmation shown here. The secure connection information will be exchanged and saved automatically.",
-            ForeColor = Color.FromArgb(83, 97, 109),
-            TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(45, 246, 535, 62)
+            Text = settings.StationId,
+            Bounds = new Rectangle(168, 139, 500, 24),
+            ForeColor = Color.FromArgb(52, 65, 76),
+            Font = new Font("Consolas", 9.2f, FontStyle.Bold),
+            TextAlign = ContentAlignment.MiddleLeft
         };
+        var refreshNetwork = new Button
+        {
+            Text = "Refresh",
+            Bounds = new Rectangle(585, 108, 83, 28),
+            BackColor = Color.FromArgb(238, 250, 255),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+        };
+        refreshNetwork.Click += (_, _) => RefreshNetworkDetails();
+        networkGroup.Controls.AddRange([
+            MakeNetworkLabel("Connection:", 18, 29),
+            MakeNetworkLabel("Adapter:", 18, 57),
+            MakeNetworkLabel("IPv4 Address:", 18, 85),
+            MakeNetworkLabel("Subnet Mask:", 397, 85),
+            MakeNetworkLabel("Default Gateway:", 18, 113),
+            MakeNetworkLabel("Stable Device ID:", 18, 141),
+            _connectionValue, _adapterValue, _ipValue, _subnetValue, _gatewayValue,
+            deviceIdValue, refreshNetwork]);
+
+        var manualGroup = new GroupBox
+        {
+            Text = "Manual Connection Fallback",
+            Bounds = new Rectangle(30, 402, 700, 228),
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            ForeColor = Color.FromArgb(245, 130, 32)
+        };
+        var manualNote = new Label
+        {
+            AutoSize = false,
+            Text = "On the Kiosk Controller, select Add Kiosk Manually and copy its setup code. Paste the one code below; the controller address and secure pairing key are included automatically.",
+            Bounds = new Rectangle(18, 25, 664, 48),
+            ForeColor = Color.FromArgb(52, 65, 76),
+            Font = new Font("Segoe UI", 9.2f),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        _manualSetupCode.Multiline = true;
+        _manualSetupCode.ScrollBars = ScrollBars.Vertical;
+        _manualSetupCode.WordWrap = true;
+        _manualSetupCode.MaxLength = 4096;
+        _manualSetupCode.Bounds = new Rectangle(18, 79, 664, 62);
+        _manualSetupCode.Font = new Font("Consolas", 8.5f);
+        _manualSetupCode.PlaceholderText = "Paste the MHK1 setup code from the Kiosk Controller";
+        _connectManual.Text = "Connect and Save";
+        _connectManual.Bounds = new Rectangle(18, 151, 175, 42);
+        _connectManual.BackColor = Color.FromArgb(245, 130, 32);
+        _connectManual.FlatStyle = FlatStyle.Flat;
+        _connectManual.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _connectManual.Click += async (_, _) => await ConnectManuallyAsync();
+        _manualStatus.AutoSize = false;
+        _manualStatus.Text = "The setup code is sensitive staff information. It is tested before anything is saved.";
+        _manualStatus.Bounds = new Rectangle(208, 149, 474, 49);
+        _manualStatus.ForeColor = Color.FromArgb(83, 97, 109);
+        _manualStatus.TextAlign = ContentAlignment.MiddleLeft;
+        _manualStatus.Font = new Font("Segoe UI", 8.8f, FontStyle.Bold);
+        manualGroup.Controls.AddRange([
+            manualNote, _manualSetupCode, _connectManual, _manualStatus]);
 
         var save = new Button
         {
             Text = "Save Options",
-            Bounds = new Rectangle(45, 324, 180, 44),
+            Bounds = new Rectangle(30, 650, 190, 46),
             BackColor = Color.FromArgb(118, 196, 66),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -5124,7 +5202,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
         var cancel = new Button
         {
             Text = "Cancel",
-            Bounds = new Rectangle(400, 324, 180, 44),
+            Bounds = new Rectangle(540, 650, 190, 46),
             DialogResult = DialogResult.Cancel,
             BackColor = Color.FromArgb(238, 250, 255),
             FlatStyle = FlatStyle.Flat,
@@ -5134,7 +5212,9 @@ internal sealed class RemoteManagementSettingsDialog : Form
         AcceptButton = save;
         CancelButton = cancel;
         Controls.AddRange([
-            heading, note, _enabled, stationLabel, _stationName, securityNote, save, cancel]);
+            heading, note, _enabled, stationLabel, _stationName,
+            networkGroup, manualGroup, save, cancel]);
+        RefreshNetworkDetails();
         KioskTheme.Apply(this, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
     }
 
@@ -5146,6 +5226,114 @@ internal sealed class RemoteManagementSettingsDialog : Form
         ForeColor = Color.FromArgb(16, 24, 32),
         Location = new Point(x, y)
     };
+
+    private static Label MakeNetworkLabel(string text, int x, int y) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        Font = new Font("Segoe UI", 9, FontStyle.Bold),
+        ForeColor = Color.FromArgb(52, 65, 76),
+        Location = new Point(x, y)
+    };
+
+    private static void ConfigureNetworkValue(Label label, int x, int y, int width)
+    {
+        label.AutoSize = false;
+        label.Bounds = new Rectangle(x, y, width, 24);
+        label.ForeColor = Color.FromArgb(16, 24, 32);
+        label.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+        label.TextAlign = ContentAlignment.MiddleLeft;
+        label.AutoEllipsis = true;
+    }
+
+    private void RefreshNetworkDetails()
+    {
+        var details = KioskNetworkDetailsProvider.GetCurrent();
+        _connectionValue.Text = details.ConnectionName;
+        _adapterValue.Text = details.AdapterDescription;
+        _ipValue.Text = details.IpAddress;
+        _subnetValue.Text = details.SubnetMask;
+        _gatewayValue.Text = details.DefaultGateway;
+    }
+
+    private async Task ConnectManuallyAsync()
+    {
+        KioskManualSetupPayload payload;
+        try
+        {
+            payload = KioskDiscoveryProtocol.ParseManualSetupCode(_manualSetupCode.Text);
+        }
+        catch (InvalidDataException ex)
+        {
+            _manualStatus.Text = ex.Message;
+            _manualStatus.ForeColor = Color.FromArgb(180, 35, 24);
+            _manualSetupCode.Focus();
+            return;
+        }
+
+        var replacing = RemoteManagementProtocol.IsConfigurationValid(
+            _settings.RemoteControllerUrl, _settings.RemotePairingKey, out _) &&
+            (!string.Equals(
+                 _settings.RemoteControllerUrl,
+                 payload.ControllerAddress,
+                 StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(_settings.RemotePairingKey, payload.PairingKey, StringComparison.Ordinal));
+        if (replacing)
+        {
+            var answer = MessageBox.Show(this,
+                "This kiosk is already connected to a controller. Replace that saved connection with " +
+                payload.ControllerName + "?",
+                "Replace Controller Connection?",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes)
+                return;
+        }
+
+        _connectManual.Enabled = false;
+        _connectManual.Text = "Testing…";
+        _manualStatus.Text = "Testing the secure connection to " + payload.ControllerName + "…";
+        _manualStatus.ForeColor = Color.FromArgb(8, 119, 189);
+        try
+        {
+            var test = await RemoteManagementProtocol.TestAsync(
+                payload.ControllerAddress, payload.PairingKey);
+            if (!test.Success)
+            {
+                _manualStatus.Text = test.Message;
+                _manualStatus.ForeColor = Color.FromArgb(180, 35, 24);
+                return;
+            }
+
+            var stationName = _stationName.Text.Trim();
+            _settings.StationName = string.IsNullOrWhiteSpace(stationName)
+                ? Environment.MachineName
+                : stationName;
+            _settings.RemoteControllerUrl = payload.ControllerAddress;
+            _settings.RemotePairingKey = payload.PairingKey;
+            _settings.RemoteManagementEnabled = true;
+            _settings.Save();
+            KioskLog.Write(
+                $"Manual kiosk setup connected {_settings.StationName} to {payload.ControllerName} at {payload.ControllerAddress}.");
+            MessageBox.Show(this,
+                "Connected securely to " + payload.ControllerName +
+                ". This kiosk will now check in using its stable Device ID, even if DHCP changes the kiosk's IP address.",
+                "Manual Connection Saved",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                _connectManual.Enabled = true;
+                _connectManual.Text = "Connect and Save";
+            }
+        }
+    }
 
     private void SaveSettings()
     {

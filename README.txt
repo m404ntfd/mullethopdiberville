@@ -80,9 +80,10 @@ kiosks, check one kiosk for an update without installing it, or tell one kiosk t
 install an available update. The controller can also publish Business Hours and
 Kiosk Appearance settings, including Auto/Light/Dark mode and a selected-day
 Dark-mode schedule, to one kiosk or all kiosks. The lower-right Controller
-Program section can check for controller updates, restart the controller, or
-close it. The controller also checks for its own updates automatically whenever
-it opens.
+Program section can check for controller updates, choose the single master
+controller, restart the controller, or close it. Red and green lenses show the
+saved master role, and local controllers discover each other when they launch.
+The controller also checks for its own updates automatically whenever it opens.
 
 Download the controller package from:
 
@@ -90,8 +91,8 @@ https://github.com/m404ntfd/mullethopdiberville/releases/latest
 
 On each kiosk, press Ctrl + Alt + M, open Staff Settings, and select Remote
 Control Options. Check Enable remote control and network discovery, give the
-kiosk a unique name, and save. No controller address or pairing key is entered on
-the kiosk. On the office PC, select Discover Kiosks. A fresh 15-second network
+kiosk a unique name, and save. No controller address or pairing key is entered
+for normal discovery. On the office PC, select Discover Kiosks. A fresh 15-second network
 scan starts automatically; select Scan Again to repeat it. Select the named kiosk
 from the fresh results and choose Request Add. The kiosk displays the controller
 computer and address and requires someone at that kiosk to approve the request
@@ -99,6 +100,27 @@ within two minutes. The encrypted pairing exchange saves the connection
 information automatically, and the first authenticated check-in saves the kiosk
 in the controller. A linked POS Controller then adds the kiosk to its next open
 Kiosk 1-4 position and saves that assignment automatically.
+
+If discovery does not show the kiosk, select Add Kiosk Manually on the
+controller and copy its one setup code. On the kiosk, Remote Control Options now
+shows the active connection, adapter, current IPv4 address, subnet mask, default
+gateway, and stable Device ID. Paste the code under Manual Connection Fallback
+and select Connect and Save. The kiosk tests the signed connection before saving
+it; the address and pairing key are contained in the one code.
+
+The saved kiosk identity is the persistent Device ID, not the IP or MAC address.
+Every check-in updates the current IP shown by the controller. If DHCP later
+assigns a different address to the kiosk computer, it keeps the same Device ID,
+checks in from the new address, and remains the same saved kiosk. MAC matching is
+not needed and would be less dependable on computers with multiple adapters or
+randomized Wi-Fi MAC addresses.
+
+In the Controller Program section, select Make This Master to designate the
+primary local controller. A confirmation and fresh peer scan are required. If
+another reachable master exists, the change is refused. When two controllers
+that were temporarily isolated see each other again, they automatically resolve
+the duplicate role so only one remains master. The green lens is lit on the
+master; the red lens is lit on every non-master controller.
 
 Controller version 1.1.0 or newer must be installed once with its Setup-based
 package to establish automatic updates. When a controller update is downloaded,
@@ -112,11 +134,11 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Kiosk Controller version 1.9.0 adds the manual 15-second network scan and Scan
-Again button. Waiver Kiosk version 2.8.1 responds reliably within the scan window.
-It remains discoverable only when Remote Control Options is enabled, and the
-approval prompt, encrypted pairing exchange, saved connection, and authenticated
-remote commands remain unchanged.
+Kiosk Controller version 1.10.0 adds the manual setup-code fallback, controller
+peer discovery, and the single-master indicator and toggle. Waiver Kiosk version
+2.9.0 adds the network details and manual connection entry. Automatic discovery,
+the approval prompt, encrypted pairing exchange, saved Device ID, and
+authenticated remote commands remain available.
 
 
 FRONT-DESK POS CONTROLLER

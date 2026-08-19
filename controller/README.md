@@ -1,7 +1,8 @@
 # Mullet Hop Kiosk Controller
 
-The controller is installed on one Windows 10 or Windows 11 office computer on
-the same private network as the waiver kiosks. It provides:
+The controller is installed on a Windows 10 or Windows 11 office computer on
+the same private network as the waiver kiosks. Additional local controller
+computers discover each other, and one can be designated as the master. It provides:
 
 * Online/offline, version, open/closed, last-seen, and IP status per kiosk.
 * Open Selected and Close Selected controls.
@@ -17,6 +18,8 @@ the same private network as the waiver kiosks. It provides:
   from the kiosk network.
 * A signed status/control connection for the separate front-desk POS Controller.
 * Local-network kiosk discovery with a required approval prompt on the kiosk.
+* A one-code manual pairing fallback when automatic kiosk discovery is blocked.
+* A persistent red/green master-controller indicator with single-master checks.
 
 
 INSTALL THE CONTROLLER PC
@@ -101,6 +104,41 @@ HMAC-SHA256 signature and a short-lived timestamp. If the controller's local IP
 address changes, an enabled kiosk verifies the controller with its saved key and
 updates the saved address automatically.
 
+If a kiosk does not appear in the discovery scan:
+
+1. Select **Add Kiosk Manually** in Controller Connection Information and copy
+   the generated setup code.
+2. At the kiosk, open **Remote Control Options**. This page now displays the
+   active connection, adapter, IPv4 address, subnet mask, default gateway, and
+   stable Device ID.
+3. Paste the code under **Manual Connection Fallback** and select **Connect and
+   Save**. The kiosk tests the signed controller connection before saving it.
+
+The setup code contains the selected controller address and secure pairing key,
+so staff do not enter either value separately. Treat the code like the pairing
+key. The controller saves the kiosk by its persistent Device ID. Its last IP
+address is refreshed on every check-in, so a new kiosk address assigned by DHCP
+does not create a duplicate and does not break the saved connection. A MAC
+address is not used because computers can have multiple adapters and randomized
+Wi-Fi MAC addresses.
+
+
+MASTER CONTROLLER ROLE
+----------------------
+
+The Controller Program section has dark red and green indicator lenses and a
+**Make This Master** button. Green means this controller is the master; red means
+it is not. Local controller applications scan the private network when they
+launch, recheck known controllers every few seconds, and show the detected
+master computer by name.
+
+Selecting **Make This Master** requires confirmation and performs a fresh
+network scan. The change is refused while another reachable controller is
+already master. If two previously isolated controllers later meet while both
+claim the role, they use the saved master time and stable controller ID to
+resolve the conflict automatically, leaving one master. Off-site Remote Mode
+controllers cannot be assigned as the local master.
+
 
 USE THE DASHBOARD
 -----------------
@@ -121,8 +159,9 @@ confirmation. Offline stations retain the latest queued command and carry it out
 when they reconnect.
 
 The lower-right Controller Program section includes the controller's own
-Auto/Light/Dark appearance selector plus Check Updates, Manage Ads, Business
-Hours, Remote Access, Restart, and Close buttons. If a downloaded update is
+Auto/Light/Dark appearance selector, master-controller indicator and toggle,
+plus Check Updates, Manage Ads, Business Hours, Remote Access, Restart, and Close
+buttons. If a downloaded update is
 waiting, Restart offers to install it. Closing the controller does not change a
 kiosk's current open/closed state, but new remote commands are unavailable until
 the controller starts again.
@@ -177,12 +216,13 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.9.0 adds a fresh, user-triggered 15-second network scan
-with progress, results, and a Scan Again option. Waiver Kiosk version 2.8.1 retries
-unpaired discovery frequently enough to respond within that scan window. The
-secure approval prompt and saved pairing process are unchanged. Controller version
-1.7.0 adds the separate POS Controller connection. Waiver Kiosk version 2.6.0 adds
-live open-to-guests and error-state reporting plus the reset-to-start command.
+Kiosk Controller version 1.10.0 adds manual setup codes, controller peer
+discovery, and the single-master indicator and toggle. Waiver Kiosk version 2.9.0
+adds current IPv4, subnet, gateway, connection, and stable Device ID details plus
+the manual connection fallback. Automatic approval-based discovery remains
+available. Controller version 1.7.0 adds the separate POS Controller connection.
+Waiver Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus
+the reset-to-start command.
 
 
 REMOVE THE CONTROLLER

@@ -20,11 +20,13 @@ internal sealed class ControllerServer : IDisposable
 
     public bool IsRunning => _listener.IsListening;
     public KioskDiscoveryCoordinator Discovery { get; }
+    public ControllerPeerCoordinator Peers { get; }
 
     public ControllerServer(ControllerState state)
     {
         _state = state;
         Discovery = new KioskDiscoveryCoordinator(state);
+        Peers = new ControllerPeerCoordinator(state);
         _listener.Prefixes.Add($"http://+:{Port}{BasePath}");
     }
 
@@ -34,6 +36,7 @@ internal sealed class ControllerServer : IDisposable
             return;
         _listener.Start();
         _listenTask = Task.Run(ListenAsync);
+        Peers.Start();
         ControllerLog.Write($"Controller service listening on TCP {Port}.");
     }
 
@@ -80,6 +83,39 @@ internal sealed class ControllerServer : IDisposable
             using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
             var body = await reader.ReadToEndAsync();
             var path = context.Request.Url?.AbsolutePath.TrimEnd('/') ?? string.Empty;
+            if (string.Equals(
+                    path,
+                    BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.PresencePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var remoteAddress = context.Request.RemoteEndPoint?.Address;
+                var localAddress = context.Request.LocalEndPoint?.Address;
+                if (remoteAddress is null || localAddress is null || !IsPrivateOrLocal(remoteAddress))
+                {
+                    await WritePlainResponseAsync(
+                        context, HttpStatusCode.Forbidden, "Controller discovery is limited to the local network.");
+                    return;
+                }
+
+                var presence = JsonSerializer.Deserialize<ControllerPeerPresence>(body, JsonOptions);
+                if (presence is null)
+                {
+                    await WritePlainResponseAsync(
+                        context, HttpStatusCode.BadRequest, "Invalid controller presence announcement.");
+                    return;
+                }
+                try
+                {
+                    var response = Peers.ProcessPresence(presence, remoteAddress, localAddress);
+                    await WriteJsonResponseAsync(context, response);
+                }
+                catch (InvalidDataException ex)
+                {
+                    ControllerLog.Write("Rejected controller presence announcement: " + ex.Message);
+                    await WritePlainResponseAsync(context, HttpStatusCode.BadRequest, ex.Message);
+                }
+                return;
+            }
             if (string.Equals(
                     path,
                     BasePath.TrimEnd('/') + "/api/discovery/announce",
@@ -318,6 +354,7 @@ internal sealed class ControllerServer : IDisposable
 
     public void Dispose()
     {
+        Peers.Dispose();
         _stopping.Cancel();
         if (_listener.IsListening)
             _listener.Stop();

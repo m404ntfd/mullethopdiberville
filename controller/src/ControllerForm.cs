@@ -31,13 +31,23 @@ internal sealed class ControllerForm : Form
     private readonly ComboBox _themeSelector = new();
     private readonly Label _controllerUpdateStatus = new();
     private readonly Label _controllerUpdateReady = new();
+    private readonly ControllerStatusLight _masterRed = new(
+        Color.FromArgb(244, 34, 48), Color.FromArgb(80, 25, 29));
+    private readonly ControllerStatusLight _masterGreen = new(
+        Color.FromArgb(38, 205, 91), Color.FromArgb(23, 75, 42));
+    private readonly Label _masterStatus = new();
+    private readonly Button _masterToggleButton = new();
     private readonly RemoteAccessSettings _remoteSettings = RemoteAccessSettingsStore.Load();
     private CloudSyncService? _cloudSync;
     private bool _lastResolvedDarkMode;
+    private bool _masterChangeInProgress;
 
     public ControllerForm()
     {
+        if (_remoteSettings.IsRemoteMachine && _state.IsMaster)
+            _state.SetMaster(false, "remote-mode controllers cannot be the local master");
         _server = new ControllerServer(_state);
+        _server.Peers.PeersChanged += ControllerPeersChanged;
         Text = "Mullet Hop Kiosk Controller";
         var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         if (appIcon is not null)
@@ -67,6 +77,7 @@ internal sealed class ControllerForm : Form
         Shown += async (_, _) =>
         {
             StartControllerServices();
+            UpdateMasterStatus();
             await CheckControllerUpdateAsync(showUpToDateMessage: false);
         };
         FormClosed += (_, _) =>
@@ -125,7 +136,7 @@ internal sealed class ControllerForm : Form
         var group = new GroupBox
         {
             Dock = DockStyle.Top,
-            Height = 175,
+            Height = 215,
             Padding = new Padding(18, 24, 18, 10),
             Text = "Controller Connection Information",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
@@ -137,7 +148,7 @@ internal sealed class ControllerForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 4,
-            RowCount = 3,
+            RowCount = 4,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
             BackColor = Color.White
@@ -149,6 +160,7 @@ internal sealed class ControllerForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
 
         var addressLabel = new Label
         {
@@ -200,7 +212,7 @@ internal sealed class ControllerForm : Form
         {
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Text = "Enable network discovery and set a name in each kiosk's Remote Control Options, then use Discover Kiosks to run a fresh network scan. Connection information is exchanged automatically after kiosk approval.",
+            Text = "Use Discover Kiosks for automatic pairing. If a waiver station does not appear, use Add Kiosk Manually and paste its one setup code into Remote Control Options on that kiosk.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -208,6 +220,8 @@ internal sealed class ControllerForm : Form
         };
         var discover = MakeTableButton("Discover Kiosks", Color.FromArgb(245, 130, 32));
         discover.Click += (_, _) => OpenKioskDiscovery();
+        var manualAdd = MakeTableButton("Add Kiosk Manually", Color.FromArgb(105, 210, 236));
+        manualAdd.Click += (_, _) => OpenManualKioskSetup();
 
         layout.Controls.Add(addressLabel, 0, 0);
         layout.Controls.Add(_addresses, 1, 0);
@@ -218,8 +232,9 @@ internal sealed class ControllerForm : Form
         layout.Controls.Add(viewKey, 2, 1);
         layout.Controls.Add(copyKey, 3, 1);
         layout.Controls.Add(note, 0, 2);
-        layout.SetColumnSpan(note, 3);
-        layout.Controls.Add(discover, 3, 2);
+        layout.SetColumnSpan(note, 4);
+        layout.Controls.Add(manualAdd, 2, 3);
+        layout.Controls.Add(discover, 3, 3);
         group.Controls.Add(layout);
         return group;
     }
@@ -244,6 +259,44 @@ internal sealed class ControllerForm : Form
         using var discovery = new KioskDiscoveryDialog(_server.Discovery, _state);
         discovery.ShowDialog(this);
         RefreshKioskList();
+    }
+
+    private void OpenManualKioskSetup()
+    {
+        if (_remoteSettings.IsRemoteMachine)
+        {
+            MessageBox.Show(this,
+                "Manual kiosk setup is available only from the on-site controller computer on the same local network as the waiver kiosk.",
+                "Add Kiosk Manually", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (!_server.IsRunning)
+        {
+            MessageBox.Show(this,
+                "The local controller service is not running. Resolve the network service error, then try again.",
+                "Add Kiosk Manually", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_addresses.Text) ||
+            _addresses.Text.Contains("localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(this,
+                "This computer does not currently have a usable private-network IPv4 address. Connect it to the kiosk network, then restart the controller.",
+                "Add Kiosk Manually", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            using var setup = new ManualKioskSetupDialog(_state, _addresses.Text);
+            setup.ShowDialog(this);
+            RefreshKioskList();
+        }
+        catch (InvalidDataException ex)
+        {
+            MessageBox.Show(this, ex.Message, "Add Kiosk Manually",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     private Panel BuildSummaryPanel()
@@ -350,13 +403,14 @@ internal sealed class ControllerForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         controllerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         _controllerUpdateStatus.Text = $"Version {ControllerUpdater.CurrentVersion} — checking for updates…";
@@ -406,6 +460,38 @@ internal sealed class ControllerForm : Form
         _themeSelector.SelectedIndexChanged += (_, _) => ChangeControllerTheme();
         appearancePanel.Controls.AddRange([appearanceLabel, _themeSelector]);
 
+        var masterPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 4,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 3, 0, 3)
+        };
+        masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
+        masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
+        masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        _masterRed.Dock = DockStyle.Fill;
+        _masterRed.Margin = new Padding(1);
+        _masterGreen.Dock = DockStyle.Fill;
+        _masterGreen.Margin = new Padding(1);
+        _masterStatus.Dock = DockStyle.Fill;
+        _masterStatus.TextAlign = ContentAlignment.MiddleLeft;
+        _masterStatus.Font = new Font("Segoe UI", 8.7f, FontStyle.Bold);
+        _masterStatus.ForeColor = Color.FromArgb(52, 65, 76);
+        _masterStatus.AutoEllipsis = true;
+        _masterStatus.Margin = new Padding(5, 0, 4, 0);
+        _masterToggleButton.Dock = DockStyle.Fill;
+        _masterToggleButton.Margin = new Padding(3, 1, 0, 1);
+        _masterToggleButton.FlatStyle = FlatStyle.Flat;
+        _masterToggleButton.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+        _masterToggleButton.Click += async (_, _) => await ToggleMasterAsync();
+        masterPanel.Controls.Add(_masterRed, 0, 0);
+        masterPanel.Controls.Add(_masterGreen, 1, 0);
+        masterPanel.Controls.Add(_masterStatus, 2, 0);
+        masterPanel.Controls.Add(_masterToggleButton, 3, 0);
+
         var controllerButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -450,7 +536,8 @@ internal sealed class ControllerForm : Form
         controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
         controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);
         controllerLayout.Controls.Add(appearancePanel, 0, 2);
-        controllerLayout.Controls.Add(controllerButtons, 0, 3);
+        controllerLayout.Controls.Add(masterPanel, 0, 3);
+        controllerLayout.Controls.Add(controllerButtons, 0, 4);
         controllerGroup.Controls.Add(controllerLayout);
 
         sections.Controls.Add(kioskGroup, 0, 0);
@@ -581,6 +668,7 @@ internal sealed class ControllerForm : Form
 
     private void RefreshKioskList()
     {
+        UpdateMasterStatus();
         var selectedId = SelectedStationId();
         var kiosks = _state.Snapshot();
         _kioskList.BeginUpdate();
@@ -626,6 +714,132 @@ internal sealed class ControllerForm : Form
         _closedSummary.Text = $"{kiosks.Count(kiosk => kiosk.StationClosed)} CLOSED";
         _totalSummary.Text = $"{kiosks.Count} KNOWN KIOSKS";
         UpdateActionButtons();
+    }
+
+    private void ControllerPeersChanged()
+    {
+        if (IsDisposed || Disposing || !IsHandleCreated)
+            return;
+        try { BeginInvoke((Action)UpdateMasterStatus); }
+        catch (InvalidOperationException) { }
+    }
+
+    private void UpdateMasterStatus()
+    {
+        if (_masterStatus.IsDisposed)
+            return;
+        var isMaster = _state.IsMaster;
+        _masterGreen.Active = isMaster;
+        _masterRed.Active = !isMaster;
+
+        if (_remoteSettings.IsRemoteMachine)
+        {
+            _masterStatus.Text = "Remote controller — not eligible for local master";
+            _masterToggleButton.Text = "Local Controllers Only";
+            _masterToggleButton.Enabled = false;
+            _masterToggleButton.BackColor = Color.FromArgb(235, 238, 241);
+            return;
+        }
+
+        var otherMaster = _server.Peers.Snapshot().FirstOrDefault(peer => peer.IsMaster);
+        if (isMaster)
+        {
+            _masterStatus.Text = "This controller is MASTER";
+            _masterStatus.ForeColor = ControllerTheme.SuccessText;
+            _masterToggleButton.Text = "Remove Master";
+            _masterToggleButton.BackColor = Color.FromArgb(255, 217, 188);
+        }
+        else
+        {
+            _masterStatus.Text = otherMaster is null
+                ? "NOT MASTER — no master detected"
+                : $"NOT MASTER — master: {otherMaster.MachineName}";
+            _masterStatus.ForeColor = otherMaster is null
+                ? ControllerTheme.ErrorText
+                : ControllerTheme.MutedText;
+            _masterToggleButton.Text = "Make This Master";
+            _masterToggleButton.BackColor = Color.FromArgb(118, 196, 66);
+        }
+        _masterToggleButton.ForeColor = Color.FromArgb(16, 24, 32);
+        _masterToggleButton.Enabled = !_masterChangeInProgress;
+    }
+
+    private async Task ToggleMasterAsync()
+    {
+        if (_masterChangeInProgress || _remoteSettings.IsRemoteMachine)
+            return;
+        if (_state.IsMaster)
+        {
+            var remove = MessageBox.Show(this,
+                "Remove the master role from this controller?\n\nThe network may have no master until another controller is assigned.",
+                "Remove Master Controller?",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (remove != DialogResult.Yes)
+                return;
+            _state.SetMaster(false, "removed by the user");
+            UpdateMasterStatus();
+            return;
+        }
+
+        var answer = MessageBox.Show(this,
+            "Make this computer the master Kiosk Controller?\n\n" +
+            "Only one controller on the local network can be master. The program will scan for another master before saving this change.",
+            "Make This the Master Controller?",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.Yes)
+            return;
+
+        _masterChangeInProgress = true;
+        UpdateMasterStatus();
+        try
+        {
+            await _server.Peers.ScanNowAsync();
+            var existingMaster = _server.Peers.Snapshot().FirstOrDefault(peer => peer.IsMaster);
+            if (existingMaster is not null)
+            {
+                MessageBox.Show(this,
+                    $"{existingMaster.MachineName} is already the master controller at " +
+                    existingMaster.ControllerAddress +
+                    ".\n\nRemove its master role before making this controller the master.",
+                    "Master Controller Already Exists",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            _state.SetMaster(true, "assigned by the user after a network scan");
+            await _server.Peers.ScanNowAsync();
+            if (_state.IsMaster)
+            {
+                MessageBox.Show(this,
+                    "This computer is now the master Kiosk Controller.",
+                    "Master Controller Saved",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            else
+            {
+                var resolvedMaster = _server.Peers.Snapshot()
+                    .FirstOrDefault(peer => peer.IsMaster);
+                MessageBox.Show(this,
+                    resolvedMaster is null
+                        ? "Another controller claimed the master role at the same time. This controller remained a non-master controller."
+                        : resolvedMaster.MachineName +
+                          " retained the master role after the controllers resolved a simultaneous change. This controller remained a non-master controller.",
+                    "Master Role Resolved",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+        finally
+        {
+            _masterChangeInProgress = false;
+            UpdateMasterStatus();
+        }
     }
 
     private void QueueSelected(string type, bool? closed = null)

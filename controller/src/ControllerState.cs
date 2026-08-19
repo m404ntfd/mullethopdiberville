@@ -121,6 +121,9 @@ internal sealed class PosCommandRequest
 internal sealed class ControllerData
 {
     public string PairingKey { get; set; } = string.Empty;
+    public string ControllerId { get; set; } = string.Empty;
+    public bool IsMaster { get; set; }
+    public DateTime? MasterSinceUtc { get; set; }
     public List<ManagedKiosk> Kiosks { get; set; } = [];
     public List<ControllerAdvertisement> Advertisements { get; set; } = [];
     public string AdvertisementRevision { get; set; } = string.Empty;
@@ -143,11 +146,29 @@ internal sealed class ControllerState
     public ControllerState()
     {
         _data = Load();
+        var changed = false;
         if (string.IsNullOrWhiteSpace(_data.PairingKey))
         {
             _data.PairingKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-            SaveLocked();
+            changed = true;
         }
+        if (!Guid.TryParseExact(_data.ControllerId, "N", out _))
+        {
+            _data.ControllerId = Guid.NewGuid().ToString("N");
+            changed = true;
+        }
+        if (!_data.IsMaster && _data.MasterSinceUtc.HasValue)
+        {
+            _data.MasterSinceUtc = null;
+            changed = true;
+        }
+        if (_data.IsMaster && !_data.MasterSinceUtc.HasValue)
+        {
+            _data.MasterSinceUtc = DateTime.UtcNow;
+            changed = true;
+        }
+        if (changed)
+            SaveLocked();
     }
 
     public string PairingKey
@@ -156,6 +177,35 @@ internal sealed class ControllerState
         {
             lock (_gate)
                 return _data.PairingKey;
+        }
+    }
+
+    public string ControllerId
+    {
+        get { lock (_gate) return _data.ControllerId; }
+    }
+
+    public bool IsMaster
+    {
+        get { lock (_gate) return _data.IsMaster; }
+    }
+
+    public DateTime? MasterSinceUtc
+    {
+        get { lock (_gate) return _data.MasterSinceUtc; }
+    }
+
+    public void SetMaster(bool isMaster, string reason)
+    {
+        lock (_gate)
+        {
+            if (_data.IsMaster == isMaster)
+                return;
+            _data.IsMaster = isMaster;
+            _data.MasterSinceUtc = isMaster ? DateTime.UtcNow : null;
+            SaveLocked();
+            ControllerLog.Write(
+                $"Controller master role changed to {(isMaster ? "MASTER" : "NOT MASTER")}: {reason}");
         }
     }
 
@@ -573,6 +623,7 @@ internal sealed class ControllerState
 
             var data = JsonSerializer.Deserialize<ControllerData>(File.ReadAllText(_dataPath), JsonOptions)
                        ?? new ControllerData();
+            data.ControllerId ??= string.Empty;
             data.Kiosks ??= [];
             data.Advertisements ??= [];
             data.AdvertisementRevision ??= string.Empty;
