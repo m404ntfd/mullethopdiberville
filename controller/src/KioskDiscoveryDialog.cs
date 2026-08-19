@@ -2,13 +2,18 @@ namespace MulletHopKioskController;
 
 internal sealed class KioskDiscoveryDialog : Form
 {
+    private const int ScanDurationSeconds = 15;
     private readonly KioskDiscoveryCoordinator _discovery;
     private readonly ControllerState _state;
     private readonly ListView _devices = new();
     private readonly Label _status = new();
+    private readonly Button _scanNetwork = new();
     private readonly Button _requestAdd = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 1_000 };
     private readonly HashSet<string> _reportedPairings = new(StringComparer.Ordinal);
+    private DateTime? _scanStartedUtc;
+    private DateTime? _scanEndsUtc;
+    private bool _scanCompletionReported;
 
     public KioskDiscoveryDialog(KioskDiscoveryCoordinator discovery, ControllerState state)
     {
@@ -26,7 +31,7 @@ internal sealed class KioskDiscoveryDialog : Form
             Dock = DockStyle.Top,
             Height = 56,
             Padding = new Padding(20, 14, 20, 0),
-            Text = "DISCOVER KIOSKS ON THIS NETWORK",
+            Text = "SCAN THIS NETWORK FOR WAIVER KIOSKS",
             Font = new Font("Segoe UI", 18, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
             BackColor = Color.White
@@ -36,8 +41,8 @@ internal sealed class KioskDiscoveryDialog : Form
             Dock = DockStyle.Top,
             Height = 62,
             Padding = new Padding(20, 6, 20, 8),
-            Text = "Waiver kiosks running the current app will appear automatically. Select one and choose Request Add. " +
-                   "Someone must then press Yes on that kiosk within two minutes.",
+            Text = "Select Scan Network to run a fresh 15-second search for kiosks with Remote Control Options enabled. " +
+                   "Select a result and choose Request Add; someone must then press Yes on that kiosk within two minutes.",
             ForeColor = Color.FromArgb(52, 65, 76),
             BackColor = Color.White
         };
@@ -54,8 +59,8 @@ internal sealed class KioskDiscoveryDialog : Form
         _refreshTimer.Tick += (_, _) => RefreshDevices();
         Shown += (_, _) =>
         {
-            RefreshDevices();
             _refreshTimer.Start();
+            StartNetworkScan();
         };
         FormClosed += (_, _) => _refreshTimer.Stop();
         ControllerTheme.Apply(this);
@@ -115,9 +120,19 @@ internal sealed class KioskDiscoveryDialog : Form
         _requestAdd.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         _requestAdd.Click += (_, _) => RequestSelectedKiosk();
 
+        _scanNetwork.Text = "Scan Network";
+        _scanNetwork.Dock = DockStyle.Right;
+        _scanNetwork.Width = 145;
+        _scanNetwork.BackColor = Color.FromArgb(8, 119, 189);
+        _scanNetwork.ForeColor = Color.White;
+        _scanNetwork.FlatStyle = FlatStyle.Flat;
+        _scanNetwork.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _scanNetwork.Click += (_, _) => StartNetworkScan();
+
         footer.Controls.Add(_status);
         footer.Controls.Add(close);
         footer.Controls.Add(_requestAdd);
+        footer.Controls.Add(_scanNetwork);
         CancelButton = close;
         return footer;
     }
@@ -128,7 +143,10 @@ internal sealed class KioskDiscoveryDialog : Form
         var savedIds = _state.Snapshot()
             .Select(kiosk => kiosk.StationId)
             .ToHashSet(StringComparer.Ordinal);
-        var discovered = _discovery.Snapshot();
+        var discovered = _discovery.Snapshot()
+            .Where(kiosk => !_scanStartedUtc.HasValue ||
+                            kiosk.LastSeenUtc >= _scanStartedUtc.Value)
+            .ToList();
 
         _devices.BeginUpdate();
         try
@@ -185,13 +203,65 @@ internal sealed class KioskDiscoveryDialog : Form
             _devices.EndUpdate();
         }
 
-        if (discovered.Count == 0)
+        if (IsScanInProgress())
         {
-            _status.Text =
-                "No kiosks found yet. Keep this window open; an unpaired kiosk normally appears within 15 seconds.";
+            var secondsRemaining = Math.Max(
+                1,
+                (int)Math.Ceiling((_scanEndsUtc!.Value - DateTime.UtcNow).TotalSeconds));
+            _scanNetwork.Text = $"Scanning… {secondsRemaining}s";
+            _status.Text = discovered.Count == 0
+                ? "Scanning the local network for enabled waiver kiosks…"
+                : $"Scanning… found {discovered.Count} kiosk{(discovered.Count == 1 ? "" : "s")} so far.";
+            _status.ForeColor = ControllerTheme.AccentText;
+        }
+        else if (_scanEndsUtc.HasValue && !_scanCompletionReported)
+        {
+            _scanCompletionReported = true;
+            _scanNetwork.Text = "Scan Again";
+            _scanNetwork.Enabled = true;
+            _status.Text = discovered.Count == 0
+                ? "Scan complete. No kiosks responded. Make sure Remote Control Options is enabled on each kiosk and all computers are on the same private network."
+                : $"Scan complete. Found {discovered.Count} kiosk{(discovered.Count == 1 ? "" : "s")}. Select one, then choose Request Add.";
+            _status.ForeColor = discovered.Count == 0
+                ? ControllerTheme.ErrorText
+                : ControllerTheme.SuccessText;
+            ControllerLog.Write(
+                $"Manual kiosk network scan completed with {discovered.Count} result{(discovered.Count == 1 ? "" : "s")}.");
+        }
+        else if (discovered.Count == 0 && !_scanStartedUtc.HasValue)
+        {
+            _status.Text = "Select Scan Network to look for waiver kiosks on this private network.";
             _status.ForeColor = ControllerTheme.MutedText;
         }
         UpdateRequestButton();
+    }
+
+    private void StartNetworkScan()
+    {
+        _scanStartedUtc = DateTime.UtcNow;
+        _scanEndsUtc = _scanStartedUtc.Value.AddSeconds(ScanDurationSeconds);
+        _scanCompletionReported = false;
+        _scanNetwork.Enabled = false;
+        _scanNetwork.Text = $"Scanning… {ScanDurationSeconds}s";
+        _status.Text = "Scanning the local network for enabled waiver kiosks…";
+        _status.ForeColor = ControllerTheme.AccentText;
+        _devices.Items.Clear();
+        _requestAdd.Enabled = false;
+        ControllerLog.Write("Manual kiosk network scan started.");
+        RefreshDevices();
+    }
+
+    private bool IsScanInProgress() =>
+        _scanEndsUtc.HasValue && _scanEndsUtc.Value > DateTime.UtcNow;
+
+    private void StopScanForPairing()
+    {
+        if (!_scanEndsUtc.HasValue)
+            return;
+        _scanEndsUtc = DateTime.UtcNow;
+        _scanCompletionReported = true;
+        _scanNetwork.Enabled = true;
+        _scanNetwork.Text = "Scan Again";
     }
 
     private void RequestSelectedKiosk()
@@ -200,6 +270,7 @@ internal sealed class KioskDiscoveryDialog : Form
         if (stationId is null)
             return;
         var result = _discovery.QueuePairing(stationId);
+        StopScanForPairing();
         _status.Text = result.Success
             ? "Request sent. Go to the selected waiver kiosk and press Yes within two minutes."
             : result.Message;

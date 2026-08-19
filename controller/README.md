@@ -81,8 +81,9 @@ network discovery.
    **Remote Control Options**.
 3. Check **Enable remote control and network discovery**, enter a unique kiosk
    name, and save. No controller address or pairing key is needed.
-4. On the controller, select **Discover Kiosks**.
-5. Select the named kiosk and choose **Request Add**.
+4. On the controller, select **Discover Kiosks**. A fresh 15-second network scan
+   starts automatically. Select **Scan Again** whenever you want to repeat it.
+5. Select the named kiosk from the fresh scan results and choose **Request Add**.
 6. At the waiver kiosk, verify the controller computer and address shown in the
    prompt, then select **Yes** within two minutes.
 7. The controller reports **Added and Saved** after the kiosk completes its
@@ -176,12 +177,12 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Waiver Kiosk version 2.8.0 simplifies Remote Control Options to an enable checkbox
-and kiosk name, with no network information entered by the kiosk user. Controller
-version 1.8.0 or newer supports approval-based local discovery and saved pairing.
-Controller version 1.7.0 adds the separate POS Controller connection. Waiver
-Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus the
-reset-to-start command.
+Kiosk Controller version 1.9.0 adds a fresh, user-triggered 15-second network scan
+with progress, results, and a Scan Again option. Waiver Kiosk version 2.8.1 retries
+unpaired discovery frequently enough to respond within that scan window. The
+secure approval prompt and saved pairing process are unchanged. Controller version
+1.7.0 adds the separate POS Controller connection. Waiver Kiosk version 2.6.0 adds
+live open-to-guests and error-state reporting plus the reset-to-start command.
 
 
 REMOVE THE CONTROLLER
