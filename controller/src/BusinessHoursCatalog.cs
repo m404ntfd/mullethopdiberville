@@ -185,6 +185,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
         };
         Shown += (_, _) => _refreshTimer.Start();
         FormClosed += (_, _) => _refreshTimer.Stop();
+        ControllerTheme.Apply(this);
     }
 
     private void SaveAndPublish()
