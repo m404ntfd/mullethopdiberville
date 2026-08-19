@@ -37,10 +37,14 @@ internal sealed class ControllerForm : Form
         Color.FromArgb(38, 205, 91), Color.FromArgb(23, 75, 42));
     private readonly Label _masterStatus = new();
     private readonly Button _masterToggleButton = new();
+    private readonly NotifyIcon _trayIcon = new();
+    private readonly ContextMenuStrip _trayMenu = new();
     private readonly RemoteAccessSettings _remoteSettings = RemoteAccessSettingsStore.Load();
     private CloudSyncService? _cloudSync;
     private bool _lastResolvedDarkMode;
     private bool _masterChangeInProgress;
+    private bool _allowApplicationExit;
+    private bool _trayNoticeShown;
 
     public ControllerForm()
     {
@@ -51,7 +55,15 @@ internal sealed class ControllerForm : Form
         Text = "Mullet Hop Kiosk Controller";
         var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         if (appIcon is not null)
+        {
             Icon = appIcon;
+            _trayIcon.Icon = (Icon)appIcon.Clone();
+        }
+        else
+        {
+            _trayIcon.Icon = SystemIcons.Application;
+        }
+        ConfigureTrayIcon();
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1180, 760);
         ClientSize = new Size(1320, 820);
@@ -85,6 +97,15 @@ internal sealed class ControllerForm : Form
             _refreshTimer.Stop();
             _cloudSync?.Dispose();
             _server.Dispose();
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _trayMenu.Dispose();
+        };
+        FormClosing += HandleFormClosing;
+        Resize += (_, _) =>
+        {
+            if (WindowState == FormWindowState.Minimized)
+                BeginInvoke(new Action(HideControllerInTray));
         };
         Activated += (_, _) =>
         {
@@ -92,6 +113,61 @@ internal sealed class ControllerForm : Form
                 _lastResolvedDarkMode != ControllerTheme.IsDark)
                 ApplyControllerTheme();
         };
+    }
+
+    private void ConfigureTrayIcon()
+    {
+        var open = new ToolStripMenuItem("Open Kiosk Controller");
+        open.Click += (_, _) => RestoreControllerFromTray();
+        _trayMenu.Items.Add(open);
+        _trayIcon.Text = "Mullet Hop Kiosk Controller";
+        _trayIcon.ContextMenuStrip = _trayMenu;
+        _trayIcon.Visible = true;
+        _trayIcon.DoubleClick += (_, _) => RestoreControllerFromTray();
+    }
+
+    private void HandleFormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (_allowApplicationExit ||
+            e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing)
+        {
+            _trayIcon.Visible = false;
+            return;
+        }
+
+        e.Cancel = true;
+        HideControllerInTray();
+    }
+
+    private void HideControllerInTray()
+    {
+        if (IsDisposed || _allowApplicationExit)
+            return;
+
+        ShowInTaskbar = false;
+        Hide();
+        WindowState = FormWindowState.Normal;
+        if (_trayNoticeShown)
+            return;
+
+        _trayNoticeShown = true;
+        _trayIcon.BalloonTipTitle = "Kiosk Controller is still running";
+        _trayIcon.BalloonTipText =
+            "The controller service remains active. Double-click the fish icon to reopen it.";
+        _trayIcon.BalloonTipIcon = ToolTipIcon.Info;
+        _trayIcon.ShowBalloonTip(3_000);
+    }
+
+    private void RestoreControllerFromTray()
+    {
+        if (IsDisposed)
+            return;
+
+        ShowInTaskbar = true;
+        Show();
+        WindowState = FormWindowState.Normal;
+        Activate();
+        BringToFront();
     }
 
     private Panel BuildHeader()
@@ -512,7 +588,7 @@ internal sealed class ControllerForm : Form
         ConfigureTableActionButton(_businessHoursButton, "Business Hours", Color.FromArgb(118, 196, 66));
         ConfigureTableActionButton(_remoteAccessButton, "Remote Access", Color.FromArgb(105, 210, 236));
         ConfigureTableActionButton(_restartControllerButton, "Restart Controller", Color.FromArgb(245, 130, 32));
-        ConfigureTableActionButton(_closeControllerButton, "Close Controller", Color.FromArgb(180, 35, 24), Color.White);
+        ConfigureTableActionButton(_closeControllerButton, "Exit Program", Color.FromArgb(180, 35, 24), Color.White);
         foreach (var button in new[]
                  {
                      _controllerUpdateButton,
@@ -657,7 +733,7 @@ internal sealed class ControllerForm : Form
         var answer = MessageBox.Show(this,
             "Remote access settings were saved. Restart the controller now to apply them?",
             "Remote Access", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-        if (answer == DialogResult.Yes) Program.RestartApplication();
+        if (answer == DialogResult.Yes) RestartControllerApplication();
     }
 
     private static Image? LoadHeaderLogo()
@@ -932,7 +1008,7 @@ internal sealed class ControllerForm : Form
             }
 
             _controllerUpdateButton.Text = "Installing…";
-            var installResult = ControllerUpdater.ApplyStagedUpdateAndRestart();
+            var installResult = ApplyControllerUpdateAndRestart();
             if (!IsDisposed && installResult.Status != ControllerUpdateStatus.Applying)
             {
                 MessageBox.Show(this, installResult.Message, "Controller Update",
@@ -963,7 +1039,7 @@ internal sealed class ControllerForm : Form
                 MessageBoxIcon.Question);
             if (answer == DialogResult.Yes)
             {
-                var result = ControllerUpdater.ApplyStagedUpdateAndRestart();
+                var result = ApplyControllerUpdateAndRestart();
                 if (result.Status != ControllerUpdateStatus.Applying)
                 {
                     MessageBox.Show(this, result.Message, "Controller Update",
@@ -979,18 +1055,42 @@ internal sealed class ControllerForm : Form
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
         if (restart == DialogResult.Yes)
-            Program.RestartApplication();
+            RestartControllerApplication();
     }
 
     private void CloseController()
     {
         var answer = MessageBox.Show(this,
-            "Close the kiosk controller?\n\nKiosks will keep their current state, but remote commands will be unavailable until the controller starts again.",
-            "Close Kiosk Controller",
+            "Exit the kiosk controller program?\n\nKiosks will keep their current state, but remote commands will be unavailable until the controller starts again. Closing the window with X only sends it to the system tray.",
+            "Exit Kiosk Controller",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
         if (answer == DialogResult.Yes)
+        {
+            _allowApplicationExit = true;
+            _trayIcon.Visible = false;
             Close();
+        }
+    }
+
+    private void RestartControllerApplication()
+    {
+        _allowApplicationExit = true;
+        _trayIcon.Visible = false;
+        Program.RestartApplication();
+    }
+
+    private ControllerUpdateResult ApplyControllerUpdateAndRestart()
+    {
+        _allowApplicationExit = true;
+        _trayIcon.Visible = false;
+        var result = ControllerUpdater.ApplyStagedUpdateAndRestart();
+        if (result.Status == ControllerUpdateStatus.Applying)
+            return result;
+
+        _allowApplicationExit = false;
+        _trayIcon.Visible = true;
+        return result;
     }
 
     private void ShowDeferredUpdateReady()
