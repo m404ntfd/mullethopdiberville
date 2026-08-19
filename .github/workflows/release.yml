@@ -49,6 +49,16 @@ jobs:
           }
           "value=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - name: Read POS controller version
+        id: pos_version
+        shell: pwsh
+        run: |
+          $projectText = Get-Content -LiteralPath "pos-controller/src/MulletHopPosController.csproj" -Raw
+          if ($projectText -notmatch '<Version>([^<]+)</Version>') {
+            throw 'The POS controller project file does not contain a Version value.'
+          }
+          "value=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Assemble screensaver video
         shell: pwsh
         run: ./scripts/Assemble-Screensaver.ps1
@@ -58,6 +68,7 @@ jobs:
         run: |
           dotnet restore src/MulletHopWaiverKiosk.csproj
           dotnet restore controller/src/MulletHopKioskController.csproj
+          dotnet restore pos-controller/src/MulletHopPosController.csproj
 
       - name: Publish kiosk application
         shell: pwsh
@@ -113,6 +124,20 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:DebugType=None `
             --output controller-publish
+
+      - name: Publish POS controller
+        shell: pwsh
+        run: |
+          dotnet publish pos-controller/src/MulletHopPosController.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:Version=${{ steps.pos_version.outputs.value }} `
+            -p:UpdateRepositoryUrl=https://github.com/${{ github.repository }} `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            --output pos-publish
 
       - name: Install matching Velopack command-line tool
         run: dotnet tool install --global vpk --version 1.2.0
@@ -206,6 +231,59 @@ jobs:
             --channel win `
             --outputDir Releases
 
+      - name: Download prior POS controller release information
+        id: pos_feed
+        shell: pwsh
+        run: |
+          $needsPack = $true
+          try {
+            vpk download github `
+              --repoUrl https://github.com/${{ github.repository }} `
+              --token "${{ secrets.GITHUB_TOKEN }}" `
+              --channel pos `
+              --outputDir PosReleases
+          }
+          catch {
+            Write-Host "No earlier POS Controller update feed exists. Building the first full installer."
+            New-Item -ItemType Directory -Path PosReleases -Force | Out-Null
+          }
+
+          $currentVersion = "${{ steps.pos_version.outputs.value }}"
+          $expectedPackage = "MulletHop.POSController-$currentVersion-pos-full.nupkg"
+          $latestRelease = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/${{ github.repository }}/releases/latest" `
+            -Headers @{ Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}" } `
+            -SkipHttpErrorCheck
+          $matchingAsset = @(
+            $latestRelease.assets | Where-Object { $_.name -eq $expectedPackage }
+          )
+
+          if ($matchingAsset.Count -gt 0) {
+            $needsPack = $false
+            Write-Host "POS Controller $currentVersion is already packaged; reusing its release files."
+
+            $posAssets = @(
+              $latestRelease.assets | Where-Object {
+                $_.name -eq "assets.pos.json" -or
+                $_.name -eq "releases.pos.json" -or
+                $_.name -like "MulletHop.POSController-*"
+              }
+            )
+            New-Item -ItemType Directory -Path PosReleases -Force | Out-Null
+            foreach ($asset in $posAssets) {
+              $destination = Join-Path "PosReleases" $asset.name
+              if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
+                Invoke-WebRequest `
+                  -Uri $asset.browser_download_url `
+                  -Headers @{ Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}" } `
+                  -OutFile $destination
+              }
+            }
+          }
+
+          "needs_pack=$($needsPack.ToString().ToLowerInvariant())" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Build controller Velopack installer and update packages
         if: steps.controller_feed.outputs.needs_pack == 'true'
         shell: pwsh
@@ -221,6 +299,22 @@ jobs:
             --runtime win-x64 `
             --channel controller `
             --outputDir ControllerReleases
+
+      - name: Build POS controller Velopack installer and update packages
+        if: steps.pos_feed.outputs.needs_pack == 'true'
+        shell: pwsh
+        run: |
+          vpk pack `
+            --packId MulletHop.POSController `
+            --packVersion ${{ steps.pos_version.outputs.value }} `
+            --packDir pos-publish `
+            --mainExe MulletHopPosController.exe `
+            --packTitle "Mullet Hop POS Controller" `
+            --packAuthors "Mullet Hop" `
+            --icon assets/MulletHopFish.ico `
+            --runtime win-x64 `
+            --channel pos `
+            --outputDir PosReleases
 
       - name: Package kiosk controller
         shell: pwsh
@@ -245,6 +339,28 @@ jobs:
             -DestinationPath "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
             -Force
 
+      - name: Package POS controller
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path PosPackage -Force | Out-Null
+          $posSetup = Get-ChildItem `
+            -LiteralPath PosReleases `
+            -Filter '*-Setup.exe' | Select-Object -First 1
+          if ($null -eq $posSetup) {
+            throw 'The POS Controller Setup executable was not generated.'
+          }
+          Copy-Item `
+            -LiteralPath $posSetup.FullName `
+            -Destination PosPackage/MulletHop.POSController-Setup.exe
+          Copy-Item pos-controller/install/Install-POS-Controller.cmd PosPackage/
+          Copy-Item pos-controller/install/Install-POS-Controller.ps1 PosPackage/
+          Copy-Item pos-controller/install/Uninstall-POS-Controller.ps1 PosPackage/
+          Copy-Item pos-controller/README.md PosPackage/
+          Compress-Archive `
+            -Path PosPackage/* `
+            -DestinationPath "Mullet-Hop-POS-Controller-${{ steps.pos_version.outputs.value }}.zip" `
+            -Force
+
       - name: Publish GitHub release
         shell: pwsh
         run: |
@@ -257,7 +373,7 @@ jobs:
             --channel win `
             --outputDir Releases
 
-      - name: Attach controller installer and update feed to release
+      - name: Attach controller installers and update feeds to release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -265,7 +381,9 @@ jobs:
           gh release upload `
             "v${{ steps.version.outputs.value }}" `
             "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
+            "Mullet-Hop-POS-Controller-${{ steps.pos_version.outputs.value }}.zip" `
             'ControllerReleases/*' `
+            'PosReleases/*' `
             --repo "${{ github.repository }}" `
             --clobber
 
@@ -278,5 +396,8 @@ jobs:
             Releases/releases.*.json
             ControllerReleases/*-Setup.exe
             ControllerReleases/releases.*.json
+            PosReleases/*-Setup.exe
+            PosReleases/releases.*.json
             Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip
+            Mullet-Hop-POS-Controller-${{ steps.pos_version.outputs.value }}.zip
           if-no-files-found: error

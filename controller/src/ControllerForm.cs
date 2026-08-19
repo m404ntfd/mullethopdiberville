@@ -844,6 +844,7 @@ internal sealed class ControllerForm : Form
     {
         CommandTypes.SetClosed when command.Closed == true => "Turn on closed screen",
         CommandTypes.SetClosed => "Open kiosk",
+        CommandTypes.ResetStart => "Reset to starting page",
         CommandTypes.CheckUpdate => "Check for update",
         CommandTypes.InstallUpdate => "Install update",
         _ => command.Type
