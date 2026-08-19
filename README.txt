@@ -110,8 +110,8 @@ Ctrl + Alt + Shift + F12
 
 Enter the staff password, then select "Open Staff Settings." The menu provides:
 
-Settings are separated into Connection & Updates, Date & Time, Waiver Station,
-and Ads & Staff Tools tabs.
+Settings use a left-side navigation rail with Connection & Updates, Date & Time,
+Waiver Station, Business Hours, and Ads & Staff Tools pages.
 
 * Exit Kiosk.
 * Check whether the computer can reach the live waiver website.
@@ -128,6 +128,17 @@ and Ads & Staff Tools tabs.
 * Select how many minutes of guest inactivity pass before the video screensaver
   begins. The default is 3 minutes, and the saved delay is retained after the
   kiosk or computer restarts.
+* Enable automatic business hours and set opening and closing times independently
+  for every day of the week. Automatic business hours are off until staff enable
+  them, so updating an existing kiosk does not unexpectedly close it.
+* Select how long the Business Closed message remains visible before the display
+  becomes fully black. The default is 5 minutes.
+* Select how many minutes before the next scheduled opening the normal video
+  screensaver begins. The default is 30 minutes; selecting 0 disables the
+  pre-opening screensaver.
+* Start an immediate temporary blackout. The display ignores ordinary keyboard,
+  mouse, and touch input until staff use Ctrl + Alt + Shift + F12, enter the
+  password, and select Return to Kiosk.
 * Change the staff password after verifying the current password.
 * Return to the kiosk and load a clean waiver starting page.
 
@@ -249,6 +260,15 @@ WHAT THE KIOSK DOES
   closed pages. The password dialog opens in the foreground with its entry field
   focused so staff can type immediately. Staff Settings also controls the
   screensaver delay, and Return to Kiosk reloads a clean waiver starting page.
+* Supports an optional weekly business-hours schedule. At closing time, the kiosk
+  clears the guest session and shows a branded Business Closed page for the saved
+  period (5 minutes by default), then disables browser input on a completely black
+  display. Only the staff shortcut and password can open Staff Settings while the
+  display is black.
+* Automatically changes the black display to the packaged video screensaver at
+  the staff-selected lead time before the next opening. From that point the video
+  behaves like the normal screensaver: the first touch or keypress clears the
+  previous session and loads the waiver start page.
 
 
 IMPORTANT FIRST-DAY TEST

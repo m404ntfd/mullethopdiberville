@@ -229,6 +229,65 @@ internal static class LegacyInstallationMigration
     }
 }
 
+internal enum BusinessHoursMode
+{
+    Disabled,
+    Open,
+    Closed,
+    PreOpening
+}
+
+internal readonly record struct BusinessHoursStatus(
+    BusinessHoursMode Mode,
+    DateTime? NextOpening,
+    DateTime? CurrentClosing);
+
+internal static class BusinessHoursCalculator
+{
+    public static BusinessHoursStatus Evaluate(KioskSettings settings, DateTime now)
+    {
+        if (!settings.BusinessHoursEnabled)
+            return new BusinessHoursStatus(BusinessHoursMode.Disabled, null, null);
+
+        var today = settings.BusinessHours.First(schedule => schedule.Day == now.DayOfWeek);
+        if (today.IsOpen && now.TimeOfDay >= today.OpenTime && now.TimeOfDay < today.CloseTime)
+        {
+            return new BusinessHoursStatus(
+                BusinessHoursMode.Open,
+                null,
+                now.Date + today.CloseTime);
+        }
+
+        DateTime? nextOpening = null;
+        for (var dayOffset = 0; dayOffset <= 7; dayOffset++)
+        {
+            var date = now.Date.AddDays(dayOffset);
+            var schedule = settings.BusinessHours.First(item => item.Day == date.DayOfWeek);
+            if (!schedule.IsOpen)
+                continue;
+
+            var candidate = date + schedule.OpenTime;
+            if (candidate > now)
+            {
+                nextOpening = candidate;
+                break;
+            }
+        }
+
+        if (nextOpening.HasValue && settings.PreOpeningScreensaverMinutes > 0 &&
+            nextOpening.Value - now <=
+                TimeSpan.FromMinutes(settings.PreOpeningScreensaverMinutes))
+        {
+            return new BusinessHoursStatus(
+                BusinessHoursMode.PreOpening,
+                nextOpening,
+                null);
+        }
+
+        return new BusinessHoursStatus(BusinessHoursMode.Closed, nextOpening, null);
+    }
+}
+
 internal sealed partial class KioskForm : Form
 {
     private static readonly HttpClient ConnectionCheckClient = new()
@@ -256,6 +315,7 @@ internal sealed partial class KioskForm : Form
     private readonly System.Windows.Forms.Timer _idleTimer = new() { Interval = 1000 };
     private readonly System.Windows.Forms.Timer _completionTimer = new();
     private readonly System.Windows.Forms.Timer _retryTimer = new() { Interval = 60000 };
+    private readonly System.Windows.Forms.Timer _businessHoursTimer = new() { Interval = 1000 };
 
     private DateTime _lastActivityUtc = DateTime.UtcNow;
     private bool _allowExit;
@@ -265,9 +325,14 @@ internal sealed partial class KioskForm : Form
     private bool _hotKeyRegistered;
     private bool _showingThankYouPage;
     private bool _showingClosedPage;
+    private bool _showingBusinessClosedPage;
+    private bool _showingBlackout;
+    private bool _manualBusinessBlackout;
     private bool _showingScreensaver;
+    private bool _preOpeningScreensaverActive;
     private bool _idleResetPerformed;
     private bool _connectionCheckInProgress;
+    private bool _businessHoursCheckInProgress;
     private string? _pendingSwitchEmail;
     private string? _pendingSwitchChoice;
     private string? _lastWaiverEmail;
@@ -275,6 +340,10 @@ internal sealed partial class KioskForm : Form
     private DateTime? _previewDateTime;
     private DateTime? _previewStartedUtc;
     private string? _dateTimePreviewScriptId;
+    private DateTime? _businessClosedPeriodStartedUtc;
+    private string? _businessClosedPeriodKey;
+    private long? _dismissedPreOpeningTicks;
+    private DateTime? _preOpeningScreensaverOpeningTime;
 
     public KioskForm(KioskSettings settings)
     {
@@ -327,6 +396,7 @@ internal sealed partial class KioskForm : Form
             await ResetForNextGuestAsync("completion");
         };
         _retryTimer.Tick += RetryTimer_Tick;
+        _businessHoursTimer.Tick += async (_, _) => await ApplyBusinessHoursStateAsync();
         NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
         InitializeRemoteManagement();
 
@@ -378,6 +448,7 @@ internal sealed partial class KioskForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _businessHoursTimer.Stop();
         StopRemoteManagement();
         NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
         base.OnFormClosed(e);
@@ -422,11 +493,9 @@ internal sealed partial class KioskForm : Form
             _browserReady = true;
             _lastActivityUtc = DateTime.UtcNow;
             _idleTimer.Start();
+            _businessHoursTimer.Start();
             StartRemoteManagement();
-            if (_settings.StationClosed)
-                ShowStationClosedPage(connectionError: false);
-            else
-                _webView.CoreWebView2.Navigate(_settings.StartUrl);
+            ShowCurrentOperatingPage();
             _webView.Focus();
             KioskLog.Write("Kiosk started.");
         }
@@ -509,7 +578,8 @@ internal sealed partial class KioskForm : Form
 
     private async void Core_NavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
-        if (_showingThankYouPage || _showingClosedPage || _showingScreensaver)
+        if (_showingThankYouPage || _showingClosedPage || _showingBusinessClosedPage ||
+            _showingBlackout || _showingScreensaver)
             return;
 
         if (!e.IsSuccess || e.HttpStatusCode >= 400)
@@ -545,6 +615,9 @@ internal sealed partial class KioskForm : Form
 
     private void Core_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        if (_showingBlackout)
+            return;
+
         string message;
         try { message = e.TryGetWebMessageAsString(); }
         catch { return; }
@@ -617,7 +690,8 @@ internal sealed partial class KioskForm : Form
     private void IdleTimer_Tick(object? sender, EventArgs e)
     {
         if (!_browserReady || _promptOpen || _isResetting || _completionTimer.Enabled ||
-            _showingClosedPage || _showingScreensaver)
+            _showingClosedPage || _showingBusinessClosedPage || _showingBlackout ||
+            _showingScreensaver)
             return;
 
         var idleFor = DateTime.UtcNow - _lastActivityUtc;
@@ -726,7 +800,8 @@ internal sealed partial class KioskForm : Form
 
     private bool IsInternalKioskPageUri(string? value)
     {
-        if ((!_showingThankYouPage && !_showingClosedPage && !_showingScreensaver) ||
+        if ((!_showingThankYouPage && !_showingClosedPage && !_showingBusinessClosedPage &&
+             !_showingBlackout && !_showingScreensaver) ||
             string.IsNullOrWhiteSpace(value))
             return false;
 
@@ -749,12 +824,17 @@ internal sealed partial class KioskForm : Form
     private void ShowThankYouPage(bool staffPreview, DateTime? scheduleTimeOverride)
     {
         if (!_browserReady || _isResetting || _settings.StationClosed ||
+            (!staffPreview && !BusinessHoursAllowGuestUse()) ||
             (_showingThankYouPage && !staffPreview))
             return;
 
+        SetBrowserInputEnabled(true);
         _showingThankYouPage = true;
         _showingClosedPage = false;
+        _showingBusinessClosedPage = false;
+        _showingBlackout = false;
         _showingScreensaver = false;
+        _preOpeningScreensaverActive = false;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
@@ -789,11 +869,12 @@ internal sealed partial class KioskForm : Form
             await _webView.CoreWebView2.Profile.ClearBrowsingDataAsync();
             _showingThankYouPage = false;
             _showingClosedPage = false;
+            _showingBusinessClosedPage = false;
+            _showingBlackout = false;
             _showingScreensaver = false;
-            if (_settings.StationClosed)
-                ShowStationClosedPage(connectionError: false);
-            else
-                _webView.CoreWebView2.Navigate(_settings.StartUrl);
+            _preOpeningScreensaverActive = false;
+            SetBrowserInputEnabled(true);
+            ShowCurrentOperatingPage();
             if (resetIdleClock)
                 MarkActivity();
             KioskLog.Write("Waiver reset: " + reason + ".");
@@ -834,6 +915,11 @@ internal sealed partial class KioskForm : Form
             await _webView.CoreWebView2.Profile.ClearBrowsingDataAsync();
             _showingThankYouPage = false;
             _showingClosedPage = false;
+            _showingBusinessClosedPage = false;
+            _showingBlackout = false;
+            _showingScreensaver = false;
+            _preOpeningScreensaverActive = false;
+            SetBrowserInputEnabled(true);
             _webView.CoreWebView2.Navigate(_settings.StartUrl);
             _lastActivityUtc = DateTime.UtcNow;
             KioskLog.Write("Restarting the waiver with the alternate guest option.");
@@ -887,14 +973,228 @@ internal sealed partial class KioskForm : Form
         }
     }
 
+    private bool BusinessHoursAllowGuestUse()
+    {
+        var status = BusinessHoursCalculator.Evaluate(_settings, DateTime.Now);
+        return status.Mode is BusinessHoursMode.Disabled or BusinessHoursMode.Open ||
+               (status.Mode == BusinessHoursMode.PreOpening &&
+                status.NextOpening?.Ticks == _dismissedPreOpeningTicks);
+    }
+
+    private void ShowCurrentOperatingPage()
+    {
+        if (_manualBusinessBlackout)
+        {
+            ShowBlackoutPage(manual: true);
+            return;
+        }
+
+        if (_settings.StationClosed)
+        {
+            ShowStationClosedPage(connectionError: false);
+            return;
+        }
+
+        var now = DateTime.Now;
+        var status = BusinessHoursCalculator.Evaluate(_settings, now);
+        var preOpeningWasDismissed = status.Mode == BusinessHoursMode.PreOpening &&
+            status.NextOpening?.Ticks == _dismissedPreOpeningTicks;
+
+        if (status.Mode == BusinessHoursMode.Open)
+            _dismissedPreOpeningTicks = null;
+
+        if (status.Mode == BusinessHoursMode.PreOpening && !preOpeningWasDismissed)
+        {
+            ResetBusinessClosedPeriod();
+            ShowScreensaver(preOpening: true, openingTime: status.NextOpening);
+            return;
+        }
+
+        if (status.Mode == BusinessHoursMode.Closed)
+        {
+            EnsureBusinessClosedPeriod(status, now);
+            if (DateTime.UtcNow - _businessClosedPeriodStartedUtc!.Value >=
+                TimeSpan.FromMinutes(_settings.BusinessClosedMessageMinutes))
+            {
+                ShowBlackoutPage();
+            }
+            else
+            {
+                ShowBusinessClosedPage(status.NextOpening);
+            }
+            return;
+        }
+
+        ResetBusinessClosedPeriod();
+        SetBrowserInputEnabled(true);
+        _webView.CoreWebView2.Navigate(_settings.StartUrl);
+    }
+
+    private async Task ApplyBusinessHoursStateAsync()
+    {
+        if (!_browserReady || _promptOpen || _isResetting || _settings.StationClosed ||
+            _manualBusinessBlackout ||
+            _businessHoursCheckInProgress)
+            return;
+
+        _businessHoursCheckInProgress = true;
+        try
+        {
+            var now = DateTime.Now;
+            var status = BusinessHoursCalculator.Evaluate(_settings, now);
+            var preOpeningWasDismissed = status.Mode == BusinessHoursMode.PreOpening &&
+                status.NextOpening?.Ticks == _dismissedPreOpeningTicks;
+
+            if (status.Mode is BusinessHoursMode.Disabled or BusinessHoursMode.Open ||
+                preOpeningWasDismissed)
+            {
+                ResetBusinessClosedPeriod();
+                if (status.Mode == BusinessHoursMode.Open)
+                    _dismissedPreOpeningTicks = null;
+
+                if (_showingBusinessClosedPage || _showingBlackout)
+                {
+                    await ResetForNextGuestAsync(
+                        "business hours opened", showStatus: false);
+                }
+                else if (_preOpeningScreensaverActive && status.Mode == BusinessHoursMode.Open)
+                {
+                    // At opening time the video remains on screen and behaves like the normal
+                    // screensaver. Guest activity will load a clean starting waiver.
+                    _preOpeningScreensaverActive = false;
+                    _preOpeningScreensaverOpeningTime = null;
+                }
+                return;
+            }
+
+            if (status.Mode == BusinessHoursMode.PreOpening)
+            {
+                ResetBusinessClosedPeriod();
+                if (_showingScreensaver)
+                {
+                    _preOpeningScreensaverActive = true;
+                    _preOpeningScreensaverOpeningTime = status.NextOpening;
+                    return;
+                }
+
+                await ResetForNextGuestAsync(
+                    "pre-opening screensaver window began", showStatus: false);
+                return;
+            }
+
+            var startedNewClosedPeriod = EnsureBusinessClosedPeriod(status, now);
+            if (startedNewClosedPeriod && !_showingBusinessClosedPage && !_showingBlackout)
+            {
+                await ResetForNextGuestAsync(
+                    "business hours closed", showStatus: false);
+                return;
+            }
+
+            var closedFor = DateTime.UtcNow - _businessClosedPeriodStartedUtc!.Value;
+            if (closedFor >= TimeSpan.FromMinutes(_settings.BusinessClosedMessageMinutes))
+            {
+                if (!_showingBlackout)
+                    ShowBlackoutPage();
+            }
+            else if (!_showingBusinessClosedPage)
+            {
+                await ResetForNextGuestAsync(
+                    "business closed page restored", showStatus: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Business hours transition error: " +
+                ex.GetType().Name + " - " + ex.Message);
+        }
+        finally
+        {
+            _businessHoursCheckInProgress = false;
+        }
+    }
+
+    private bool EnsureBusinessClosedPeriod(BusinessHoursStatus status, DateTime now)
+    {
+        var key = status.NextOpening.HasValue
+            ? status.NextOpening.Value.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "no-scheduled-opening";
+        if (string.Equals(_businessClosedPeriodKey, key, StringComparison.Ordinal) &&
+            _businessClosedPeriodStartedUtc.HasValue)
+            return false;
+
+        _businessClosedPeriodKey = key;
+        _businessClosedPeriodStartedUtc = DateTime.UtcNow;
+        _dismissedPreOpeningTicks = null;
+        KioskLog.Write("Business hours closed at " + now.ToString("O") + ".");
+        return true;
+    }
+
+    private void ResetBusinessClosedPeriod()
+    {
+        _businessClosedPeriodKey = null;
+        _businessClosedPeriodStartedUtc = null;
+    }
+
+    private void SetBrowserInputEnabled(bool enabled)
+    {
+        _webView.Enabled = enabled;
+    }
+
+    private void ShowBusinessClosedPage(DateTime? nextOpening)
+    {
+        if (!_browserReady)
+            return;
+
+        SetBrowserInputEnabled(true);
+        _showingThankYouPage = false;
+        _showingClosedPage = false;
+        _showingBusinessClosedPage = true;
+        _showingBlackout = false;
+        _showingScreensaver = false;
+        _preOpeningScreensaverActive = false;
+        _preOpeningScreensaverOpeningTime = null;
+        _completionTimer.Stop();
+        _retryTimer.Stop();
+        HideBanner();
+        _webView.CoreWebView2.NavigateToString(BuildBusinessClosedHtml(nextOpening));
+        KioskLog.Write("The scheduled Business Closed page was displayed.");
+    }
+
+    private void ShowBlackoutPage(bool manual = false)
+    {
+        if (!_browserReady)
+            return;
+
+        _manualBusinessBlackout = manual;
+        _showingThankYouPage = false;
+        _showingClosedPage = false;
+        _showingBusinessClosedPage = false;
+        _showingBlackout = true;
+        _showingScreensaver = false;
+        _preOpeningScreensaverActive = false;
+        _preOpeningScreensaverOpeningTime = null;
+        _completionTimer.Stop();
+        _retryTimer.Stop();
+        HideBanner();
+        _webView.CoreWebView2.NavigateToString(BuildBlackoutHtml());
+        SetBrowserInputEnabled(false);
+        KioskLog.Write("The scheduled business-hours blackout started. Only the staff shortcut remains active.");
+    }
+
     private void ShowStationClosedPage(bool connectionError)
     {
         if (!_browserReady)
             return;
 
+        _manualBusinessBlackout = false;
+        SetBrowserInputEnabled(true);
         _showingThankYouPage = false;
         _showingClosedPage = true;
+        _showingBusinessClosedPage = false;
+        _showingBlackout = false;
         _showingScreensaver = false;
+        _preOpeningScreensaverActive = false;
+        _preOpeningScreensaverOpeningTime = null;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
@@ -908,28 +1208,41 @@ internal sealed partial class KioskForm : Form
             : "The staff-controlled waiver station closed page was displayed.");
     }
 
-    private void ShowScreensaver()
+    private void ShowScreensaver(bool preOpening = false, DateTime? openingTime = null)
     {
-        if (!_browserReady || _isResetting || _promptOpen || _settings.StationClosed ||
-            _showingClosedPage || _showingScreensaver)
+        if (!_browserReady || (_isResetting && !preOpening) || _promptOpen ||
+            _settings.StationClosed || _showingClosedPage || _showingBusinessClosedPage ||
+            _showingBlackout || _showingScreensaver)
             return;
 
         var videoPath = Path.Combine(AppContext.BaseDirectory, ScreensaverFileName);
         if (!File.Exists(videoPath))
         {
             KioskLog.Write("Screensaver video is missing: " + videoPath);
-            MarkActivity();
-            return;
+            if (!preOpening)
+            {
+                MarkActivity();
+                return;
+            }
         }
 
+        SetBrowserInputEnabled(true);
         _showingScreensaver = true;
         _showingThankYouPage = false;
+        _showingClosedPage = false;
+        _showingBusinessClosedPage = false;
+        _showingBlackout = false;
+        _preOpeningScreensaverActive = preOpening;
+        _preOpeningScreensaverOpeningTime = preOpening ? openingTime : null;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
         _webView.CoreWebView2.NavigateToString(BuildScreensaverHtml());
-        KioskLog.Write("Screensaver started after " +
-            _settings.ScreensaverTimeoutMinutes + " minute(s) without guest activity.");
+        KioskLog.Write(preOpening
+            ? "The pre-opening screensaver started for the scheduled opening at " +
+                openingTime?.ToString("O") + "."
+            : "Screensaver started after " + _settings.ScreensaverTimeoutMinutes +
+                " minute(s) without guest activity.");
     }
 
     private async Task WakeFromScreensaverAsync()
@@ -937,6 +1250,11 @@ internal sealed partial class KioskForm : Form
         if (!_showingScreensaver || _isResetting)
             return;
 
+        if (_preOpeningScreensaverActive && _preOpeningScreensaverOpeningTime.HasValue)
+            _dismissedPreOpeningTicks = _preOpeningScreensaverOpeningTime.Value.Ticks;
+
+        _preOpeningScreensaverActive = false;
+        _preOpeningScreensaverOpeningTime = null;
         MarkActivity();
         KioskLog.Write("Screensaver dismissed by guest activity; loading a fresh starting page.");
         await ResetForNextGuestAsync("screensaver wake", showStatus: false);
@@ -1018,6 +1336,169 @@ internal sealed partial class KioskForm : Form
             </html>
             """;
     }
+
+    private static string BuildBusinessClosedHtml(DateTime? nextOpening)
+    {
+        var backgroundUrl = $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}";
+        var logoDataUrl = GetApplicationLogoDataUrl();
+        var logoMarkup = string.IsNullOrWhiteSpace(logoDataUrl)
+            ? "<div class=\"logo-fallback\">MULLET HOP</div>"
+            : $"<img class=\"fish-logo\" src=\"{logoDataUrl}\" alt=\"Mullet Hop fish logo\">";
+        var openingMarkup = nextOpening.HasValue
+            ? "<p class=\"opening\">We reopen <strong>" +
+                System.Net.WebUtility.HtmlEncode(
+                    nextOpening.Value.ToString("dddd, MMMM d 'at' h:mm tt")) +
+                ".</strong></p>"
+            : "<p class=\"opening\">Please check with the front desk for our next opening time.</p>";
+
+        return $$"""
+            <!doctype html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Business Closed | Mullet Hop</title>
+              <style>
+                :root {
+                  --lime: #76c442;
+                  --aqua: #00a4d6;
+                  --purple: #75449a;
+                  --orange: #f58220;
+                  --ink: #101820;
+                }
+                * { box-sizing: border-box; }
+                html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+                body {
+                  display: grid;
+                  place-items: center;
+                  padding: 28px;
+                  color: var(--ink);
+                  font-family: 'Open Sans', 'Segoe UI', Arial, sans-serif;
+                  background-color: #eefaff;
+                  background-image:
+                    linear-gradient(rgba(247,252,255,.18), rgba(247,252,255,.18)),
+                    url('{{backgroundUrl}}');
+                  background-position: center;
+                  background-size: cover;
+                }
+                .card {
+                  width: min(980px, 94vw);
+                  max-height: 94vh;
+                  overflow: hidden;
+                  border: 4px solid var(--ink);
+                  border-radius: 30px;
+                  background: #fff;
+                  box-shadow: 0 22px 55px rgba(16,24,32,.24);
+                  text-align: center;
+                }
+                .stripe {
+                  height: 17px;
+                  background: linear-gradient(90deg, var(--lime) 0 25%, var(--aqua) 25% 50%, var(--purple) 50% 75%, var(--orange) 75% 100%);
+                }
+                .content { padding: clamp(24px, 4.5vh, 48px) clamp(28px, 6vw, 74px) 42px; }
+                .brand { min-height: 118px; display: grid; place-items: center; margin-bottom: 6px; }
+                .fish-logo { width: 132px; height: 132px; object-fit: contain; }
+                .logo-fallback {
+                  color: #0877bd;
+                  font-size: clamp(34px, 5vw, 60px);
+                  font-weight: 800;
+                  -webkit-text-stroke: 2px var(--ink);
+                }
+                .badge {
+                  display: inline-grid;
+                  place-items: center;
+                  min-width: 140px;
+                  height: 62px;
+                  margin: 4px auto 18px;
+                  padding: 0 26px;
+                  border: 4px solid var(--ink);
+                  border-radius: 999px;
+                  background: var(--orange);
+                  box-shadow: 0 8px 0 rgba(16,24,32,.12);
+                  font-size: 22px;
+                  font-weight: 800;
+                  letter-spacing: 1px;
+                }
+                h1 {
+                  margin: 0 auto 24px;
+                  color: var(--purple);
+                  font-size: clamp(42px, 6vw, 76px);
+                  line-height: 1.02;
+                  font-weight: 800;
+                  letter-spacing: -2px;
+                }
+                .message {
+                  margin: 0 auto 20px;
+                  padding: 23px 30px;
+                  border: 3px solid var(--aqua);
+                  border-radius: 18px;
+                  background: #eefaff;
+                  font-size: clamp(21px, 2.4vw, 31px);
+                  line-height: 1.35;
+                  font-weight: 700;
+                }
+                .opening {
+                  margin: 0 auto;
+                  padding: 22px 28px;
+                  border: 3px solid var(--lime);
+                  border-radius: 18px;
+                  background: #f7fff2;
+                  font-size: clamp(20px, 2.25vw, 29px);
+                  line-height: 1.3;
+                }
+                .opening strong { color: #397819; }
+                @media (max-height: 720px) {
+                  .content { padding-top: 20px; padding-bottom: 24px; }
+                  .brand { min-height: 78px; }
+                  .fish-logo { width: 86px; height: 86px; }
+                  .badge { height: 48px; margin-bottom: 12px; font-size: 18px; }
+                  h1 { margin-bottom: 15px; }
+                  .message, .opening { padding-top: 15px; padding-bottom: 15px; }
+                  .message { margin-bottom: 14px; }
+                }
+              </style>
+            </head>
+            <body>
+              <main class="card" aria-labelledby="business-closed-heading">
+                <div class="stripe"></div>
+                <div class="content">
+                  <div class="brand">{{logoMarkup}}</div>
+                  <div class="badge" aria-hidden="true">CLOSED</div>
+                  <h1 id="business-closed-heading">BUSINESS CLOSED</h1>
+                  <p class="message">Mullet Hop is currently closed. Please return during our normal business hours.</p>
+                  {{openingMarkup}}
+                </div>
+              </main>
+            </body>
+            </html>
+            """;
+    }
+
+    private static string BuildBlackoutHtml() =>
+        """
+        <!doctype html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Mullet Hop Kiosk</title>
+          <style>
+            * { box-sizing: border-box; }
+            html, body {
+              width: 100%;
+              height: 100%;
+              margin: 0;
+              overflow: hidden;
+              background: #000;
+              cursor: none;
+              user-select: none;
+              pointer-events: none;
+            }
+          </style>
+        </head>
+        <body aria-hidden="true"></body>
+        </html>
+        """;
 
     private static string BuildStationClosedHtml(bool connectionError)
     {
@@ -1619,6 +2100,7 @@ internal sealed partial class KioskForm : Form
                                 Close();
                                 return;
                             case StaffSettingsAction.ReturnToKiosk:
+                                _manualBusinessBlackout = false;
                                 await ResetForNextGuestAsync(
                                     "staff returned to kiosk", showStatus: false);
                                 return;
@@ -1649,6 +2131,10 @@ internal sealed partial class KioskForm : Form
                                         "Staff Settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
                                 }
                                 continue;
+                            case StaffSettingsAction.StartBusinessBlackout:
+                                ShowBlackoutPage(manual: true);
+                                KioskLog.Write("Staff started an immediate business-hours blackout.");
+                                return;
                         }
                     }
                     return;
@@ -1667,8 +2153,10 @@ internal sealed partial class KioskForm : Form
                 TopMost = true;
                 Activate();
                 _webView.Focus();
-                MarkActivity();
+                if (!_showingBlackout)
+                    MarkActivity();
                 _idleTimer.Start();
+                _ = ApplyBusinessHoursStateAsync();
             }
         }
     }
@@ -2798,6 +3286,47 @@ internal sealed class KioskAdvertisement
     }
 }
 
+internal sealed class KioskBusinessDayHours
+{
+    public DayOfWeek Day { get; set; }
+    public bool IsOpen { get; set; } = true;
+    public TimeSpan OpenTime { get; set; } = TimeSpan.FromHours(10);
+    public TimeSpan CloseTime { get; set; } = TimeSpan.FromHours(22);
+
+    public static DayOfWeek[] OrderedDays { get; } =
+    [
+        DayOfWeek.Monday,
+        DayOfWeek.Tuesday,
+        DayOfWeek.Wednesday,
+        DayOfWeek.Thursday,
+        DayOfWeek.Friday,
+        DayOfWeek.Saturday,
+        DayOfWeek.Sunday
+    ];
+
+    public static List<KioskBusinessDayHours> CreateDefaults() =>
+        OrderedDays.Select(day => new KioskBusinessDayHours { Day = day }).ToList();
+
+    public void Normalize()
+    {
+        OpenTime = NormalizeTime(OpenTime);
+        CloseTime = NormalizeTime(CloseTime);
+        if (CloseTime <= OpenTime)
+        {
+            OpenTime = TimeSpan.FromHours(10);
+            CloseTime = TimeSpan.FromHours(22);
+        }
+    }
+
+    private static TimeSpan NormalizeTime(TimeSpan value)
+    {
+        var ticks = value.Ticks % TimeSpan.TicksPerDay;
+        if (ticks < 0)
+            ticks += TimeSpan.TicksPerDay;
+        return TimeSpan.FromTicks(ticks);
+    }
+}
+
 internal sealed class KioskSettings
 {
     public string StartUrl { get; set; } =
@@ -2809,6 +3338,11 @@ internal sealed class KioskSettings
     public int ScreensaverTimeoutMinutes { get; set; } = 3;
     public int CompletionResetSeconds { get; set; } = 15;
     public bool StationClosed { get; set; }
+    public bool BusinessHoursEnabled { get; set; }
+    public int BusinessClosedMessageMinutes { get; set; } = 5;
+    public int PreOpeningScreensaverMinutes { get; set; } = 30;
+    public List<KioskBusinessDayHours> BusinessHours { get; set; } =
+        KioskBusinessDayHours.CreateDefaults();
     public bool RemoteManagementEnabled { get; set; }
     public string RemoteControllerUrl { get; set; } = string.Empty;
     public string RemotePairingKey { get; set; } = string.Empty;
@@ -2916,6 +3450,17 @@ internal sealed class KioskSettings
         AllowedPathPrefixes ??= ["/public/onlinewaiver/"];
         CompletionUrlKeywords ??= ["success", "complete", "done", "submitted"];
         Advertisements ??= [];
+        BusinessHours ??= KioskBusinessDayHours.CreateDefaults();
+        var savedBusinessHours = BusinessHours
+            .GroupBy(schedule => schedule.Day)
+            .ToDictionary(group => group.Key, group => group.First());
+        BusinessHours = KioskBusinessDayHours.OrderedDays
+            .Select(day => savedBusinessHours.TryGetValue(day, out var schedule)
+                ? schedule
+                : new KioskBusinessDayHours { Day = day })
+            .ToList();
+        foreach (var schedule in BusinessHours)
+            schedule.Normalize();
         RemoteControllerUrl = (RemoteControllerUrl ?? string.Empty).Trim();
         RemotePairingKey = (RemotePairingKey ?? string.Empty).Trim();
         if (!Guid.TryParseExact(StationId, "N", out _)) StationId = Guid.NewGuid().ToString("N");
@@ -2933,6 +3478,8 @@ internal sealed class KioskSettings
         IdleTimeoutMinutes = Math.Clamp(IdleTimeoutMinutes, 1, 60);
         ScreensaverTimeoutMinutes = Math.Clamp(ScreensaverTimeoutMinutes, 1, 240);
         CompletionResetSeconds = Math.Clamp(CompletionResetSeconds, 12, 60);
+        BusinessClosedMessageMinutes = Math.Clamp(BusinessClosedMessageMinutes, 1, 240);
+        PreOpeningScreensaverMinutes = Math.Clamp(PreOpeningScreensaverMinutes, 0, 240);
     }
 
     private static byte[] DerivePinHash(string pin, byte[] salt)
@@ -3045,7 +3592,8 @@ internal enum StaffSettingsAction
     PreviewDateTime,
     UseLiveDateTime,
     PreviewThankYouPage,
-    ToggleStationClosed
+    ToggleStationClosed,
+    StartBusinessBlackout
 }
 
 internal sealed class StaffSettingsDialog : Form
@@ -3064,6 +3612,13 @@ internal sealed class StaffSettingsDialog : Form
     private readonly DateTimePicker _timePicker = new();
     private readonly NumericUpDown _screensaverMinutes = new();
     private readonly Button _screensaverSaveButton = new();
+    private readonly CheckBox _businessHoursEnabled = new();
+    private readonly NumericUpDown _businessClosedMinutes = new();
+    private readonly NumericUpDown _preOpeningScreensaverMinutes = new();
+    private readonly Button _businessHoursSaveButton = new();
+    private readonly Label _businessHoursStatus = new();
+    private readonly Dictionary<DayOfWeek,
+        (CheckBox IsOpen, DateTimePicker Opens, DateTimePicker Closes)> _businessDayControls = [];
 
     public StaffSettingsAction SelectedAction { get; private set; }
     public DateTime SelectedDateTime => _datePicker.Value.Date + _timePicker.Value.TimeOfDay;
@@ -3083,7 +3638,7 @@ internal sealed class StaffSettingsDialog : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
-        ClientSize = new Size(680, 710);
+        ClientSize = new Size(840, 710);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.White;
 
@@ -3094,13 +3649,17 @@ internal sealed class StaffSettingsDialog : Form
             Font = new Font("Segoe UI", 21, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
             TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(25, 17, 630, 45)
+            Bounds = new Rectangle(25, 17, 790, 45)
         };
         var settingsTabs = new TabControl
         {
-            Bounds = new Rectangle(20, 76, 640, 560),
-            Font = new Font("Segoe UI", 10, FontStyle.Bold),
-            Padding = new Point(14, 7)
+            Bounds = new Rectangle(20, 76, 800, 560),
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            Alignment = TabAlignment.Left,
+            DrawMode = TabDrawMode.OwnerDrawFixed,
+            SizeMode = TabSizeMode.Fixed,
+            ItemSize = new Size(42, 185),
+            Padding = new Point(12, 7)
         };
         var connectionTab = new TabPage("Connection & Updates")
         {
@@ -3117,17 +3676,39 @@ internal sealed class StaffSettingsDialog : Form
             BackColor = Color.White,
             Padding = new Padding(8)
         };
+        var businessHoursTab = new TabPage("Business Hours")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
         var staffToolsTab = new TabPage("Ads & Staff Tools")
         {
             BackColor = Color.White,
             Padding = new Padding(8)
         };
         settingsTabs.TabPages.AddRange([
-            connectionTab, dateTimeTab, stationTab, staffToolsTab]);
+            connectionTab, dateTimeTab, stationTab, businessHoursTab, staffToolsTab]);
         settingsTabs.SelectedIndex = Math.Clamp(
             _lastSelectedTabIndex, 0, settingsTabs.TabPages.Count - 1);
         settingsTabs.SelectedIndexChanged += (_, _) =>
             _lastSelectedTabIndex = settingsTabs.SelectedIndex;
+        settingsTabs.DrawItem += (_, e) =>
+        {
+            var selected = e.Index == settingsTabs.SelectedIndex;
+            using var background = new SolidBrush(selected
+                ? Color.FromArgb(238, 250, 255)
+                : Color.FromArgb(247, 247, 247));
+            e.Graphics.FillRectangle(background, e.Bounds);
+            var textRectangle = Rectangle.Inflate(e.Bounds, -8, -4);
+            TextRenderer.DrawText(
+                e.Graphics,
+                settingsTabs.TabPages[e.Index].Text,
+                settingsTabs.Font,
+                textRectangle,
+                selected ? Color.FromArgb(117, 68, 154) : Color.FromArgb(16, 24, 32),
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        };
 
         var currentStatus = new Label
         {
@@ -3404,6 +3985,161 @@ internal sealed class StaffSettingsDialog : Form
             screensaverMinutesLabel, _screensaverSaveButton]);
         stationTab.Controls.AddRange([closedPageGroup, screensaverGroup]);
 
+        _businessHoursEnabled.Text = "Use automatic business hours";
+        _businessHoursEnabled.Checked = _settings.BusinessHoursEnabled;
+        _businessHoursEnabled.AutoSize = true;
+        _businessHoursEnabled.Font = new Font("Segoe UI", 10.5f, FontStyle.Bold);
+        _businessHoursEnabled.ForeColor = Color.FromArgb(117, 68, 154);
+        _businessHoursEnabled.Location = new Point(20, 16);
+        _businessHoursEnabled.CheckedChanged += (_, _) =>
+        {
+            UpdateBusinessHoursControlState();
+            _businessHoursSaveButton.Text = "Save Business Hours";
+        };
+
+        _businessHoursStatus.AutoSize = false;
+        _businessHoursStatus.Text = DescribeBusinessHoursStatus(_settings);
+        _businessHoursStatus.Font = new Font("Segoe UI", 9.2f, FontStyle.Bold);
+        _businessHoursStatus.ForeColor = _settings.BusinessHoursEnabled
+            ? Color.FromArgb(8, 119, 189)
+            : Color.FromArgb(83, 97, 109);
+        _businessHoursStatus.Bounds = new Rectangle(20, 44, 580, 34);
+
+        var weeklyHoursGroup = new GroupBox
+        {
+            Text = "Weekly Hours",
+            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(8, 119, 189),
+            Bounds = new Rectangle(15, 76, 590, 270)
+        };
+        weeklyHoursGroup.Controls.AddRange([
+            new Label
+            {
+                Text = "Day", AutoSize = false, Bounds = new Rectangle(18, 29, 92, 22),
+                ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            },
+            new Label
+            {
+                Text = "Open", AutoSize = false, Bounds = new Rectangle(112, 29, 58, 22),
+                ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                TextAlign = ContentAlignment.TopCenter
+            },
+            new Label
+            {
+                Text = "Opening time", AutoSize = false, Bounds = new Rectangle(184, 29, 142, 22),
+                ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                TextAlign = ContentAlignment.TopCenter
+            },
+            new Label
+            {
+                Text = "Closing time", AutoSize = false, Bounds = new Rectangle(348, 29, 142, 22),
+                ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                TextAlign = ContentAlignment.TopCenter
+            }
+        ]);
+
+        for (var index = 0; index < KioskBusinessDayHours.OrderedDays.Length; index++)
+        {
+            var day = KioskBusinessDayHours.OrderedDays[index];
+            var schedule = _settings.BusinessHours.First(item => item.Day == day);
+            var rowY = 54 + index * 30;
+            var dayLabel = new Label
+            {
+                Text = day.ToString(), AutoSize = false,
+                Bounds = new Rectangle(18, rowY + 3, 92, 25),
+                ForeColor = Color.FromArgb(16, 24, 32)
+            };
+            var isOpen = new CheckBox
+            {
+                Checked = schedule.IsOpen,
+                AutoSize = false,
+                Bounds = new Rectangle(128, rowY + 3, 24, 24)
+            };
+            var opens = CreateBusinessTimePicker(schedule.OpenTime, 184, rowY);
+            var closes = CreateBusinessTimePicker(schedule.CloseTime, 348, rowY);
+            _businessDayControls[day] = (isOpen, opens, closes);
+            isOpen.CheckedChanged += (_, _) =>
+            {
+                UpdateBusinessHoursControlState();
+                _businessHoursSaveButton.Text = "Save Business Hours";
+            };
+            opens.ValueChanged += (_, _) => _businessHoursSaveButton.Text = "Save Business Hours";
+            closes.ValueChanged += (_, _) => _businessHoursSaveButton.Text = "Save Business Hours";
+            weeklyHoursGroup.Controls.AddRange([dayLabel, isOpen, opens, closes]);
+        }
+
+        var automationGroup = new GroupBox
+        {
+            Text = "Closed Display and Pre-Opening",
+            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(117, 68, 154),
+            Bounds = new Rectangle(15, 353, 590, 118)
+        };
+        var closedMinutesLabel = new Label
+        {
+            Text = "Show Business Closed screen for:", AutoSize = false,
+            Bounds = new Rectangle(18, 30, 225, 28),
+            ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
+        };
+        _businessClosedMinutes.Minimum = 1;
+        _businessClosedMinutes.Maximum = 240;
+        _businessClosedMinutes.Value = Math.Clamp(_settings.BusinessClosedMessageMinutes, 1, 240);
+        _businessClosedMinutes.TextAlign = HorizontalAlignment.Center;
+        _businessClosedMinutes.Bounds = new Rectangle(246, 29, 70, 30);
+        _businessClosedMinutes.ValueChanged += (_, _) =>
+            _businessHoursSaveButton.Text = "Save Business Hours";
+        var closedMinutesSuffix = new Label
+        {
+            Text = "minutes, then black out", AutoSize = false,
+            Bounds = new Rectangle(324, 30, 200, 28),
+            ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
+        };
+        var preOpeningLabel = new Label
+        {
+            Text = "Start the screensaver:", AutoSize = false,
+            Bounds = new Rectangle(18, 72, 225, 28),
+            ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
+        };
+        _preOpeningScreensaverMinutes.Minimum = 0;
+        _preOpeningScreensaverMinutes.Maximum = 240;
+        _preOpeningScreensaverMinutes.Value = Math.Clamp(
+            _settings.PreOpeningScreensaverMinutes, 0, 240);
+        _preOpeningScreensaverMinutes.TextAlign = HorizontalAlignment.Center;
+        _preOpeningScreensaverMinutes.Bounds = new Rectangle(246, 71, 70, 30);
+        _preOpeningScreensaverMinutes.ValueChanged += (_, _) =>
+            _businessHoursSaveButton.Text = "Save Business Hours";
+        var preOpeningSuffix = new Label
+        {
+            Text = "minutes before opening (0 = off)", AutoSize = false,
+            Bounds = new Rectangle(324, 72, 250, 28),
+            ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
+        };
+        automationGroup.Controls.AddRange([
+            closedMinutesLabel, _businessClosedMinutes, closedMinutesSuffix,
+            preOpeningLabel, _preOpeningScreensaverMinutes, preOpeningSuffix]);
+
+        _businessHoursSaveButton.Text = "Save Business Hours";
+        _businessHoursSaveButton.Bounds = new Rectangle(20, 478, 210, 38);
+        _businessHoursSaveButton.BackColor = Color.FromArgb(118, 196, 66);
+        _businessHoursSaveButton.FlatStyle = FlatStyle.Flat;
+        _businessHoursSaveButton.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _businessHoursSaveButton.Click += (_, _) => SaveBusinessHours();
+
+        var startBlackoutButton = new Button
+        {
+            Text = "Start Blackout Now",
+            Bounds = new Rectangle(385, 478, 200, 38),
+            BackColor = Color.Black,
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+        };
+        startBlackoutButton.Click += (_, _) => Complete(StaffSettingsAction.StartBusinessBlackout);
+        businessHoursTab.Controls.AddRange([
+            _businessHoursEnabled, _businessHoursStatus, weeklyHoursGroup,
+            automationGroup, _businessHoursSaveButton, startBlackoutButton]);
+        UpdateBusinessHoursControlState();
+
         var staffToolsGroup = new GroupBox
         {
             Text = "Advertisements and Staff Tools",
@@ -3426,7 +4162,7 @@ internal sealed class StaffSettingsDialog : Form
         var returnButton = new Button
         {
             Text = "Return to Kiosk",
-            Bounds = new Rectangle(460, 652, 190, 45),
+            Bounds = new Rectangle(620, 652, 190, 45),
             BackColor = Color.FromArgb(238, 250, 255),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -3436,6 +4172,120 @@ internal sealed class StaffSettingsDialog : Form
         CancelButton = returnButton;
         Controls.AddRange([
             heading, settingsTabs, exitButton, returnButton]);
+    }
+
+    private static DateTimePicker CreateBusinessTimePicker(TimeSpan time, int x, int y)
+    {
+        return new DateTimePicker
+        {
+            Format = DateTimePickerFormat.Custom,
+            CustomFormat = "h:mm tt",
+            ShowUpDown = true,
+            Value = DateTime.Today + time,
+            Bounds = new Rectangle(x, y, 142, 27),
+            Font = new Font("Segoe UI", 9)
+        };
+    }
+
+    private void UpdateBusinessHoursControlState()
+    {
+        foreach (var controls in _businessDayControls.Values)
+        {
+            controls.IsOpen.Enabled = _businessHoursEnabled.Checked;
+            controls.Opens.Enabled = _businessHoursEnabled.Checked && controls.IsOpen.Checked;
+            controls.Closes.Enabled = _businessHoursEnabled.Checked && controls.IsOpen.Checked;
+        }
+
+        _businessClosedMinutes.Enabled = _businessHoursEnabled.Checked;
+        _preOpeningScreensaverMinutes.Enabled = _businessHoursEnabled.Checked;
+    }
+
+    private void SaveBusinessHours()
+    {
+        var previousEnabled = _settings.BusinessHoursEnabled;
+        var previousClosedMinutes = _settings.BusinessClosedMessageMinutes;
+        var previousPreOpeningMinutes = _settings.PreOpeningScreensaverMinutes;
+        var previousSchedules = _settings.BusinessHours
+            .Select(schedule => new KioskBusinessDayHours
+            {
+                Day = schedule.Day,
+                IsOpen = schedule.IsOpen,
+                OpenTime = schedule.OpenTime,
+                CloseTime = schedule.CloseTime
+            })
+            .ToList();
+
+        var schedules = new List<KioskBusinessDayHours>();
+        foreach (var day in KioskBusinessDayHours.OrderedDays)
+        {
+            var controls = _businessDayControls[day];
+            var openTime = controls.Opens.Value.TimeOfDay;
+            var closeTime = controls.Closes.Value.TimeOfDay;
+            if (controls.IsOpen.Checked && closeTime <= openTime)
+            {
+                MessageBox.Show(this,
+                    day + " closing time must be later than its opening time.",
+                    "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                controls.Closes.Focus();
+                return;
+            }
+
+            schedules.Add(new KioskBusinessDayHours
+            {
+                Day = day,
+                IsOpen = controls.IsOpen.Checked,
+                OpenTime = openTime,
+                CloseTime = closeTime
+            });
+        }
+
+        try
+        {
+            _settings.BusinessHoursEnabled = _businessHoursEnabled.Checked;
+            _settings.BusinessClosedMessageMinutes = (int)_businessClosedMinutes.Value;
+            _settings.PreOpeningScreensaverMinutes = (int)_preOpeningScreensaverMinutes.Value;
+            _settings.BusinessHours = schedules;
+            _settings.Save();
+            _businessHoursStatus.Text = DescribeBusinessHoursStatus(_settings);
+            _businessHoursStatus.ForeColor = _settings.BusinessHoursEnabled
+                ? Color.FromArgb(8, 119, 189)
+                : Color.FromArgb(83, 97, 109);
+            _businessHoursSaveButton.Text = "Saved";
+            KioskLog.Write("Business hours settings were updated.");
+        }
+        catch (Exception ex)
+        {
+            _settings.BusinessHoursEnabled = previousEnabled;
+            _settings.BusinessClosedMessageMinutes = previousClosedMinutes;
+            _settings.PreOpeningScreensaverMinutes = previousPreOpeningMinutes;
+            _settings.BusinessHours = previousSchedules;
+            _businessHoursSaveButton.Text = "Save Business Hours";
+            KioskLog.Write("Business hours settings error: " +
+                ex.GetType().Name + " - " + ex.Message);
+            MessageBox.Show(this,
+                "The business hours could not be saved.\n\n" + ex.Message,
+                "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static string DescribeBusinessHoursStatus(KioskSettings settings)
+    {
+        var status = BusinessHoursCalculator.Evaluate(settings, DateTime.Now);
+        return status.Mode switch
+        {
+            BusinessHoursMode.Disabled =>
+                "Automatic business hours are OFF. The kiosk remains available.",
+            BusinessHoursMode.Open =>
+                "OPEN NOW — scheduled to close at " +
+                status.CurrentClosing?.ToString("h:mm tt") + ".",
+            BusinessHoursMode.PreOpening =>
+                "PRE-OPENING — screensaver window for " +
+                status.NextOpening?.ToString("dddd 'at' h:mm tt") + ".",
+            _ when status.NextOpening.HasValue =>
+                "CLOSED NOW — next opening is " +
+                status.NextOpening.Value.ToString("dddd 'at' h:mm tt") + ".",
+            _ => "CLOSED NOW — no opening day is currently scheduled."
+        };
     }
 
     private async Task CheckConnectionAsync()
