@@ -3444,6 +3444,10 @@ internal sealed class KioskSettings
     public DateTime? AdvertisementLastSyncUtc { get; set; }
     public string AdvertisementLastSyncStatus { get; set; } =
         "Advertisements have not been synced with the kiosk manager.";
+    public string BusinessHoursSyncRevision { get; set; } = string.Empty;
+    public DateTime? BusinessHoursLastSyncUtc { get; set; }
+    public string BusinessHoursLastSyncStatus { get; set; } =
+        "Business Hours have not been synced with the kiosk manager.";
 
     public string[] CompletionUrlKeywords { get; set; } =
         ["success", "complete", "completed", "confirmation", "finished", "done", "submitted", "thankyou", "thank-you"];
@@ -3562,6 +3566,10 @@ internal sealed class KioskSettings
         AdvertisementLastSyncStatus = string.IsNullOrWhiteSpace(AdvertisementLastSyncStatus)
             ? "Advertisements have not been synced with the kiosk manager."
             : AdvertisementLastSyncStatus.Trim();
+        BusinessHoursSyncRevision ??= string.Empty;
+        BusinessHoursLastSyncStatus = string.IsNullOrWhiteSpace(BusinessHoursLastSyncStatus)
+            ? "Business Hours have not been synced with the kiosk manager."
+            : BusinessHoursLastSyncStatus.Trim();
         foreach (var advertisement in Advertisements)
             advertisement.Normalize();
         IdleTimeoutMinutes = Math.Clamp(IdleTimeoutMinutes, 1, 60);

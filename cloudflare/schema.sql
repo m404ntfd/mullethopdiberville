@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS locations (
   location_id TEXT PRIMARY KEY,
   kiosk_json TEXT NOT NULL DEFAULT '[]',
   advertisement_updated_utc TEXT,
+  business_hours_updated_utc TEXT,
   local_last_seen_utc TEXT,
   updated_utc TEXT NOT NULL
 );

@@ -17,5 +17,14 @@ restart the remote controller.
 
 Both controllers make outbound HTTPS connections. Do not configure router port
 forwarding. Kiosks continue to communicate only with the on-site controller and
-retain their last synchronized advertisements if either controller or the
-internet connection is unavailable.
+retain their last synchronized advertisements and Business Hours settings if
+either controller or the internet connection is unavailable.
+
+# Business Hours sync upgrade
+
+Existing relay installations must apply the one-time database migration before deploying this version:
+
+```powershell
+npx wrangler d1 execute mullet-hop-kiosk-relay --remote --file migrate-business-hours.sql
+npx wrangler deploy
+```

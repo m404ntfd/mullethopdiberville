@@ -8,6 +8,7 @@ internal static class CommandTypes
     public const string SetClosed = "set-closed";
     public const string CheckUpdate = "check-update";
     public const string InstallUpdate = "install-update";
+    public const string SyncBusinessHours = "sync-business-hours";
 }
 
 internal sealed class KioskCheckInRequest
@@ -22,12 +23,15 @@ internal sealed class KioskCheckInRequest
     public string LastCommandMessage { get; set; } = string.Empty;
     public string AdvertisementSyncRevision { get; set; } = string.Empty;
     public DateTime? AdvertisementLastSyncUtc { get; set; }
+    public string BusinessHoursSyncRevision { get; set; } = string.Empty;
+    public DateTime? BusinessHoursLastSyncUtc { get; set; }
 }
 
 internal sealed class KioskCheckInResponse
 {
     public KioskCommand? Command { get; set; }
     public string AdvertisementRevision { get; set; } = string.Empty;
+    public string BusinessHoursRevision { get; set; } = string.Empty;
 }
 
 internal sealed class KioskCommand
@@ -59,6 +63,8 @@ internal sealed class ManagedKiosk
     public bool LastResultSuccess { get; set; } = true;
     public string AdvertisementSyncRevision { get; set; } = string.Empty;
     public DateTime? AdvertisementLastSyncUtc { get; set; }
+    public string BusinessHoursSyncRevision { get; set; } = string.Empty;
+    public DateTime? BusinessHoursLastSyncUtc { get; set; }
     public KioskCommand? PendingCommand { get; set; }
 
     public bool IsOnline => DateTime.UtcNow - LastSeenUtc < TimeSpan.FromSeconds(18);
@@ -76,6 +82,8 @@ internal sealed class ManagedKiosk
         LastResultSuccess = LastResultSuccess,
         AdvertisementSyncRevision = AdvertisementSyncRevision,
         AdvertisementLastSyncUtc = AdvertisementLastSyncUtc,
+        BusinessHoursSyncRevision = BusinessHoursSyncRevision,
+        BusinessHoursLastSyncUtc = BusinessHoursLastSyncUtc,
         PendingCommand = PendingCommand?.Clone()
     };
 }
@@ -87,6 +95,9 @@ internal sealed class ControllerData
     public List<ControllerAdvertisement> Advertisements { get; set; } = [];
     public string AdvertisementRevision { get; set; } = string.Empty;
     public DateTime? AdvertisementUpdatedUtc { get; set; }
+    public ControllerBusinessHours BusinessHours { get; set; } = new();
+    public string BusinessHoursRevision { get; set; } = string.Empty;
+    public DateTime? BusinessHoursUpdatedUtc { get; set; }
 }
 
 internal sealed class ControllerState
@@ -133,6 +144,55 @@ internal sealed class ControllerState
         {
             lock (_gate)
                 return _data.AdvertisementUpdatedUtc;
+        }
+    }
+
+    public string BusinessHoursRevision
+    {
+        get { lock (_gate) return _data.BusinessHoursRevision; }
+    }
+
+    public DateTime? BusinessHoursUpdatedUtc
+    {
+        get { lock (_gate) return _data.BusinessHoursUpdatedUtc; }
+    }
+
+    public ControllerBusinessHours BusinessHoursSnapshot()
+    {
+        lock (_gate) return _data.BusinessHours.Clone();
+    }
+
+    public void SaveBusinessHours(ControllerBusinessHours profile)
+    {
+        lock (_gate)
+        {
+            profile = profile.Clone();
+            profile.Normalize();
+            _data.BusinessHours = profile;
+            _data.BusinessHoursRevision = Guid.NewGuid().ToString("N");
+            _data.BusinessHoursUpdatedUtc = DateTime.UtcNow;
+            SaveLocked();
+            ControllerLog.Write($"Published Business Hours profile {_data.BusinessHoursRevision}.");
+        }
+    }
+
+    public BusinessHoursSyncPackage CreateBusinessHoursSyncPackage()
+    {
+        lock (_gate)
+        {
+            return new BusinessHoursSyncPackage
+            {
+                Revision = _data.BusinessHoursRevision,
+                GeneratedUtc = DateTime.UtcNow,
+                Enabled = _data.BusinessHours.Enabled,
+                ClosedMessageMinutes = _data.BusinessHours.ClosedMessageMinutes,
+                PreOpeningScreensaverMinutes = _data.BusinessHours.PreOpeningScreensaverMinutes,
+                Days = _data.BusinessHours.Days.Select(day => new BusinessHoursSyncItem
+                {
+                    Day = (int)day.Day, IsOpen = day.IsOpen,
+                    OpenTime = day.OpenTime, CloseTime = day.CloseTime
+                }).ToList()
+            };
         }
     }
 
@@ -235,6 +295,9 @@ internal sealed class ControllerState
             kiosk.AdvertisementSyncRevision = Clean(
                 request.AdvertisementSyncRevision, string.Empty, 80);
             kiosk.AdvertisementLastSyncUtc = request.AdvertisementLastSyncUtc;
+            kiosk.BusinessHoursSyncRevision = Clean(
+                request.BusinessHoursSyncRevision, string.Empty, 80);
+            kiosk.BusinessHoursLastSyncUtc = request.BusinessHoursLastSyncUtc;
 
             if (kiosk.PendingCommand is not null &&
                 string.Equals(kiosk.PendingCommand.Id, request.LastCommandId, StringComparison.Ordinal))
@@ -398,6 +461,30 @@ internal sealed class ControllerState
         }
     }
 
+    public void ApplyCloudBusinessHours(BusinessHoursSyncPackage package, DateTime updatedUtc)
+    {
+        lock (_gate)
+        {
+            var profile = new ControllerBusinessHours
+            {
+                Enabled = package.Enabled,
+                ClosedMessageMinutes = package.ClosedMessageMinutes,
+                PreOpeningScreensaverMinutes = package.PreOpeningScreensaverMinutes,
+                Days = package.Days.Select(item => new ControllerBusinessDayHours
+                {
+                    Day = item.Day is >= 0 and <= 6 ? (DayOfWeek)item.Day : DayOfWeek.Monday,
+                    IsOpen = item.IsOpen, OpenTime = item.OpenTime, CloseTime = item.CloseTime
+                }).ToList()
+            };
+            profile.Normalize();
+            _data.BusinessHours = profile;
+            _data.BusinessHoursRevision = package.Revision;
+            _data.BusinessHoursUpdatedUtc = updatedUtc;
+            SaveLocked();
+            ControllerLog.Write($"Applied cloud Business Hours profile {package.Revision}.");
+        }
+    }
+
     private ControllerData Load()
     {
         try
@@ -411,6 +498,9 @@ internal sealed class ControllerState
             data.Kiosks ??= [];
             data.Advertisements ??= [];
             data.AdvertisementRevision ??= string.Empty;
+            data.BusinessHours ??= new ControllerBusinessHours();
+            data.BusinessHoursRevision ??= string.Empty;
+            data.BusinessHours.Normalize();
             foreach (var advertisement in data.Advertisements)
                 advertisement.Normalize();
             return data;
@@ -443,6 +533,7 @@ internal sealed class ControllerState
         CommandTypes.SetClosed => "Open-kiosk command queued.",
         CommandTypes.CheckUpdate => "Update check queued.",
         CommandTypes.InstallUpdate => "Update installation queued.",
+        CommandTypes.SyncBusinessHours => "Business Hours sync queued.",
         _ => "Command queued."
     };
 
