@@ -7,7 +7,7 @@ Write-Host ''
 
 $running = Get-Process -Name 'MulletHopWaiverKiosk' -ErrorAction SilentlyContinue
 if ($running) {
-    throw 'The waiver kiosk is running. Exit it with Ctrl + Alt + Shift + F12, then run this installer again.'
+    throw 'The waiver kiosk is running. Exit it with Ctrl + Alt + M, then run this installer again.'
 }
 
 $searchFolders = @($PSScriptRoot, (Join-Path $PSScriptRoot 'Releases'))
@@ -66,7 +66,7 @@ Write-Host ''
 Write-Host 'Installation complete.' -ForegroundColor Green
 Write-Host 'Future updates will be checked automatically whenever the kiosk starts.' -ForegroundColor Green
 Write-Host 'Staff can also check for updates from Staff Settings.' -ForegroundColor Green
-Write-Host 'Staff settings shortcut: Ctrl + Alt + Shift + F12' -ForegroundColor Green
+Write-Host 'Staff settings shortcut: Ctrl + Alt + M' -ForegroundColor Green
 Write-Host ''
 
 if (-not (Get-Process -Name 'MulletHopWaiverKiosk' -ErrorAction SilentlyContinue)) {

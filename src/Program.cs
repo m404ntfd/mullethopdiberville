@@ -302,8 +302,7 @@ internal sealed partial class KioskForm : Form
     private const int StaffExitHotKeyId = 0x4D48;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
-    private const uint ModShift = 0x0004;
-    private const uint VkF12 = 0x7B;
+    private const uint VkM = 0x4D;
     private const string AdvertisementVirtualHost = "mullethop-ads.local";
     private const string ScreensaverVirtualHost = "mullethop-kiosk.local";
     private const string ScreensaverFileName = "MulletHopScreensaver.mp4";
@@ -416,7 +415,7 @@ internal sealed partial class KioskForm : Form
             {
                 _allowExit = true;
                 MessageBox.Show(
-                    "The staff settings shortcut could not be registered. Close any program using Ctrl + Alt + Shift + F12, then start the kiosk again.",
+                    "The staff settings shortcut could not be registered. Close any program using Ctrl + Alt + M, then start the kiosk again.",
                     "Mullet Hop Waiver Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Close();
                 return;
@@ -443,7 +442,7 @@ internal sealed partial class KioskForm : Form
     {
         base.OnHandleCreated(e);
         _hotKeyRegistered = RegisterHotKey(Handle, StaffExitHotKeyId,
-            ModControl | ModAlt | ModShift, VkF12);
+            ModControl | ModAlt, VkM);
 
         if (!_hotKeyRegistered)
             KioskLog.Write("Unable to register the staff settings hotkey.");
@@ -2437,7 +2436,7 @@ internal sealed partial class KioskForm : Form
             _previewStartedUtc = DateTime.UtcNow;
             _previewBanner.Text = "STAFF DATE/TIME PREVIEW — " +
                 selectedDateTime.ToString("dddd, MMMM d, yyyy 'at' h:mm tt") +
-                " — Press Ctrl + Alt + Shift + F12 to return to live time";
+                " — Press Ctrl + Alt + M to return to live time";
             _previewBanner.Visible = true;
             _previewBanner.BringToFront();
             await ResetForNextGuestAsync("staff date/time preview", showStatus: false);
@@ -3947,7 +3946,7 @@ internal sealed class PinSetupDialog : Form
         var note = new Label
         {
             AutoSize = false,
-            Text = "Use 4–8 numbers only. Staff will press Ctrl + Alt + Shift + F12 and enter this password.",
+            Text = "Use 4–8 numbers only. Staff will press Ctrl + Alt + M and enter this password.",
             Bounds = new Rectangle(25, 58, 420, 48)
         };
         var pinLabel = new Label { Text = "New Password:", AutoSize = true, Location = new Point(25, 122) };

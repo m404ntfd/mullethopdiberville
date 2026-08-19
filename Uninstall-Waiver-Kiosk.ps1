@@ -12,7 +12,7 @@ if ($answer -notmatch '^[Yy]') {
 
 $processes = Get-Process -Name 'MulletHopWaiverKiosk' -ErrorAction SilentlyContinue
 if ($processes) {
-    throw 'The kiosk is running. Exit it with Ctrl + Alt + Shift + F12, then run this uninstaller again.'
+    throw 'The kiosk is running. Exit it with Ctrl + Alt + M, then run this uninstaller again.'
 }
 
 $velopackRoot = Join-Path $env:LOCALAPPDATA 'MulletHop.WaiverKiosk'

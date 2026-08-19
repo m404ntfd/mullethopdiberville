@@ -200,7 +200,7 @@ internal sealed class ControllerForm : Form
         {
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Text = "On each kiosk: Ctrl + Alt + Shift + F12 → Staff Settings → Remote Control Setup. Enter a unique kiosk name, then paste the address and key above.",
+            Text = "On each kiosk: Ctrl + Alt + M → Staff Settings → Remote Control Setup. Enter a unique kiosk name, then paste the address and key above.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f),
             TextAlign = ContentAlignment.MiddleLeft,
