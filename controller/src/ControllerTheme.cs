@@ -20,8 +20,13 @@ internal sealed class ControllerThemeSettings
 internal static class ControllerTheme
 {
     private sealed record OriginalColors(Color BackColor, Color ForeColor);
+    private sealed class NativeThemeState
+    {
+        public bool Dark { get; set; }
+    }
 
     private static readonly ConditionalWeakTable<Control, OriginalColors> Original = new();
+    private static readonly ConditionalWeakTable<Control, NativeThemeState> NativeThemeStates = new();
     private static readonly ConditionalWeakTable<Form, object> TitleBarHooks = new();
     private static readonly string SettingsPath = Path.Combine(
         ControllerLog.DataDirectory, "controller-theme.json");
@@ -61,6 +66,18 @@ internal static class ControllerTheme
     public static Color OfflineText => IsDark
         ? Color.FromArgb(255, 163, 154)
         : Color.FromArgb(125, 55, 48);
+    public static Color AccentText => IsDark
+        ? Color.FromArgb(91, 198, 240)
+        : Color.FromArgb(8, 119, 189);
+    public static Color SuccessText => IsDark
+        ? Color.FromArgb(144, 220, 126)
+        : Color.FromArgb(54, 128, 27);
+    public static Color WarningText => IsDark
+        ? Color.FromArgb(255, 190, 120)
+        : Color.FromArgb(182, 76, 0);
+    public static Color ErrorText => IsDark
+        ? Color.FromArgb(255, 150, 143)
+        : Color.FromArgb(180, 35, 24);
 
     public static void SetMode(ControllerThemeMode mode)
     {
@@ -83,6 +100,7 @@ internal static class ControllerTheme
 
     public static void Apply(Control root)
     {
+        CaptureOriginalTree(root);
         ApplyControl(root);
         if (root is Form form)
         {
@@ -96,6 +114,13 @@ internal static class ControllerTheme
         root.Invalidate(true);
     }
 
+    private static void CaptureOriginalTree(Control control)
+    {
+        Original.GetValue(control, item => new OriginalColors(item.BackColor, item.ForeColor));
+        foreach (Control child in control.Controls)
+            CaptureOriginalTree(child);
+    }
+
     private static void ApplyControl(Control control)
     {
         var original = Original.GetValue(control,
@@ -105,11 +130,21 @@ internal static class ControllerTheme
         {
             control.BackColor = original.BackColor;
             control.ForeColor = original.ForeColor;
+            if (control is DateTimePicker picker)
+            {
+                picker.CalendarMonthBackground = SystemColors.Window;
+                picker.CalendarForeColor = SystemColors.WindowText;
+                picker.CalendarTitleBackColor = SystemColors.ActiveCaption;
+                picker.CalendarTitleForeColor = SystemColors.ActiveCaptionText;
+            }
         }
         else
         {
             ApplyDarkColors(control, original);
         }
+
+        EnsureReadableForeground(control);
+        ApplyNativeControlTheme(control);
 
         foreach (Control child in control.Controls)
             ApplyControl(child);
@@ -124,8 +159,22 @@ internal static class ControllerTheme
                 control.ForeColor = PrimaryText;
                 break;
 
-            case TextBoxBase or ComboBox or NumericUpDown or DateTimePicker or ListBox or ListView:
+            case DateTimePicker picker:
+                picker.BackColor = InputBackground;
+                picker.ForeColor = PrimaryText;
+                picker.CalendarMonthBackground = InputBackground;
+                picker.CalendarForeColor = PrimaryText;
+                picker.CalendarTitleBackColor = SurfaceBackground;
+                picker.CalendarTitleForeColor = PrimaryText;
+                break;
+
+            case TextBoxBase or ComboBox or NumericUpDown or ListBox or ListView:
                 control.BackColor = InputBackground;
+                control.ForeColor = PrimaryText;
+                break;
+
+            case TabPage:
+                control.BackColor = SurfaceBackground;
                 control.ForeColor = PrimaryText;
                 break;
 
@@ -135,7 +184,7 @@ internal static class ControllerTheme
                 break;
 
             case Button button:
-                if (IsLightSurface(original.BackColor))
+                if (IsLightSurface(original.BackColor) || IsSystemButtonSurface(original.BackColor))
                     button.BackColor = Color.FromArgb(51, 65, 78);
                 else
                     button.BackColor = original.BackColor;
@@ -148,6 +197,14 @@ internal static class ControllerTheme
             case CheckBox or RadioButton:
                 control.BackColor = Color.Transparent;
                 control.ForeColor = MapTextColor(original.ForeColor);
+                break;
+
+            case LinkLabel link:
+                link.BackColor = Color.Transparent;
+                link.ForeColor = AccentText;
+                link.LinkColor = AccentText;
+                link.ActiveLinkColor = Color.FromArgb(255, 182, 110);
+                link.VisitedLinkColor = Color.FromArgb(205, 153, 235);
                 break;
 
             case PictureBox:
@@ -203,13 +260,86 @@ internal static class ControllerTheme
 
     private static bool IsLightSurface(Color color) =>
         color == Color.White ||
+        color.ToArgb() == SystemColors.Control.ToArgb() ||
+        color.ToArgb() == SystemColors.ControlLight.ToArgb() ||
+        color.ToArgb() == SystemColors.Window.ToArgb() ||
         color.ToArgb() == Color.FromArgb(244, 248, 251).ToArgb() ||
         color.ToArgb() == Color.FromArgb(247, 251, 253).ToArgb() ||
         color.ToArgb() == Color.FromArgb(238, 250, 255).ToArgb() ||
         color.ToArgb() == Color.FromArgb(235, 238, 241).ToArgb();
 
+    private static bool IsSystemButtonSurface(Color color) =>
+        color.ToArgb() == SystemColors.Control.ToArgb() || color.IsEmpty;
+
     private static bool IsDarkColor(Color color) =>
         color.A > 0 && (color.R * 299 + color.G * 587 + color.B * 114) / 1000 < 145;
+
+    private static void EnsureReadableForeground(Control control)
+    {
+        if (control is PictureBox or ProgressBar || control.ForeColor == Color.Transparent) return;
+        var background = EffectiveBackground(control);
+        if (ContrastRatio(control.ForeColor, background) >= 4.5) return;
+        control.ForeColor = IsDarkColor(background)
+            ? Color.FromArgb(245, 248, 250)
+            : Color.FromArgb(16, 24, 32);
+    }
+
+    private static Color EffectiveBackground(Control control)
+    {
+        for (Control? current = control; current is not null; current = current.Parent)
+        {
+            if (current.BackColor != Color.Transparent && current.BackColor.A > 0)
+                return current.BackColor;
+        }
+        return IsDark ? WindowBackground : Color.White;
+    }
+
+    private static double ContrastRatio(Color foreground, Color background)
+    {
+        var lighter = Math.Max(RelativeLuminance(foreground), RelativeLuminance(background));
+        var darker = Math.Min(RelativeLuminance(foreground), RelativeLuminance(background));
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static double RelativeLuminance(Color color)
+    {
+        static double Channel(byte value)
+        {
+            var component = value / 255d;
+            return component <= 0.04045
+                ? component / 12.92
+                : Math.Pow((component + 0.055) / 1.055, 2.4);
+        }
+        return 0.2126 * Channel(color.R) + 0.7152 * Channel(color.G) + 0.0722 * Channel(color.B);
+    }
+
+    private static void ApplyNativeControlTheme(Control control)
+    {
+        if (control is not (TextBoxBase or ComboBox or NumericUpDown or DateTimePicker or
+            ListBox or ListView or TabControl)) return;
+
+        var state = NativeThemeStates.GetValue(control, item =>
+        {
+            var value = new NativeThemeState();
+            item.HandleCreated += (_, _) => SetNativeTheme(item, value.Dark);
+            return value;
+        });
+        state.Dark = IsDark;
+        if (control.IsHandleCreated) SetNativeTheme(control, state.Dark);
+    }
+
+    private static void SetNativeTheme(Control control, bool dark)
+    {
+        if (!OperatingSystem.IsWindows() || !control.IsHandleCreated) return;
+        try
+        {
+            SetWindowTheme(control.Handle, dark ? "DarkMode_Explorer" : "Explorer", null);
+        }
+        catch (Exception ex)
+        {
+            ControllerLog.Write("Native control theme error: " + ex.Message);
+        }
+    }
 
     private static ControllerThemeMode LoadMode()
     {
@@ -263,4 +393,7 @@ internal static class ControllerTheme
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(
         IntPtr windowHandle, int attribute, ref int value, int valueSize);
+
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr windowHandle, string? subAppName, string? subIdList);
 }

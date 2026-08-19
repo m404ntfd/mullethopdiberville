@@ -547,8 +547,9 @@ internal sealed partial class KioskForm : Form
         {
             var dark = _lastDarkTheme ? "true" : "false";
             await _webView.CoreWebView2.ExecuteScriptAsync(
-                "document.body?.classList.toggle('dark-theme', " + dark + ");" +
-                "document.body?.classList.toggle('mullet-hop-dark-theme', " + dark + ");");
+                "if (window.__mulletHopSetDarkMode) window.__mulletHopSetDarkMode(" + dark + ");" +
+                "else { document.body?.classList.toggle('dark-theme', " + dark + ");" +
+                "document.body?.classList.toggle('mullet-hop-dark-theme', " + dark + "); }");
         }
         catch (Exception ex)
         {
@@ -2528,7 +2529,7 @@ internal sealed partial class KioskForm : Form
           const kioskLogoSource = '__MULLET_HOP_LOGO_DATA_URL__';
           const providerLogoSource = '__MULLET_HOP_PROVIDER_LOGO_DATA_URL__';
           const kioskBackgroundSource = '__MULLET_HOP_BACKGROUND_URL__';
-          const kioskDarkMode = __MULLET_HOP_DARK_MODE__;
+          let kioskDarkMode = __MULLET_HOP_DARK_MODE__;
 
           let lastActivityMessage = 0;
           const postActivity = () => {
@@ -2553,6 +2554,83 @@ internal sealed partial class KioskForm : Form
             document.querySelector("input[type='email']") ||
             document.querySelector("input[name*='email' i]") ||
             document.querySelector("input[id*='email' i]");
+
+          const parseCssColor = value => {
+            const match = String(value || '').match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)/i);
+            if (!match) return null;
+            return {
+              r: Number(match[1]), g: Number(match[2]), b: Number(match[3]),
+              a: match[4] === undefined ? 1 : Number(match[4])
+            };
+          };
+          const colorLuminance = color => {
+            const channel = value => {
+              const component = value / 255;
+              return component <= .04045 ? component / 12.92 : Math.pow((component + .055) / 1.055, 2.4);
+            };
+            return .2126 * channel(color.r) + .7152 * channel(color.g) + .0722 * channel(color.b);
+          };
+          const contrastRatio = (first, second) => {
+            const lighter = Math.max(colorLuminance(first), colorLuminance(second));
+            const darker = Math.min(colorLuminance(first), colorLuminance(second));
+            return (lighter + .05) / (darker + .05);
+          };
+          const effectiveBackground = element => {
+            for (let current = element; current; current = current.parentElement) {
+              const color = parseCssColor(getComputedStyle(current).backgroundColor);
+              if (color && color.a >= .5) return color;
+            }
+            return { r: 17, g: 24, b: 32, a: 1 };
+          };
+          const restoreContrastFixes = () => {
+            document.querySelectorAll('[data-mullet-hop-contrast-fixed]').forEach(element => {
+              const original = element.dataset.mulletHopOriginalColor || '';
+              const priority = element.dataset.mulletHopOriginalColorPriority || '';
+              if (original) element.style.setProperty('color', original, priority);
+              else element.style.removeProperty('color');
+              delete element.dataset.mulletHopContrastFixed;
+              delete element.dataset.mulletHopOriginalColor;
+              delete element.dataset.mulletHopOriginalColorPriority;
+            });
+          };
+          const repairDarkContrast = () => {
+            if (!document.body?.classList.contains('mullet-hop-dark-theme')) {
+              restoreContrastFixes();
+              return;
+            }
+            document.querySelectorAll('body, body *').forEach(element => {
+              if (element.matches('script, style, img, svg, path, canvas, video, source')) return;
+              const style = getComputedStyle(element);
+              if (style.display === 'none' || style.visibility === 'hidden') return;
+              const foreground = parseCssColor(style.color);
+              if (!foreground) return;
+              const background = effectiveBackground(element);
+              if (contrastRatio(foreground, background) >= 4.5) return;
+              if (!element.dataset.mulletHopContrastFixed) {
+                element.dataset.mulletHopContrastFixed = '1';
+                element.dataset.mulletHopOriginalColor = element.style.getPropertyValue('color');
+                element.dataset.mulletHopOriginalColorPriority = element.style.getPropertyPriority('color');
+              }
+              element.style.setProperty(
+                'color', colorLuminance(background) < .36 ? '#f5f8fa' : '#101820', 'important');
+            });
+          };
+          let contrastRepairQueued = false;
+          const scheduleDarkContrastRepair = () => {
+            if (contrastRepairQueued) return;
+            contrastRepairQueued = true;
+            requestAnimationFrame(() => {
+              contrastRepairQueued = false;
+              repairDarkContrast();
+            });
+          };
+          window.__mulletHopRepairDarkContrast = scheduleDarkContrastRepair;
+          window.__mulletHopSetDarkMode = dark => {
+            kioskDarkMode = Boolean(dark);
+            document.body?.classList.toggle('dark-theme', kioskDarkMode);
+            document.body?.classList.toggle('mullet-hop-dark-theme', kioskDarkMode);
+            scheduleDarkContrastRepair();
+          };
 
           const radioDescription = input => {
             const parts = [input.value, input.getAttribute('aria-label'), input.getAttribute('title')];
@@ -3245,6 +3323,7 @@ internal sealed partial class KioskForm : Form
               html:has(body.mullet-hop-dark-theme) { background: #111820; }
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme {
                 color: #edf3f7 !important;
+                color-scheme: dark;
                 background-color: #111820 !important;
                 background-image:
                   linear-gradient(rgba(10,16,23,.78), rgba(10,16,23,.78)),
@@ -3280,6 +3359,16 @@ internal sealed partial class KioskForm : Form
                 color: #f5f8fa !important;
                 background: #25313d !important;
                 border-color: #5bc6f0 !important;
+                caret-color: #f5f8fa !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme input::placeholder,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme textarea::placeholder {
+                color: #b9c6d0 !important;
+                opacity: 1 !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme option {
+                color: #f5f8fa !important;
+                background: #25313d !important;
               }
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme .mullet-hop-choice-group,
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme .choice,
@@ -3292,6 +3381,11 @@ internal sealed partial class KioskForm : Form
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme input[type='button'],
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme input[type='reset'] {
                 color: #101820 !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme button *,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme .button *,
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme .btn * {
+                color: inherit !important;
               }
               @media (max-width: 1100px) {
                 body.mullet-hop-waiver-themed,
@@ -3347,6 +3441,7 @@ internal sealed partial class KioskForm : Form
 
             document.body.classList.add('mullet-hop-waiver-themed');
             document.body.classList.toggle('mullet-hop-dark-theme', kioskDarkMode);
+            scheduleDarkContrastRepair();
             repairProviderLogo();
             document.querySelectorAll('canvas').forEach(installSignatureTouchBridge);
             const main = document.getElementById('divMain') ||
@@ -3960,6 +4055,7 @@ internal sealed class StaffSettingsDialog : Form
     private readonly DateTimePicker _scheduledDarkTime = new();
     private readonly Label _themeStatus = new();
     private readonly Dictionary<DayOfWeek, CheckBox> _scheduledDarkDays = [];
+    private bool IsDarkTheme => KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
     private readonly Dictionary<DayOfWeek,
         (CheckBox IsOpen, DateTimePicker Opens, DateTimePicker Closes)> _businessDayControls = [];
 
@@ -4819,8 +4915,8 @@ internal sealed class StaffSettingsDialog : Form
             _settings.Save();
             _businessHoursStatus.Text = DescribeBusinessHoursStatus(_settings);
             _businessHoursStatus.ForeColor = _settings.BusinessHoursEnabled
-                ? Color.FromArgb(8, 119, 189)
-                : Color.FromArgb(83, 97, 109);
+                ? KioskTheme.AccentText(IsDarkTheme)
+                : KioskTheme.MutedText(IsDarkTheme);
             _businessHoursSaveButton.Text = "Saved";
             KioskLog.Write("Business hours settings were updated.");
         }
@@ -4863,7 +4959,7 @@ internal sealed class StaffSettingsDialog : Form
     {
         _connectionButton.Enabled = false;
         _connectionResult.Text = "Checking the waiver website…";
-        _connectionResult.ForeColor = Color.FromArgb(83, 97, 109);
+        _connectionResult.ForeColor = KioskTheme.MutedText(IsDarkTheme);
 
         try
         {
@@ -4877,19 +4973,19 @@ internal sealed class StaffSettingsDialog : Form
             if (response.IsSuccessStatusCode)
             {
                 _connectionResult.Text = "Connected — the waiver website responded successfully.";
-                _connectionResult.ForeColor = Color.FromArgb(54, 128, 27);
+                _connectionResult.ForeColor = KioskTheme.SuccessText(IsDarkTheme);
             }
             else
             {
                 _connectionResult.Text = $"Website reached — response: {(int)response.StatusCode} {response.ReasonPhrase}";
-                _connectionResult.ForeColor = Color.FromArgb(182, 76, 0);
+                _connectionResult.ForeColor = KioskTheme.WarningText(IsDarkTheme);
             }
         }
         catch (Exception ex)
         {
             if (IsDisposed) return;
             _connectionResult.Text = "Connection failed — " + ex.Message;
-            _connectionResult.ForeColor = Color.FromArgb(180, 35, 24);
+            _connectionResult.ForeColor = KioskTheme.ErrorText(IsDarkTheme);
         }
         finally
         {
@@ -4926,7 +5022,7 @@ internal sealed class StaffSettingsDialog : Form
     {
         _updateButton.Enabled = false;
         _updateResult.Text = "Checking GitHub for an update…";
-        _updateResult.ForeColor = Color.FromArgb(83, 97, 109);
+        _updateResult.ForeColor = KioskTheme.MutedText(IsDarkTheme);
 
         try
         {
@@ -4936,11 +5032,11 @@ internal sealed class StaffSettingsDialog : Form
             _updateResult.Text = result.Message;
             _updateResult.ForeColor = result.Status switch
             {
-                KioskUpdateStatus.UpToDate => Color.FromArgb(54, 128, 27),
-                KioskUpdateStatus.Applying => Color.FromArgb(54, 128, 27),
-                KioskUpdateStatus.NotConfigured => Color.FromArgb(182, 76, 0),
-                KioskUpdateStatus.NotInstalled => Color.FromArgb(182, 76, 0),
-                _ => Color.FromArgb(180, 35, 24)
+                KioskUpdateStatus.UpToDate => KioskTheme.SuccessText(IsDarkTheme),
+                KioskUpdateStatus.Applying => KioskTheme.SuccessText(IsDarkTheme),
+                KioskUpdateStatus.NotConfigured => KioskTheme.WarningText(IsDarkTheme),
+                KioskUpdateStatus.NotInstalled => KioskTheme.WarningText(IsDarkTheme),
+                _ => KioskTheme.ErrorText(IsDarkTheme)
             };
         }
         finally
@@ -4967,6 +5063,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
     private readonly TextBox _pairingKey = new();
     private readonly Button _testButton = new();
     private readonly Label _testResult = new();
+    private bool IsDarkTheme => KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
 
     public RemoteManagementSettingsDialog(KioskSettings settings)
     {
@@ -5102,7 +5199,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
     {
         _testButton.Enabled = false;
         _testResult.Text = "Contacting the controller…";
-        _testResult.ForeColor = Color.FromArgb(83, 97, 109);
+        _testResult.ForeColor = KioskTheme.MutedText(IsDarkTheme);
         try
         {
             var result = await RemoteManagementProtocol.TestAsync(
@@ -5110,8 +5207,8 @@ internal sealed class RemoteManagementSettingsDialog : Form
             if (IsDisposed) return;
             _testResult.Text = result.Message;
             _testResult.ForeColor = result.Success
-                ? Color.FromArgb(54, 128, 27)
-                : Color.FromArgb(180, 35, 24);
+                ? KioskTheme.SuccessText(IsDarkTheme)
+                : KioskTheme.ErrorText(IsDarkTheme);
         }
         finally
         {
@@ -5178,6 +5275,7 @@ internal sealed class StaffPasswordChangeDialog : Form
     private readonly Label _verificationStatus = new();
     private readonly Button _changeButton = new();
     private string? _verifiedCurrentPassword;
+    private bool IsDarkTheme => KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
 
     public StaffPasswordChangeDialog(KioskSettings settings)
     {
@@ -5334,14 +5432,14 @@ internal sealed class StaffPasswordChangeDialog : Form
             _verifiedCurrentPassword = null;
             _changeButton.Enabled = false;
             _verificationStatus.Text = "Current password is incorrect.";
-            _verificationStatus.ForeColor = Color.FromArgb(180, 35, 24);
+            _verificationStatus.ForeColor = KioskTheme.ErrorText(IsDarkTheme);
             ShowProblem("The current staff password is incorrect.", _currentPassword);
             return;
         }
 
         _verifiedCurrentPassword = current;
         _verificationStatus.Text = "Current password verified. The OK button is now available.";
-        _verificationStatus.ForeColor = Color.FromArgb(54, 128, 27);
+        _verificationStatus.ForeColor = KioskTheme.SuccessText(IsDarkTheme);
         _changeButton.Enabled = true;
         _newPassword.Focus();
     }
@@ -5354,7 +5452,7 @@ internal sealed class StaffPasswordChangeDialog : Form
         _verifiedCurrentPassword = null;
         _changeButton.Enabled = false;
         _verificationStatus.Text = "Current password changed. Verify it again.";
-        _verificationStatus.ForeColor = Color.FromArgb(182, 76, 0);
+        _verificationStatus.ForeColor = KioskTheme.WarningText(IsDarkTheme);
     }
 
     private void ChangePassword()
@@ -5366,7 +5464,7 @@ internal sealed class StaffPasswordChangeDialog : Form
             _verifiedCurrentPassword = null;
             _changeButton.Enabled = false;
             _verificationStatus.Text = "Verify the current password before continuing.";
-            _verificationStatus.ForeColor = Color.FromArgb(180, 35, 24);
+            _verificationStatus.ForeColor = KioskTheme.ErrorText(IsDarkTheme);
             ShowProblem("Verify the current staff password before changing it.", _currentPassword);
             return;
         }
@@ -5528,6 +5626,7 @@ internal sealed class AdvertisementManagerDialog : Form
     private readonly Label _lastSync = new();
     private readonly ProgressBar _syncProgress = new();
     private readonly Button _syncButton = new();
+    private bool IsDarkTheme => KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
 
     public AdvertisementManagerDialog(
         KioskSettings settings,
@@ -5674,7 +5773,7 @@ internal sealed class AdvertisementManagerDialog : Form
         _syncButton.Enabled = false;
         _syncProgress.Value = 0;
         _syncStatus.Text = "Starting advertisement sync…";
-        _syncStatus.ForeColor = Color.FromArgb(8, 119, 189);
+        _syncStatus.ForeColor = KioskTheme.AccentText(IsDarkTheme);
         try
         {
             var progress = new Progress<AdvertisementSyncProgress>(update =>
@@ -5690,14 +5789,14 @@ internal sealed class AdvertisementManagerDialog : Form
             if (result.Success)
             {
                 _syncProgress.Value = 100;
-                _syncStatus.ForeColor = Color.FromArgb(54, 128, 27);
+                _syncStatus.ForeColor = KioskTheme.SuccessText(IsDarkTheme);
                 RefreshList();
             }
             else
             {
                 _syncProgress.Value = 0;
                 _syncStatus.Text = result.Message;
-                _syncStatus.ForeColor = Color.FromArgb(180, 35, 24);
+                _syncStatus.ForeColor = KioskTheme.ErrorText(IsDarkTheme);
                 MessageBox.Show(this, result.Message, "Advertisement Sync",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
@@ -5734,7 +5833,7 @@ internal sealed class AdvertisementManagerDialog : Form
             var item = new ListViewItem(advertisement.Name) { Tag = advertisement };
             item.SubItems.Add(advertisement.ScheduleSummary());
             item.SubItems.Add(status);
-            if (!advertisement.Enabled) item.ForeColor = Color.Gray;
+            if (!advertisement.Enabled) item.ForeColor = KioskTheme.MutedText(IsDarkTheme);
             _list.Items.Add(item);
             if (advertisement.Id == selectId) item.Selected = true;
         }

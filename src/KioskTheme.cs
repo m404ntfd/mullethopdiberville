@@ -20,8 +20,13 @@ internal readonly record struct KioskThemeStatus(
 internal static class KioskTheme
 {
     private sealed record OriginalColors(Color BackColor, Color ForeColor);
+    private sealed class NativeThemeState
+    {
+        public bool Dark { get; set; }
+    }
 
     private static readonly ConditionalWeakTable<Control, OriginalColors> Original = new();
+    private static readonly ConditionalWeakTable<Control, NativeThemeState> NativeThemeStates = new();
     private static readonly ConditionalWeakTable<Form, object> TitleBarHooks = new();
 
     public static KioskThemeStatus Evaluate(KioskSettings settings, DateTime now)
@@ -67,6 +72,7 @@ internal static class KioskTheme
 
     public static void Apply(Control root, bool dark)
     {
+        CaptureOriginalTree(root);
         ApplyControl(root, dark);
         if (root is Form form)
         {
@@ -78,6 +84,13 @@ internal static class KioskTheme
             }
         }
         root.Invalidate(true);
+    }
+
+    private static void CaptureOriginalTree(Control control)
+    {
+        Original.GetValue(control, item => new OriginalColors(item.BackColor, item.ForeColor));
+        foreach (Control child in control.Controls)
+            CaptureOriginalTree(child);
     }
 
     public static Color WindowBackground(bool dark) => dark
@@ -101,6 +114,18 @@ internal static class KioskTheme
     public static Color Navigation(bool dark) => dark
         ? Color.FromArgb(29, 38, 48)
         : Color.FromArgb(247, 247, 247);
+    public static Color AccentText(bool dark) => dark
+        ? Color.FromArgb(91, 198, 240)
+        : Color.FromArgb(8, 119, 189);
+    public static Color SuccessText(bool dark) => dark
+        ? Color.FromArgb(144, 220, 126)
+        : Color.FromArgb(54, 128, 27);
+    public static Color WarningText(bool dark) => dark
+        ? Color.FromArgb(255, 190, 120)
+        : Color.FromArgb(182, 76, 0);
+    public static Color ErrorText(bool dark) => dark
+        ? Color.FromArgb(255, 150, 143)
+        : Color.FromArgb(180, 35, 24);
 
     private static DateTime FindFollowingBusinessOpening(KioskSettings settings, DateTime start)
     {
@@ -122,6 +147,13 @@ internal static class KioskTheme
         {
             control.BackColor = original.BackColor;
             control.ForeColor = original.ForeColor;
+            if (control is DateTimePicker picker)
+            {
+                picker.CalendarMonthBackground = SystemColors.Window;
+                picker.CalendarForeColor = SystemColors.WindowText;
+                picker.CalendarTitleBackColor = SystemColors.ActiveCaption;
+                picker.CalendarTitleForeColor = SystemColors.ActiveCaptionText;
+            }
         }
         else
         {
@@ -135,12 +167,20 @@ internal static class KioskTheme
                     control.BackColor = SurfaceBackground(true);
                     control.ForeColor = MapText(original.ForeColor);
                     break;
-                case TextBoxBase or ComboBox or NumericUpDown or DateTimePicker or ListBox or ListView:
+                case DateTimePicker picker:
+                    picker.BackColor = InputBackground(true);
+                    picker.ForeColor = PrimaryText(true);
+                    picker.CalendarMonthBackground = InputBackground(true);
+                    picker.CalendarForeColor = PrimaryText(true);
+                    picker.CalendarTitleBackColor = SurfaceBackground(true);
+                    picker.CalendarTitleForeColor = PrimaryText(true);
+                    break;
+                case TextBoxBase or ComboBox or NumericUpDown or ListBox or ListView:
                     control.BackColor = InputBackground(true);
                     control.ForeColor = PrimaryText(true);
                     break;
                 case Button button:
-                    if (IsLightSurface(original.BackColor))
+                    if (IsLightSurface(original.BackColor) || IsSystemButtonSurface(original.BackColor))
                         button.BackColor = Color.FromArgb(51, 65, 78);
                     else
                         button.BackColor = original.BackColor;
@@ -152,6 +192,13 @@ internal static class KioskTheme
                 case CheckBox or RadioButton:
                     control.BackColor = Color.Transparent;
                     control.ForeColor = MapText(original.ForeColor);
+                    break;
+                case LinkLabel link:
+                    link.BackColor = Color.Transparent;
+                    link.ForeColor = AccentText(true);
+                    link.LinkColor = AccentText(true);
+                    link.ActiveLinkColor = Color.FromArgb(255, 182, 110);
+                    link.VisitedLinkColor = Color.FromArgb(205, 153, 235);
                     break;
                 case Label:
                     if (original.BackColor != Color.Transparent && IsLightSurface(original.BackColor))
@@ -170,6 +217,9 @@ internal static class KioskTheme
                     break;
             }
         }
+
+        EnsureReadableForeground(control, dark);
+        ApplyNativeControlTheme(control, dark);
 
         foreach (Control child in control.Controls)
             ApplyControl(child, dark);
@@ -192,12 +242,85 @@ internal static class KioskTheme
 
     private static bool IsLightSurface(Color color) =>
         color == Color.White ||
+        color.ToArgb() == SystemColors.Control.ToArgb() ||
+        color.ToArgb() == SystemColors.ControlLight.ToArgb() ||
+        color.ToArgb() == SystemColors.Window.ToArgb() ||
         color.ToArgb() == Color.FromArgb(238, 250, 255).ToArgb() ||
         color.ToArgb() == Color.FromArgb(247, 247, 247).ToArgb() ||
         color.ToArgb() == Color.FromArgb(247, 251, 253).ToArgb();
 
+    private static bool IsSystemButtonSurface(Color color) =>
+        color.ToArgb() == SystemColors.Control.ToArgb() || color.IsEmpty;
+
     private static bool IsDarkColor(Color color) =>
         color.A > 0 && (color.R * 299 + color.G * 587 + color.B * 114) / 1000 < 145;
+
+    private static void EnsureReadableForeground(Control control, bool dark)
+    {
+        if (control is PictureBox or ProgressBar || control.ForeColor == Color.Transparent) return;
+        var background = EffectiveBackground(control, dark);
+        if (ContrastRatio(control.ForeColor, background) >= 4.5) return;
+        control.ForeColor = IsDarkColor(background)
+            ? Color.FromArgb(245, 248, 250)
+            : Color.FromArgb(16, 24, 32);
+    }
+
+    private static Color EffectiveBackground(Control control, bool dark)
+    {
+        for (Control? current = control; current is not null; current = current.Parent)
+        {
+            if (current.BackColor != Color.Transparent && current.BackColor.A > 0)
+                return current.BackColor;
+        }
+        return WindowBackground(dark);
+    }
+
+    private static double ContrastRatio(Color foreground, Color background)
+    {
+        var lighter = Math.Max(RelativeLuminance(foreground), RelativeLuminance(background));
+        var darker = Math.Min(RelativeLuminance(foreground), RelativeLuminance(background));
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static double RelativeLuminance(Color color)
+    {
+        static double Channel(byte value)
+        {
+            var component = value / 255d;
+            return component <= 0.04045
+                ? component / 12.92
+                : Math.Pow((component + 0.055) / 1.055, 2.4);
+        }
+        return 0.2126 * Channel(color.R) + 0.7152 * Channel(color.G) + 0.0722 * Channel(color.B);
+    }
+
+    private static void ApplyNativeControlTheme(Control control, bool dark)
+    {
+        if (control is not (TextBoxBase or ComboBox or NumericUpDown or DateTimePicker or
+            ListBox or ListView or TabControl)) return;
+
+        var state = NativeThemeStates.GetValue(control, item =>
+        {
+            var value = new NativeThemeState();
+            item.HandleCreated += (_, _) => SetNativeTheme(item, value.Dark);
+            return value;
+        });
+        state.Dark = dark;
+        if (control.IsHandleCreated) SetNativeTheme(control, state.Dark);
+    }
+
+    private static void SetNativeTheme(Control control, bool dark)
+    {
+        if (!OperatingSystem.IsWindows() || !control.IsHandleCreated) return;
+        try
+        {
+            SetWindowTheme(control.Handle, dark ? "DarkMode_Explorer" : "Explorer", null);
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Native control theme error: " + ex.Message);
+        }
+    }
 
     public static bool WindowsUsesDarkApps()
     {
@@ -233,4 +356,7 @@ internal static class KioskTheme
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(
         IntPtr windowHandle, int attribute, ref int value, int valueSize);
+
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr windowHandle, string? subAppName, string? subIdList);
 }
