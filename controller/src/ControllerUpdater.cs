@@ -7,7 +7,7 @@ namespace MulletHopKioskController;
 internal enum ControllerUpdateStatus
 {
     UpToDate,
-    Available,
+    ReadyToInstall,
     Applying,
     NotConfigured,
     NotInstalled,
@@ -22,6 +22,11 @@ internal static class ControllerUpdater
 {
     private const string RepositoryMetadataKey = "UpdateRepositoryUrl";
     private const string UpdateChannel = "controller";
+    private static UpdateManager? _stagedManager;
+    private static UpdateInfo? _stagedUpdate;
+
+    public static bool HasStagedUpdate =>
+        _stagedManager is not null && _stagedUpdate is not null;
 
     public static string CurrentVersion
     {
@@ -41,60 +46,7 @@ internal static class ControllerUpdater
                 string.Equals(attribute.Key, RepositoryMetadataKey, StringComparison.Ordinal))?
             .Value?.Trim() ?? string.Empty;
 
-    public static void ApplyAvailableUpdateOnStartup()
-    {
-        try
-        {
-            var result = CheckDownloadAndApplyAsync().GetAwaiter().GetResult();
-            ControllerLog.Write("Automatic controller update check: " + result.Message);
-        }
-        catch (Exception ex)
-        {
-            ControllerLog.Write("Automatic controller update error: " +
-                ex.GetType().Name + " - " + ex.Message);
-        }
-    }
-
-    public static async Task<ControllerUpdateResult> CheckForUpdateAsync()
-    {
-        if (string.IsNullOrWhiteSpace(RepositoryUrl))
-        {
-            return new ControllerUpdateResult(
-                ControllerUpdateStatus.NotConfigured,
-                "This controller build was not created by the GitHub release workflow.");
-        }
-
-        try
-        {
-            var manager = CreateUpdateManager();
-            var update = await manager.CheckForUpdatesAsync();
-            return update is null
-                ? new ControllerUpdateResult(
-                    ControllerUpdateStatus.UpToDate,
-                    $"Controller version {CurrentVersion} is up to date.")
-                : new ControllerUpdateResult(
-                    ControllerUpdateStatus.Available,
-                    $"Controller version {update.TargetFullRelease.Version} is available. " +
-                    $"This computer currently has version {CurrentVersion}.");
-        }
-        catch (Exception ex) when (
-            string.Equals(ex.GetType().Name, "NotInstalledException", StringComparison.Ordinal))
-        {
-            return new ControllerUpdateResult(
-                ControllerUpdateStatus.NotInstalled,
-                "Automatic controller updates begin after installing the controller with its new Setup file.");
-        }
-        catch (Exception ex)
-        {
-            ControllerLog.Write("Controller update check error: " +
-                ex.GetType().Name + " - " + ex.Message);
-            return new ControllerUpdateResult(
-                ControllerUpdateStatus.Failed,
-                "The controller update check failed. Verify the internet connection and try again.");
-        }
-    }
-
-    public static async Task<ControllerUpdateResult> CheckDownloadAndApplyAsync()
+    public static async Task<ControllerUpdateResult> CheckAndStageUpdateAsync()
     {
         if (string.IsNullOrWhiteSpace(RepositoryUrl))
         {
@@ -109,17 +61,22 @@ internal static class ControllerUpdater
             var update = await manager.CheckForUpdatesAsync();
             if (update is null)
             {
+                _stagedManager = null;
+                _stagedUpdate = null;
                 return new ControllerUpdateResult(
                     ControllerUpdateStatus.UpToDate,
                     $"Controller version {CurrentVersion} is up to date.");
             }
 
             await manager.DownloadUpdatesAsync(update);
-            ControllerLog.Write("A controller update was downloaded and is being applied.");
-            manager.ApplyUpdatesAndRestart(update);
+            _stagedManager = manager;
+            _stagedUpdate = update;
+            ControllerLog.Write(
+                $"Controller update {update.TargetFullRelease.Version} is downloaded and ready to install.");
             return new ControllerUpdateResult(
-                ControllerUpdateStatus.Applying,
-                "The controller update is installing. The controller will restart automatically.");
+                ControllerUpdateStatus.ReadyToInstall,
+                $"Controller version {update.TargetFullRelease.Version} has been downloaded. " +
+                $"This computer currently has version {CurrentVersion}.");
         }
         catch (Exception ex) when (
             string.Equals(ex.GetType().Name, "NotInstalledException", StringComparison.Ordinal))
@@ -127,6 +84,33 @@ internal static class ControllerUpdater
             return new ControllerUpdateResult(
                 ControllerUpdateStatus.NotInstalled,
                 "Automatic controller updates begin after installing the controller with its new Setup file.");
+        }
+        catch (Exception ex)
+        {
+            ControllerLog.Write("Controller update check/download error: " +
+                ex.GetType().Name + " - " + ex.Message);
+            return new ControllerUpdateResult(
+                ControllerUpdateStatus.Failed,
+                "The controller update check failed. Verify the internet connection and try again.");
+        }
+    }
+
+    public static ControllerUpdateResult ApplyStagedUpdateAndRestart()
+    {
+        if (_stagedManager is null || _stagedUpdate is null)
+        {
+            return new ControllerUpdateResult(
+                ControllerUpdateStatus.UpToDate,
+                "No downloaded controller update is waiting to be installed.");
+        }
+
+        try
+        {
+            ControllerLog.Write("The downloaded controller update is being applied.");
+            _stagedManager.ApplyUpdatesAndRestart(_stagedUpdate);
+            return new ControllerUpdateResult(
+                ControllerUpdateStatus.Applying,
+                "The controller update is installing. The controller will restart automatically.");
         }
         catch (Exception ex)
         {

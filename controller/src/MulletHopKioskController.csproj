@@ -8,7 +8,7 @@
     <AssemblyName>MulletHopKioskController</AssemblyName>
     <RootNamespace>MulletHopKioskController</RootNamespace>
     <AssemblyTitle>Mullet Hop Kiosk Controller</AssemblyTitle>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop Kiosk Controller</Product>
     <Description>Local-network dashboard for Mullet Hop waiver kiosks.</Description>

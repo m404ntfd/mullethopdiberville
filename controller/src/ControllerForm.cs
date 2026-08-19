@@ -22,7 +22,10 @@ internal sealed class ControllerForm : Form
     private readonly Button _checkUpdateButton = new();
     private readonly Button _installUpdateButton = new();
     private readonly Button _controllerUpdateButton = new();
-    private readonly Button _exitButton = new();
+    private readonly Button _restartControllerButton = new();
+    private readonly Button _closeControllerButton = new();
+    private readonly Label _controllerUpdateStatus = new();
+    private readonly Label _controllerUpdateReady = new();
 
     public ControllerForm()
     {
@@ -50,7 +53,11 @@ internal sealed class ControllerForm : Form
         Controls.Add(header);
 
         _refreshTimer.Tick += (_, _) => RefreshKioskList();
-        Shown += (_, _) => StartControllerService();
+        Shown += async (_, _) =>
+        {
+            StartControllerService();
+            await CheckControllerUpdateAsync(showUpToDateMessage: false);
+        };
         FormClosed += (_, _) =>
         {
             _refreshTimer.Stop();
@@ -210,55 +217,130 @@ internal sealed class ControllerForm : Form
         var panel = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 160,
-            Padding = new Padding(18, 10, 18, 10),
+            Height = 190,
+            Padding = new Padding(12, 8, 12, 8),
             BackColor = Color.White
+        };
+
+        var sections = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = Color.White
+        };
+        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
+        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+        sections.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var kioskGroup = new GroupBox
+        {
+            Dock = DockStyle.Fill,
+            Text = "Kiosk Controls",
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            ForeColor = Color.FromArgb(8, 119, 189),
+            Padding = new Padding(10, 22, 10, 8),
+            Margin = new Padding(0, 0, 8, 0)
         };
         _selectionStatus.Text = "Select a kiosk above to manage it.";
         _selectionStatus.AutoSize = false;
+        _selectionStatus.Dock = DockStyle.Top;
+        _selectionStatus.Height = 27;
         _selectionStatus.ForeColor = Color.FromArgb(52, 65, 76);
         _selectionStatus.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-        _selectionStatus.Bounds = new Rectangle(20, 7, 900, 25);
-        _selectionStatus.Anchor = AnchorStyles.Left | AnchorStyles.Top;
 
-        ConfigureActionButton(_openButton, "Open Selected", 20, Color.FromArgb(118, 196, 66), width: 160);
-        ConfigureActionButton(_closeButton, "Close Selected", 190, Color.FromArgb(245, 130, 32), width: 160);
-        ConfigureActionButton(_checkUpdateButton, "Check Kiosk Update", 360, Color.FromArgb(105, 210, 236), width: 190);
-        ConfigureActionButton(_installUpdateButton, "Install Kiosk Update", 560, Color.FromArgb(117, 68, 154), Color.White, 190);
+        var kioskButtons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Padding = new Padding(0, 2, 0, 0),
+            Margin = Padding.Empty
+        };
+        ConfigureFlowButton(_openButton, "Open Selected", Color.FromArgb(118, 196, 66), 145);
+        ConfigureFlowButton(_closeButton, "Close Selected", Color.FromArgb(245, 130, 32), 145);
+        ConfigureFlowButton(_checkUpdateButton, "Check Kiosk Update", Color.FromArgb(105, 210, 236), 172);
+        ConfigureFlowButton(_installUpdateButton, "Install Kiosk Update", Color.FromArgb(117, 68, 154), 172, Color.White);
         _openButton.Click += (_, _) => QueueSelected(CommandTypes.SetClosed, false);
         _closeButton.Click += (_, _) => QueueSelected(CommandTypes.SetClosed, true);
         _checkUpdateButton.Click += (_, _) => QueueSelected(CommandTypes.CheckUpdate);
         _installUpdateButton.Click += (_, _) => InstallSelectedUpdate();
 
-        var openAll = MakeActionButton("Open All", 20, 98, Color.FromArgb(210, 239, 190), 160);
+        var openAll = MakeFlowButton("Open All", Color.FromArgb(210, 239, 190), 130);
         openAll.Click += (_, _) => QueueForAll(CommandTypes.SetClosed, false);
-        var closeAll = MakeActionButton("Close All", 190, 98, Color.FromArgb(255, 217, 188), 160);
+        var closeAll = MakeFlowButton("Close All", Color.FromArgb(255, 217, 188), 130);
         closeAll.Click += (_, _) => CloseAllKiosks();
+        kioskButtons.Controls.AddRange([
+            _openButton, _closeButton, _checkUpdateButton,
+            _installUpdateButton, openAll, closeAll]);
+        kioskGroup.Controls.Add(kioskButtons);
+        kioskGroup.Controls.Add(_selectionStatus);
 
-        ConfigureActionButton(
-            _controllerUpdateButton,
-            "Check Controller Update",
-            952,
-            Color.FromArgb(8, 119, 189),
-            Color.White,
-            220);
-        _controllerUpdateButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync();
+        var controllerGroup = new GroupBox
+        {
+            Dock = DockStyle.Fill,
+            Text = "Controller Program",
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            ForeColor = Color.FromArgb(8, 119, 189),
+            Padding = new Padding(10, 22, 10, 8),
+            Margin = new Padding(0)
+        };
+        var controllerLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        ConfigureActionButton(
-            _exitButton,
-            "Exit Controller",
-            952,
-            Color.FromArgb(180, 35, 24),
-            Color.White,
-            220,
-            98);
-        _exitButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        _exitButton.Click += (_, _) => ExitController();
+        _controllerUpdateStatus.Text = $"Version {ControllerUpdater.CurrentVersion} — checking for updates…";
+        _controllerUpdateStatus.Dock = DockStyle.Fill;
+        _controllerUpdateStatus.TextAlign = ContentAlignment.MiddleLeft;
+        _controllerUpdateStatus.ForeColor = Color.FromArgb(52, 65, 76);
+        _controllerUpdateStatus.Font = new Font("Segoe UI", 9);
 
-        panel.Controls.AddRange([
-            _selectionStatus, _openButton, _closeButton, _checkUpdateButton,
-            _installUpdateButton, openAll, closeAll, _controllerUpdateButton, _exitButton]);
+        _controllerUpdateReady.Text = "! Update Ready to Install";
+        _controllerUpdateReady.Dock = DockStyle.Fill;
+        _controllerUpdateReady.TextAlign = ContentAlignment.MiddleLeft;
+        _controllerUpdateReady.ForeColor = Color.FromArgb(196, 28, 28);
+        _controllerUpdateReady.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        _controllerUpdateReady.Visible = false;
+
+        var controllerButtons = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
+        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
+        ConfigureTableActionButton(_controllerUpdateButton, "Check Updates", Color.FromArgb(8, 119, 189), Color.White);
+        ConfigureTableActionButton(_restartControllerButton, "Restart", Color.FromArgb(245, 130, 32));
+        ConfigureTableActionButton(_closeControllerButton, "Close", Color.FromArgb(180, 35, 24), Color.White);
+        _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync(showUpToDateMessage: true);
+        _restartControllerButton.Click += (_, _) => RestartController();
+        _closeControllerButton.Click += (_, _) => CloseController();
+        controllerButtons.Controls.Add(_controllerUpdateButton, 0, 0);
+        controllerButtons.Controls.Add(_restartControllerButton, 1, 0);
+        controllerButtons.Controls.Add(_closeControllerButton, 2, 0);
+
+        controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
+        controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);
+        controllerLayout.Controls.Add(controllerButtons, 0, 2);
+        controllerGroup.Controls.Add(controllerLayout);
+
+        sections.Controls.Add(kioskGroup, 0, 0);
+        sections.Controls.Add(controllerGroup, 1, 0);
+        panel.Controls.Add(sections);
         UpdateActionButtons();
         return panel;
     }
@@ -406,37 +488,41 @@ internal sealed class ControllerForm : Form
             QueueForAll(CommandTypes.SetClosed, true);
     }
 
-    private async Task CheckControllerUpdateAsync()
+    private async Task CheckControllerUpdateAsync(bool showUpToDateMessage)
     {
         _controllerUpdateButton.Enabled = false;
         var originalText = _controllerUpdateButton.Text;
         _controllerUpdateButton.Text = "Checking…";
+        _controllerUpdateStatus.Text = "Checking for controller updates…";
         try
         {
-            var result = await ControllerUpdater.CheckForUpdateAsync();
+            var result = await ControllerUpdater.CheckAndStageUpdateAsync();
             if (IsDisposed)
                 return;
 
-            if (result.Status != ControllerUpdateStatus.Available)
+            _controllerUpdateStatus.Text = result.Message;
+            if (result.Status != ControllerUpdateStatus.ReadyToInstall)
             {
-                MessageBox.Show(this, result.Message, "Controller Update",
-                    MessageBoxButtons.OK,
-                    result.Status == ControllerUpdateStatus.Failed
-                        ? MessageBoxIcon.Warning
-                        : MessageBoxIcon.Information);
+                _controllerUpdateReady.Visible = false;
+                if (showUpToDateMessage || result.Status != ControllerUpdateStatus.UpToDate)
+                {
+                    MessageBox.Show(this, result.Message, "Controller Update",
+                        MessageBoxButtons.OK,
+                        result.Status == ControllerUpdateStatus.Failed
+                            ? MessageBoxIcon.Warning
+                            : MessageBoxIcon.Information);
+                }
                 return;
             }
 
-            var answer = MessageBox.Show(this,
-                result.Message + "\n\nDownload and install it now? The controller will restart automatically.",
-                "Controller Update Available",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
-            if (answer != DialogResult.Yes)
+            if (!ShowControllerUpdatePrompt(result.Message))
+            {
+                ShowDeferredUpdateReady();
                 return;
+            }
 
             _controllerUpdateButton.Text = "Installing…";
-            var installResult = await ControllerUpdater.CheckDownloadAndApplyAsync();
+            var installResult = ControllerUpdater.ApplyStagedUpdateAndRestart();
             if (!IsDisposed && installResult.Status != ControllerUpdateStatus.Applying)
             {
                 MessageBox.Show(this, installResult.Message, "Controller Update",
@@ -456,15 +542,100 @@ internal sealed class ControllerForm : Form
         }
     }
 
-    private void ExitController()
+    private void RestartController()
+    {
+        if (ControllerUpdater.HasStagedUpdate)
+        {
+            var answer = MessageBox.Show(this,
+                "A controller update is ready to install. Restart now and install the update?",
+                "Install Controller Update",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (answer == DialogResult.Yes)
+            {
+                var result = ControllerUpdater.ApplyStagedUpdateAndRestart();
+                if (result.Status != ControllerUpdateStatus.Applying)
+                {
+                    MessageBox.Show(this, result.Message, "Controller Update",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            return;
+        }
+
+        var restart = MessageBox.Show(this,
+            "Restart the kiosk controller now?",
+            "Restart Kiosk Controller",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (restart == DialogResult.Yes)
+            Program.RestartApplication();
+    }
+
+    private void CloseController()
     {
         var answer = MessageBox.Show(this,
-            "Exit the kiosk controller?\n\nKiosks will keep their current state, but remote commands will be unavailable until the controller starts again.",
-            "Exit Kiosk Controller",
+            "Close the kiosk controller?\n\nKiosks will keep their current state, but remote commands will be unavailable until the controller starts again.",
+            "Close Kiosk Controller",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
         if (answer == DialogResult.Yes)
             Close();
+    }
+
+    private void ShowDeferredUpdateReady()
+    {
+        _controllerUpdateReady.Visible = true;
+        _controllerUpdateStatus.Text =
+            "The downloaded update will install when the controller is restarted.";
+    }
+
+    private bool ShowControllerUpdatePrompt(string message)
+    {
+        using var prompt = new Form
+        {
+            Text = "Controller Update Ready",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = false,
+            ClientSize = new Size(520, 205),
+            BackColor = Color.White,
+            Font = new Font("Segoe UI", 10)
+        };
+        var updateMessage = new Label
+        {
+            Text = message +
+                "\n\nRestart and install it now, or keep working and install it later?",
+            AutoSize = false,
+            Bounds = new Rectangle(24, 20, 472, 105),
+            ForeColor = Color.FromArgb(16, 24, 32)
+        };
+        var installNow = new Button
+        {
+            Text = "Restart and Install Now",
+            DialogResult = DialogResult.Yes,
+            Bounds = new Rectangle(68, 142, 190, 44),
+            BackColor = Color.FromArgb(8, 119, 189),
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+        };
+        var installLater = new Button
+        {
+            Text = "Install Later",
+            DialogResult = DialogResult.No,
+            Bounds = new Rectangle(272, 142, 180, 44),
+            BackColor = Color.FromArgb(235, 238, 241),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+        };
+        prompt.AcceptButton = installNow;
+        prompt.CancelButton = installLater;
+        prompt.Controls.AddRange([updateMessage, installNow, installLater]);
+        return prompt.ShowDialog(this) == DialogResult.Yes;
     }
 
     private ManagedKiosk? SelectedKiosk()
@@ -566,27 +737,41 @@ internal sealed class ControllerForm : Form
         label.Font = new Font("Segoe UI", 13, FontStyle.Bold);
     }
 
-    private static void ConfigureActionButton(
+    private static void ConfigureFlowButton(
         Button button,
         string text,
-        int x,
         Color color,
-        Color? foreground = null,
-        int width = 155,
-        int y = 40)
+        int width,
+        Color? foreground = null)
     {
         button.Text = text;
-        button.Bounds = new Rectangle(x, y, width, 48);
+        button.Size = new Size(width, 44);
+        button.Margin = new Padding(3);
         button.BackColor = color;
         button.ForeColor = foreground ?? Color.FromArgb(16, 24, 32);
         button.FlatStyle = FlatStyle.Flat;
-        button.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        button.Font = new Font("Segoe UI", 9, FontStyle.Bold);
     }
 
-    private static Button MakeActionButton(string text, int x, int y, Color color, int width)
+    private static Button MakeFlowButton(string text, Color color, int width)
     {
         var button = new Button();
-        ConfigureActionButton(button, text, x, color, width: width, y: y);
+        ConfigureFlowButton(button, text, color, width);
         return button;
+    }
+
+    private static void ConfigureTableActionButton(
+        Button button,
+        string text,
+        Color color,
+        Color? foreground = null)
+    {
+        button.Text = text;
+        button.Dock = DockStyle.Fill;
+        button.Margin = new Padding(3);
+        button.BackColor = color;
+        button.ForeColor = foreground ?? Color.FromArgb(16, 24, 32);
+        button.FlatStyle = FlatStyle.Flat;
+        button.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
     }
 }
