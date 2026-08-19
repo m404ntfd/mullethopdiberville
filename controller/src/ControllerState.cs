@@ -292,6 +292,112 @@ internal sealed class ControllerState
         }
     }
 
+    public IReadOnlyList<CloudCommand> PendingCloudCommands()
+    {
+        lock (_gate)
+        {
+            return _data.Kiosks
+                .Where(kiosk => kiosk.PendingCommand is not null)
+                .Select(kiosk => new CloudCommand
+                {
+                    StationId = kiosk.StationId,
+                    Command = kiosk.PendingCommand!.Clone()
+                })
+                .ToList();
+        }
+    }
+
+    public void AcknowledgeCloudCommands(IEnumerable<CloudCommand> commands)
+    {
+        lock (_gate)
+        {
+            foreach (var sent in commands)
+            {
+                var kiosk = _data.Kiosks.FirstOrDefault(item => item.StationId == sent.StationId);
+                if (kiosk?.PendingCommand?.Id == sent.Command.Id)
+                {
+                    kiosk.PendingCommand = null;
+                    kiosk.LastResult = "Command accepted by the cloud relay.";
+                }
+            }
+            SaveLocked();
+        }
+    }
+
+    public void QueueCloudCommand(CloudCommand cloudCommand)
+    {
+        lock (_gate)
+        {
+            var kiosk = _data.Kiosks.FirstOrDefault(item => item.StationId == cloudCommand.StationId);
+            if (kiosk is null || string.IsNullOrWhiteSpace(cloudCommand.Command.Id)) return;
+            if (kiosk.PendingCommand?.Id == cloudCommand.Command.Id) return;
+            kiosk.PendingCommand = cloudCommand.Command.Clone();
+            kiosk.LastResult = DescribeQueuedCommand(
+                cloudCommand.Command.Type, cloudCommand.Command.Closed);
+            SaveLocked();
+        }
+    }
+
+    public void ApplyCloudKioskSnapshot(IEnumerable<ManagedKiosk> cloudKiosks)
+    {
+        lock (_gate)
+        {
+            var pendingByStation = _data.Kiosks
+                .Where(kiosk => kiosk.PendingCommand is not null)
+                .ToDictionary(kiosk => kiosk.StationId, kiosk => kiosk.PendingCommand!.Clone());
+            _data.Kiosks = cloudKiosks.Select(item => item.Clone()).ToList();
+            foreach (var kiosk in _data.Kiosks)
+            {
+                if (pendingByStation.TryGetValue(kiosk.StationId, out var pending))
+                    kiosk.PendingCommand = pending;
+            }
+            SaveLocked();
+        }
+    }
+
+    public void ApplyCloudAdvertisements(AdvertisementSyncPackage package, DateTime updatedUtc)
+    {
+        lock (_gate)
+        {
+            Directory.CreateDirectory(ControllerAdvertisementFiles.DirectoryPath);
+            var imported = new List<ControllerAdvertisement>();
+            foreach (var item in package.Advertisements)
+            {
+                var safeName = Path.GetFileName(item.ImageFileName);
+                if (string.IsNullOrWhiteSpace(safeName) ||
+                    !safeName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase))
+                    safeName = Guid.NewGuid().ToString("N") + ".jpg";
+                var path = ControllerAdvertisementFiles.GetSafePath(safeName)
+                           ?? throw new InvalidOperationException("The cloud advertisement filename is invalid.");
+                File.WriteAllBytes(path, Convert.FromBase64String(item.ImageBase64));
+                imported.Add(new ControllerAdvertisement
+                {
+                    Id = item.Id,
+                    Name = item.Name,
+                    ImageFileName = safeName,
+                    Enabled = item.Enabled,
+                    ScheduleType = Enum.IsDefined(typeof(ControllerAdvertisementScheduleType), item.ScheduleType)
+                        ? (ControllerAdvertisementScheduleType)item.ScheduleType
+                        : ControllerAdvertisementScheduleType.SpecificDates,
+                    StartDateTime = item.StartDateTime,
+                    EndDateTime = item.EndDateTime,
+                    DaysOfWeek = item.DaysOfWeek
+                        .Where(value => value is >= 0 and <= 6)
+                        .Select(value => (DayOfWeek)value).ToArray(),
+                    DailyStartTime = item.DailyStartTime,
+                    DailyEndTime = item.DailyEndTime
+                });
+            }
+
+            foreach (var advertisement in imported) advertisement.Normalize();
+            _data.Advertisements = imported;
+            _data.AdvertisementRevision = package.Revision;
+            _data.AdvertisementUpdatedUtc = updatedUtc;
+            SaveLocked();
+            ControllerLog.Write($"Applied cloud advertisement catalog {package.Revision}.");
+        }
+    }
+
     private ControllerData Load()
     {
         try

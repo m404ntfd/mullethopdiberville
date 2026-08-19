@@ -13,6 +13,8 @@ the same private network as the waiver kiosks. It provides:
   and close controls.
 * Queued commands: if a kiosk is temporarily offline, the newest command waits
   until that kiosk reconnects.
+* Optional secure Cloudflare synchronization for a controller installed away
+  from the kiosk network.
 
 
 INSTALL THE CONTROLLER PC
@@ -43,6 +45,26 @@ can update themselves. Existing pairing information and kiosk history are kept.
 The controller does not need internet access for open/close commands. It needs
 internet access only to update itself, and each kiosk still needs internet
 access to check GitHub and install a kiosk update.
+
+
+REMOTE ACCESS (OPTIONAL)
+------------------------
+
+Select **Remote Access** in the Controller Program section. The on-site
+controller should enable secure cloud synchronization and leave **This is a
+remote machine** unchecked. On the off-site controller, paste the setup code,
+check **This is a remote machine**, then select **Save and Restart**.
+
+The on-site controller remains the only computer that talks directly to waiver
+kiosks. Both controllers make outbound HTTPS connections to the Cloudflare
+relay, so router port forwarding is not required. Remote commands wait in the
+relay until the on-site controller receives them. Kiosk status and scheduled
+advertisements synchronize in both directions, and local kiosk operation
+continues when the internet or cloud relay is temporarily unavailable.
+
+The installer ZIP includes `Cloudflare-Setup/Setup-Cloudflare-Relay.cmd` for the
+one-time Worker, D1, R2, and access-key setup. Treat the access key and copied
+setup code as staff credentials.
 
 
 PAIR EACH WAIVER KIOSK ONCE
