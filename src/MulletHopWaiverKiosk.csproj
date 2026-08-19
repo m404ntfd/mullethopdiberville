@@ -9,7 +9,7 @@
     <RootNamespace>MulletHopWaiverKiosk</RootNamespace>
     <AssemblyTitle>Mullet Hop Waiver Kiosk</AssemblyTitle>
     <ApplicationIcon>..\assets\MulletHopFish.ico</ApplicationIcon>
-    <Version>2.6.0</Version>
+    <Version>2.6.1</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop Waiver Kiosk</Product>
     <Description>Full-screen Mullet Hop waiver kiosk with scheduled advertising and automatic updates.</Description>

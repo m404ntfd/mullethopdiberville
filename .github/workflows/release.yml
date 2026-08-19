@@ -139,6 +139,14 @@ jobs:
             -p:DebugType=None `
             --output pos-publish
 
+      - name: Verify POS controller startup
+        shell: pwsh
+        run: |
+          & "pos-publish/MulletHopPosController.exe" --startup-smoke-test
+          if ($LASTEXITCODE -ne 0) {
+            throw "The POS Controller startup smoke test failed with exit code $LASTEXITCODE."
+          }
+
       - name: Install matching Velopack command-line tool
         run: dotnet tool install --global vpk --version 1.2.0
 

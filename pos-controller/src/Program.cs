@@ -7,9 +7,20 @@ internal static class Program
     private const string MutexName = "MulletHopPosController.SingleInstance";
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         VelopackApp.Build().Run();
+
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+
+        if (args.Contains("--startup-smoke-test", StringComparer.OrdinalIgnoreCase))
+        {
+            using var form = new PosControllerForm(new PosSettings());
+            form.CreateControl();
+            return;
+        }
 
         using var mutex = new Mutex(true, MutexName, out var ownsMutex);
         if (!ownsMutex)
@@ -23,9 +34,6 @@ internal static class Program
         }
 
         PosUpdater.ApplyAvailableUpdateOnStartup();
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
 
         try
         {
