@@ -8,7 +8,7 @@ the same private network as the waiver kiosks. It provides:
 * Open All and Close All controls.
 * A non-installing update check per selected kiosk.
 * An install-update command per selected kiosk.
-* A separate controller update check and an Exit Controller button.
+* A lower-right Controller Program section with update, restart, and close controls.
 * Queued commands: if a kiosk is temporarily offline, the newest command waits
   until that kiosk reconnects.
 
@@ -28,9 +28,11 @@ https://github.com/m404ntfd/mullethopdiberville/releases/latest
    change. A DHCP reservation in the router is recommended.
 
 The controller starts automatically when that Windows account signs in. It also
-checks GitHub for controller updates whenever it opens, installs an available
-update, and restarts automatically. Use Check Controller Update on the right
-side of the dashboard to check manually.
+checks GitHub for controller updates whenever it opens. When an update is found,
+the controller downloads it and offers Restart and Install Now or Install Later.
+Choosing Install Later displays a red "! Update Ready to Install" notice until
+the controller is restarted. Use Check Updates in the lower-right Controller
+Program section to check manually.
 
 Version 1.1.0 must be installed once with the new package to establish the
 automatic updater. After that one-time installation, later controller versions
@@ -79,10 +81,11 @@ Open All and Close All apply to every known station. Close All asks for
 confirmation. Offline stations retain the latest queued command and carry it out
 when they reconnect.
 
-Check Controller Update on the right checks for a newer office-controller
-version and offers to install it. Exit Controller closes the office controller;
-the kiosks keep their current open/closed state, but new remote commands are not
-available until the controller starts again.
+The lower-right Controller Program section checks for controller updates and
+provides Restart and Close buttons. If a downloaded update is waiting, Restart
+offers to install it. Closing the controller does not change a kiosk's current
+open/closed state, but new remote commands are unavailable until the controller
+starts again.
 
 
 NETWORK NOTES

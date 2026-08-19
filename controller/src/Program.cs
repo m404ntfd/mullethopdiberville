@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Velopack;
 
 namespace MulletHopKioskController;
@@ -7,11 +8,13 @@ internal static class Program
     private const string MutexName = "MulletHopKioskController.SingleInstance";
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         // Velopack must run before the normal controller startup so install,
         // update, and uninstall hooks can finish without opening the dashboard.
         VelopackApp.Build().Run();
+
+        WaitForPreviousInstance(args);
 
         using var mutex = new Mutex(true, MutexName, out var ownsMutex);
         if (!ownsMutex)
@@ -23,8 +26,6 @@ internal static class Program
                 MessageBoxIcon.Information);
             return;
         }
-
-        ControllerUpdater.ApplyAvailableUpdateOnStartup();
 
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
@@ -42,6 +43,43 @@ internal static class Program
                 "Mullet Hop Kiosk Controller",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+    }
+
+    public static void RestartApplication()
+    {
+        var executable = Environment.ProcessPath ?? Application.ExecutablePath;
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = executable,
+            Arguments = $"--wait-for-process {Environment.ProcessId}",
+            UseShellExecute = true
+        });
+        Application.Exit();
+    }
+
+    private static void WaitForPreviousInstance(string[] args)
+    {
+        if (args.Length != 2 ||
+            !string.Equals(args[0], "--wait-for-process", StringComparison.Ordinal) ||
+            !int.TryParse(args[1], out var processId))
+        {
+            return;
+        }
+
+        try
+        {
+            using var previousProcess = Process.GetProcessById(processId);
+            previousProcess.WaitForExit(15_000);
+        }
+        catch (ArgumentException)
+        {
+            // The previous controller already exited.
+        }
+        catch (Exception ex)
+        {
+            ControllerLog.Write("Controller restart wait error: " +
+                ex.GetType().Name + " - " + ex.Message);
         }
     }
 }
