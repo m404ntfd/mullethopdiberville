@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Reflection;
 
 namespace MulletHopKioskController;
 
@@ -23,10 +24,13 @@ internal sealed class ControllerForm : Form
     private readonly Button _installUpdateButton = new();
     private readonly Button _controllerUpdateButton = new();
     private readonly Button _manageAdsButton = new();
+    private readonly Button _remoteAccessButton = new();
     private readonly Button _restartControllerButton = new();
     private readonly Button _closeControllerButton = new();
     private readonly Label _controllerUpdateStatus = new();
     private readonly Label _controllerUpdateReady = new();
+    private readonly RemoteAccessSettings _remoteSettings = RemoteAccessSettingsStore.Load();
+    private CloudSyncService? _cloudSync;
 
     public ControllerForm()
     {
@@ -56,12 +60,13 @@ internal sealed class ControllerForm : Form
         _refreshTimer.Tick += (_, _) => RefreshKioskList();
         Shown += async (_, _) =>
         {
-            StartControllerService();
+            StartControllerServices();
             await CheckControllerUpdateAsync(showUpToDateMessage: false);
         };
         FormClosed += (_, _) =>
         {
             _refreshTimer.Stop();
+            _cloudSync?.Dispose();
             _server.Dispose();
         };
     }
@@ -74,6 +79,13 @@ internal sealed class ControllerForm : Form
             Height = 78,
             BackColor = Color.FromArgb(117, 68, 154)
         };
+        var logo = new PictureBox
+        {
+            Bounds = new Rectangle(18, 8, 94, 62),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Color.Transparent,
+            Image = LoadHeaderLogo()
+        };
         var title = new Label
         {
             AutoSize = false,
@@ -81,7 +93,7 @@ internal sealed class ControllerForm : Form
             ForeColor = Color.White,
             Font = new Font("Segoe UI", 23, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft,
-            Bounds = new Rectangle(24, 8, 690, 58),
+            Bounds = new Rectangle(120, 8, 690, 58),
             Anchor = AnchorStyles.Left | AnchorStyles.Top
         };
         _serviceStatus.AutoSize = false;
@@ -92,7 +104,7 @@ internal sealed class ControllerForm : Form
         _serviceStatus.TextAlign = ContentAlignment.MiddleCenter;
         _serviceStatus.Bounds = new Rectangle(850, 18, 320, 42);
         _serviceStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        panel.Controls.AddRange([title, _serviceStatus]);
+        panel.Controls.AddRange([logo, title, _serviceStatus]);
         return panel;
     }
 
@@ -316,17 +328,18 @@ internal sealed class ControllerForm : Form
         var controllerButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 4,
-            RowCount = 1,
+            ColumnCount = 3,
+            RowCount = 2,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        for (var index = 0; index < 3; index++)
+            controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         ConfigureTableActionButton(_controllerUpdateButton, "Check Updates", Color.FromArgb(8, 119, 189), Color.White);
         ConfigureTableActionButton(_manageAdsButton, "Manage Ads", Color.FromArgb(117, 68, 154), Color.White);
+        ConfigureTableActionButton(_remoteAccessButton, "Remote Access", Color.FromArgb(105, 210, 236));
         ConfigureTableActionButton(_restartControllerButton, "Restart", Color.FromArgb(245, 130, 32));
         ConfigureTableActionButton(_closeControllerButton, "Close", Color.FromArgb(180, 35, 24), Color.White);
         _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync(showUpToDateMessage: true);
@@ -336,12 +349,14 @@ internal sealed class ControllerForm : Form
             advertisements.ShowDialog(this);
             RefreshKioskList();
         };
+        _remoteAccessButton.Click += (_, _) => OpenRemoteAccessSettings();
         _restartControllerButton.Click += (_, _) => RestartController();
         _closeControllerButton.Click += (_, _) => CloseController();
         controllerButtons.Controls.Add(_controllerUpdateButton, 0, 0);
         controllerButtons.Controls.Add(_manageAdsButton, 1, 0);
-        controllerButtons.Controls.Add(_restartControllerButton, 2, 0);
-        controllerButtons.Controls.Add(_closeControllerButton, 3, 0);
+        controllerButtons.Controls.Add(_remoteAccessButton, 2, 0);
+        controllerButtons.Controls.Add(_restartControllerButton, 0, 1);
+        controllerButtons.Controls.Add(_closeControllerButton, 1, 1);
 
         controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
         controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);
@@ -383,6 +398,43 @@ internal sealed class ControllerForm : Form
         };
     }
 
+    private void StartControllerServices()
+    {
+        if (!_remoteSettings.IsRemoteMachine)
+            StartControllerService();
+        else
+        {
+            _serviceStatus.Text = "● REMOTE MODE STARTING";
+            _serviceStatus.BackColor = Color.FromArgb(8, 119, 189);
+            _refreshTimer.Start();
+            RefreshKioskList();
+        }
+
+        if (_remoteSettings.Enabled)
+        {
+            try
+            {
+                _cloudSync = new CloudSyncService(_state, _remoteSettings);
+                _cloudSync.StatusChanged += (message, connected) =>
+                {
+                    if (IsDisposed) return;
+                    BeginInvoke(() =>
+                    {
+                        _serviceStatus.Text = message;
+                        _serviceStatus.BackColor = connected
+                            ? Color.FromArgb(54, 128, 27)
+                            : Color.FromArgb(180, 35, 24);
+                    });
+                };
+                _cloudSync.Start();
+            }
+            catch (Exception ex)
+            {
+                ShowServiceError("Cloud synchronization could not start.\n\n" + ex.Message);
+            }
+        }
+    }
+
     private void StartControllerService()
     {
         try
@@ -401,6 +453,31 @@ internal sealed class ControllerForm : Form
         catch (Exception ex)
         {
             ShowServiceError("The controller network service could not start.\n\n" + ex.Message);
+        }
+    }
+
+    private void OpenRemoteAccessSettings()
+    {
+        using var settings = new RemoteAccessSettingsDialog(RemoteAccessSettingsStore.Load());
+        if (settings.ShowDialog(this) != DialogResult.OK) return;
+        var answer = MessageBox.Show(this,
+            "Remote access settings were saved. Restart the controller now to apply them?",
+            "Remote Access", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (answer == DialogResult.Yes) Program.RestartApplication();
+    }
+
+    private static Image? LoadHeaderLogo()
+    {
+        try
+        {
+            using var stream = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream("MulletHopKioskController.Assets.MulletHopFish.png");
+            return stream is null ? null : new Bitmap(stream);
+        }
+        catch (Exception ex)
+        {
+            ControllerLog.Write("Controller header logo error: " + ex.Message);
+            return null;
         }
     }
 

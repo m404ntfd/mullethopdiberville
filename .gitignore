@@ -1,5 +1,7 @@
 bin/
 obj/
+cloudflare/wrangler.toml
+cloudflare/Mullet-Hop-Remote-Connection.json
 publish/
 controller-publish/
 ControllerPackage/

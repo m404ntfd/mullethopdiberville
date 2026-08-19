@@ -239,6 +239,7 @@ jobs:
           Copy-Item controller/install/Install-Kiosk-Controller.ps1 ControllerPackage/
           Copy-Item controller/install/Uninstall-Kiosk-Controller.ps1 ControllerPackage/
           Copy-Item controller/README.md ControllerPackage/
+          Copy-Item cloudflare ControllerPackage/Cloudflare-Setup -Recurse
           Compress-Archive `
             -Path ControllerPackage/* `
             -DestinationPath "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `

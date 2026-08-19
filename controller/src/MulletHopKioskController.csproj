@@ -8,7 +8,8 @@
     <AssemblyName>MulletHopKioskController</AssemblyName>
     <RootNamespace>MulletHopKioskController</RootNamespace>
     <AssemblyTitle>Mullet Hop Kiosk Controller</AssemblyTitle>
-    <Version>1.3.0</Version>
+    <ApplicationIcon>..\..\assets\MulletHopFish.ico</ApplicationIcon>
+    <Version>1.4.0</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop Kiosk Controller</Product>
     <Description>Local-network dashboard for Mullet Hop waiver kiosks.</Description>
@@ -16,6 +17,11 @@
 
   <ItemGroup>
     <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\MulletHopFish.png"
+                      LogicalName="MulletHopKioskController.Assets.MulletHopFish.png" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UpdateRepositoryUrl)' != ''">
