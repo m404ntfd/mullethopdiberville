@@ -5094,7 +5094,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
         var note = new Label
         {
             AutoSize = false,
-            Text = "Turn on remote control and give this kiosk a name. Use automatic discovery normally, or use the manual setup code if discovery cannot find this computer.",
+            Text = "Turn on remote control and give this kiosk a name. Use automatic discovery normally. A controller can also send a secure request using the IPv4 address shown below; use the setup code only as a fallback.",
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = Color.FromArgb(52, 65, 76),
             Bounds = new Rectangle(48, 55, 664, 55)
@@ -5162,7 +5162,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
         var manualNote = new Label
         {
             AutoSize = false,
-            Text = "On the Kiosk Controller, select Add Kiosk Manually and copy its setup code. Paste the one code below; the controller address and secure pairing key are included automatically.",
+            Text = "Fallback only: if automatic discovery and code-free IP pairing do not work, copy the setup code from Add Kiosk Manually on the controller and paste it below.",
             Bounds = new Rectangle(18, 25, 664, 48),
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.2f),

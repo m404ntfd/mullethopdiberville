@@ -212,7 +212,7 @@ internal sealed class ControllerForm : Form
         {
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Text = "Use Discover Kiosks for automatic pairing. If a waiver station does not appear, use Add Kiosk Manually and paste its one setup code into Remote Control Options on that kiosk.",
+            Text = "Use Discover Kiosks for automatic pairing. If a waiver station does not appear, use Add Kiosk Manually and enter the IPv4 address shown on that kiosk. No code is required for IP pairing.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -288,7 +288,10 @@ internal sealed class ControllerForm : Form
 
         try
         {
-            using var setup = new ManualKioskSetupDialog(_state, _addresses.Text);
+            using var setup = new ManualKioskSetupDialog(
+                _state,
+                _server.Discovery,
+                _addresses.Text);
             setup.ShowDialog(this);
             RefreshKioskList();
         }
@@ -320,7 +323,7 @@ internal sealed class ControllerForm : Form
         var panel = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 280,
+            Height = 320,
             Padding = new Padding(12, 8, 12, 8),
             BackColor = Color.White
         };
@@ -495,21 +498,35 @@ internal sealed class ControllerForm : Form
         var controllerButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 3,
+            ColumnCount = 3,
+            RowCount = 2,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         for (var index = 0; index < 3; index++)
-            controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
+            controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         ConfigureTableActionButton(_controllerUpdateButton, "Check Updates", Color.FromArgb(8, 119, 189), Color.White);
         ConfigureTableActionButton(_manageAdsButton, "Manage Ads", Color.FromArgb(117, 68, 154), Color.White);
         ConfigureTableActionButton(_businessHoursButton, "Business Hours", Color.FromArgb(118, 196, 66));
         ConfigureTableActionButton(_remoteAccessButton, "Remote Access", Color.FromArgb(105, 210, 236));
-        ConfigureTableActionButton(_restartControllerButton, "Restart", Color.FromArgb(245, 130, 32));
-        ConfigureTableActionButton(_closeControllerButton, "Close", Color.FromArgb(180, 35, 24), Color.White);
+        ConfigureTableActionButton(_restartControllerButton, "Restart Controller", Color.FromArgb(245, 130, 32));
+        ConfigureTableActionButton(_closeControllerButton, "Close Controller", Color.FromArgb(180, 35, 24), Color.White);
+        foreach (var button in new[]
+                 {
+                     _controllerUpdateButton,
+                     _manageAdsButton,
+                     _businessHoursButton,
+                     _remoteAccessButton,
+                     _restartControllerButton,
+                     _closeControllerButton
+                 })
+        {
+            button.MinimumSize = new Size(120, 48);
+            button.Margin = new Padding(4);
+            button.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        }
         _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync(showUpToDateMessage: true);
         _manageAdsButton.Click += (_, _) =>
         {
@@ -528,10 +545,10 @@ internal sealed class ControllerForm : Form
         _closeControllerButton.Click += (_, _) => CloseController();
         controllerButtons.Controls.Add(_controllerUpdateButton, 0, 0);
         controllerButtons.Controls.Add(_manageAdsButton, 1, 0);
-        controllerButtons.Controls.Add(_businessHoursButton, 0, 1);
-        controllerButtons.Controls.Add(_remoteAccessButton, 1, 1);
-        controllerButtons.Controls.Add(_restartControllerButton, 0, 2);
-        controllerButtons.Controls.Add(_closeControllerButton, 1, 2);
+        controllerButtons.Controls.Add(_businessHoursButton, 2, 0);
+        controllerButtons.Controls.Add(_remoteAccessButton, 0, 1);
+        controllerButtons.Controls.Add(_restartControllerButton, 1, 1);
+        controllerButtons.Controls.Add(_closeControllerButton, 2, 1);
 
         controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
         controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);

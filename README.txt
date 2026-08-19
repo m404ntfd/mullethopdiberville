@@ -102,11 +102,18 @@ in the controller. A linked POS Controller then adds the kiosk to its next open
 Kiosk 1-4 position and saves that assignment automatically.
 
 If discovery does not show the kiosk, select Add Kiosk Manually on the
-controller and copy its one setup code. On the kiosk, Remote Control Options now
-shows the active connection, adapter, current IPv4 address, subnet mask, default
-gateway, and stable Device ID. Paste the code under Manual Connection Fallback
-and select Connect and Save. The kiosk tests the signed connection before saving
-it; the address and pairing key are contained in the one code.
+controller and enter the IPv4 address shown in Remote Control Options on that
+kiosk. Select Send Secure Request. The kiosk contacts the controller using its
+normal outbound discovery connection, receives the encrypted key exchange, and
+asks someone at the kiosk to approve the request. No code is required for this
+IP-address workflow. After approval, the first authenticated check-in saves the
+kiosk permanently by Device ID.
+
+The existing setup code remains available as a last-resort fallback. It cannot
+be reduced to 8–10 characters while remaining self-contained because it carries
+the controller address and full 256-bit pairing key. Treat it like the pairing
+key. Paste it under Manual Connection Fallback on the kiosk only when the
+code-free IP workflow cannot communicate.
 
 The saved kiosk identity is the persistent Device ID, not the IP or MAC address.
 Every check-in updates the current IP shown by the controller. If DHCP later
@@ -134,11 +141,10 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Kiosk Controller version 1.10.0 adds the manual setup-code fallback, controller
-peer discovery, and the single-master indicator and toggle. Waiver Kiosk version
-2.9.0 adds the network details and manual connection entry. Automatic discovery,
-the approval prompt, encrypted pairing exchange, saved Device ID, and
-authenticated remote commands remain available.
+Kiosk Controller version 1.10.1 enlarges the Controller Program buttons and adds
+code-free manual pairing by kiosk IPv4 address. Waiver Kiosk version 2.9.1 uses
+the existing outbound discovery and encrypted approval exchange for this release.
+The long self-contained setup code remains available only as a fallback.
 
 
 FRONT-DESK POS CONTROLLER

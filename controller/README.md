@@ -18,7 +18,7 @@ computers discover each other, and one can be designated as the master. It provi
   from the kiosk network.
 * A signed status/control connection for the separate front-desk POS Controller.
 * Local-network kiosk discovery with a required approval prompt on the kiosk.
-* A one-code manual pairing fallback when automatic kiosk discovery is blocked.
+* Code-free manual pairing by kiosk IPv4 address, plus a self-contained setup-code fallback.
 * A persistent red/green master-controller indicator with single-master checks.
 
 
@@ -106,21 +106,23 @@ updates the saved address automatically.
 
 If a kiosk does not appear in the discovery scan:
 
-1. Select **Add Kiosk Manually** in Controller Connection Information and copy
-   the generated setup code.
-2. At the kiosk, open **Remote Control Options**. This page now displays the
-   active connection, adapter, IPv4 address, subnet mask, default gateway, and
-   stable Device ID.
-3. Paste the code under **Manual Connection Fallback** and select **Connect and
-   Save**. The kiosk tests the signed controller connection before saving it.
+1. At the kiosk, open **Remote Control Options** and note the displayed IPv4
+   address.
+2. On the controller, select **Add Kiosk Manually**, enter that IPv4 address,
+   and select **Send Secure Request**.
+3. The kiosk contacts the controller through its existing outbound discovery
+   connection. Approve the encrypted pairing request on the kiosk within two
+   minutes.
+4. The first authenticated check-in permanently saves the kiosk by its stable
+   Device ID. No code is required for the IP-address workflow.
 
-The setup code contains the selected controller address and secure pairing key,
-so staff do not enter either value separately. Treat the code like the pairing
-key. The controller saves the kiosk by its persistent Device ID. Its last IP
-address is refreshed on every check-in, so a new kiosk address assigned by DHCP
-does not create a duplicate and does not break the saved connection. A MAC
-address is not used because computers can have multiple adapters and randomized
-Wi-Fi MAC addresses.
+The generated setup code remains available in the same dialog as a last-resort
+fallback. It is intentionally longer than 8–10 characters because it is
+self-contained and carries the controller address plus the full 256-bit secure
+pairing key. Treat it like the pairing key. The kiosk's last IP address is
+refreshed on every check-in, so a new address assigned by DHCP does not create a
+duplicate or break the saved connection. A MAC address is not used because
+computers can have multiple adapters and randomized Wi-Fi MAC addresses.
 
 
 MASTER CONTROLLER ROLE
@@ -160,9 +162,9 @@ when they reconnect.
 
 The lower-right Controller Program section includes the controller's own
 Auto/Light/Dark appearance selector, master-controller indicator and toggle,
-plus Check Updates, Manage Ads, Business Hours, Remote Access, Restart, and Close
-buttons. If a downloaded update is
-waiting, Restart offers to install it. Closing the controller does not change a
+plus Check Updates, Manage Ads, Business Hours, Remote Access, Restart Controller,
+and Close Controller buttons in a larger three-column, two-row grid. If a
+downloaded update is waiting, Restart Controller offers to install it. Closing the controller does not change a
 kiosk's current open/closed state, but new remote commands are unavailable until
 the controller starts again.
 
@@ -216,13 +218,13 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.10.0 adds manual setup codes, controller peer
-discovery, and the single-master indicator and toggle. Waiver Kiosk version 2.9.0
-adds current IPv4, subnet, gateway, connection, and stable Device ID details plus
-the manual connection fallback. Automatic approval-based discovery remains
-available. Controller version 1.7.0 adds the separate POS Controller connection.
-Waiver Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus
-the reset-to-start command.
+Kiosk Controller version 1.10.1 enlarges the Controller Program buttons and adds
+code-free manual pairing by kiosk IPv4 address. Waiver Kiosk version 2.9.1 uses
+the existing outbound discovery and encrypted approval exchange for the IP
+workflow. The long self-contained setup code remains available as a fallback.
+Controller version 1.7.0 adds the separate POS Controller connection. Waiver
+Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus the
+reset-to-start command.
 
 
 REMOVE THE CONTROLLER

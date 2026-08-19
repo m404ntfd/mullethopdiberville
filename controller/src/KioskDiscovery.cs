@@ -49,11 +49,24 @@ internal sealed class DiscoveredKiosk
 
 internal sealed record PairingQueueResult(bool Success, string Message, string RequestId);
 
+internal sealed record IpPairingQueueResult(
+    bool Success,
+    string Message,
+    string RequestId,
+    DateTime ExpiresUtc);
+
+internal sealed record PendingIpPairing(
+    string IpAddress,
+    string RequestId,
+    DateTime ExpiresUtc);
+
 internal sealed class KioskDiscoveryCoordinator
 {
     private readonly object _gate = new();
     private readonly ControllerState _state;
     private readonly Dictionary<string, DiscoveredKiosk> _devices = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PendingIpPairing> _pendingIpPairings =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public KioskDiscoveryCoordinator(ControllerState state)
     {
@@ -88,21 +101,70 @@ internal sealed class KioskDiscoveryCoordinator
                     string.Empty);
             }
 
-            if (!KioskDiscoveryProtocol.IsValidPublicKey(device.KioskPublicKey))
+            return QueuePairingLocked(
+                device,
+                Guid.NewGuid().ToString("N"),
+                DateTime.UtcNow.AddMinutes(2));
+        }
+    }
+
+    public IpPairingQueueResult QueuePairingByIp(string value)
+    {
+        if (!TryNormalizePrivateIpv4(value, out var ipAddress))
+        {
+            return new IpPairingQueueResult(
+                false,
+                "Enter the private IPv4 address shown in Remote Control Options on the waiver kiosk.",
+                string.Empty,
+                DateTime.MinValue);
+        }
+
+        lock (_gate)
+        {
+            ExpireRequestsLocked();
+            var requestId = Guid.NewGuid().ToString("N");
+            var expiresUtc = DateTime.UtcNow.AddMinutes(2);
+            var activeDevice = _devices.Values.FirstOrDefault(device =>
+                string.Equals(device.IpAddress, ipAddress, StringComparison.OrdinalIgnoreCase) &&
+                DateTime.UtcNow - device.LastSeenUtc <= TimeSpan.FromSeconds(30));
+            if (activeDevice is not null)
             {
-                return new PairingQueueResult(
-                    false,
-                    "The kiosk did not provide a valid secure pairing key.",
-                    string.Empty);
+                var savedDevice = _state.Snapshot().FirstOrDefault(kiosk =>
+                    string.Equals(
+                        kiosk.StationId,
+                        activeDevice.StationId,
+                        StringComparison.Ordinal));
+                if (savedDevice is not null)
+                {
+                    return new IpPairingQueueResult(
+                        false,
+                        $"{savedDevice.StationName} is already added and permanently saved.",
+                        string.Empty,
+                        DateTime.MinValue);
+                }
+
+                var queued = QueuePairingLocked(activeDevice, requestId, expiresUtc);
+                return new IpPairingQueueResult(
+                    queued.Success,
+                    queued.Success
+                        ? "The kiosk was reached. Approve the request on its screen within two minutes."
+                        : queued.Message,
+                    queued.RequestId,
+                    queued.Success ? expiresUtc : DateTime.MinValue);
             }
 
-            device.PairingRequestId = Guid.NewGuid().ToString("N");
-            device.PairingExpiresUtc = DateTime.UtcNow.AddMinutes(2);
-            device.PairingState = DiscoveryPairingState.WaitingForKiosk;
-            device.PairingMessage = "Waiting for confirmation on the waiver kiosk.";
+            _pendingIpPairings[ipAddress] = new PendingIpPairing(
+                ipAddress,
+                requestId,
+                expiresUtc);
             ControllerLog.Write(
-                $"Pairing confirmation requested from {device.StationName} ({device.MachineName}).");
-            return new PairingQueueResult(true, device.PairingMessage, device.PairingRequestId);
+                $"Manual secure pairing requested for waiver kiosk IP {ipAddress}.");
+            return new IpPairingQueueResult(
+                true,
+                $"Waiting for the waiver kiosk at {ipAddress} to contact this controller. " +
+                "Remote Control Options must be enabled on that kiosk.",
+                requestId,
+                expiresUtc);
         }
     }
 
@@ -114,6 +176,7 @@ internal sealed class KioskDiscoveryCoordinator
         ValidateAnnouncement(announcement);
         lock (_gate)
         {
+            ExpireRequestsLocked();
             RemoveStaleDevicesLocked();
             if (!_devices.TryGetValue(announcement.StationId, out var device))
             {
@@ -139,6 +202,31 @@ internal sealed class KioskDiscoveryCoordinator
             device.KioskPublicKey = announcement.KioskPublicKey;
 
             ExpireRequestLocked(device);
+            var announcingIp = NormalizeIpAddress(remoteAddress);
+            if (_pendingIpPairings.Remove(announcingIp, out var pendingIpPairing))
+            {
+                var isAlreadySaved = _state.Snapshot().Any(kiosk =>
+                    string.Equals(kiosk.StationId, device.StationId, StringComparison.Ordinal));
+                if (isAlreadySaved)
+                {
+                    device.PairingRequestId = pendingIpPairing.RequestId;
+                    device.PairingExpiresUtc = pendingIpPairing.ExpiresUtc;
+                    device.PairingState = DiscoveryPairingState.Accepted;
+                    device.PairingMessage = "This kiosk was already permanently saved.";
+                }
+                else
+                {
+                    var queued = QueuePairingLocked(
+                        device,
+                        pendingIpPairing.RequestId,
+                        pendingIpPairing.ExpiresUtc);
+                    if (queued.Success)
+                    {
+                        ControllerLog.Write(
+                            $"Waiver kiosk {device.StationName} answered the manual IP request at {announcingIp}.");
+                    }
+                }
+            }
             var acknowledgedRequestId = string.Empty;
             if (announcement.PairingResult is not null &&
                 string.Equals(
@@ -234,6 +322,35 @@ internal sealed class KioskDiscoveryCoordinator
     {
         foreach (var device in _devices.Values)
             ExpireRequestLocked(device);
+        foreach (var ipAddress in _pendingIpPairings
+                     .Where(pair => pair.Value.ExpiresUtc <= DateTime.UtcNow)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            _pendingIpPairings.Remove(ipAddress);
+        }
+    }
+
+    private static PairingQueueResult QueuePairingLocked(
+        DiscoveredKiosk device,
+        string requestId,
+        DateTime expiresUtc)
+    {
+        if (!KioskDiscoveryProtocol.IsValidPublicKey(device.KioskPublicKey))
+        {
+            return new PairingQueueResult(
+                false,
+                "The kiosk did not provide a valid secure pairing key.",
+                string.Empty);
+        }
+
+        device.PairingRequestId = requestId;
+        device.PairingExpiresUtc = expiresUtc;
+        device.PairingState = DiscoveryPairingState.WaitingForKiosk;
+        device.PairingMessage = "Waiting for confirmation on the waiver kiosk.";
+        ControllerLog.Write(
+            $"Pairing confirmation requested from {device.StationName} ({device.MachineName}).");
+        return new PairingQueueResult(true, device.PairingMessage, device.PairingRequestId);
     }
 
     private static void ExpireRequestLocked(DiscoveredKiosk device)
@@ -262,5 +379,36 @@ internal sealed class KioskDiscoveryCoordinator
     {
         value = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
         return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private static bool TryNormalizePrivateIpv4(string? value, out string normalized)
+    {
+        normalized = string.Empty;
+        if (!IPAddress.TryParse(value?.Trim(), out var address))
+            return false;
+        if (address.IsIPv4MappedToIPv6)
+            address = address.MapToIPv4();
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+            IPAddress.IsLoopback(address))
+        {
+            return false;
+        }
+
+        var bytes = address.GetAddressBytes();
+        var isPrivate = bytes[0] == 10 ||
+                        (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
+                        (bytes[0] == 192 && bytes[1] == 168) ||
+                        (bytes[0] == 169 && bytes[1] == 254);
+        if (!isPrivate)
+            return false;
+        normalized = address.ToString();
+        return true;
+    }
+
+    private static string NormalizeIpAddress(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+            address = address.MapToIPv4();
+        return address.ToString();
     }
 }
