@@ -96,6 +96,9 @@ internal sealed partial class KioskForm
         MachineName = Environment.MachineName,
         Version = KioskUpdater.CurrentVersion,
         StationClosed = _settings.StationClosed,
+        AvailableForGuests = IsAvailableForGuests(),
+        HasError = IsInErrorState(),
+        StatusMessage = CurrentPosStatusMessage(),
         LastCommandId = _settings.RemoteLastCommandId,
         LastCommandSuccess = _settings.RemoteLastCommandSuccess,
         LastCommandMessage = _settings.RemoteLastCommandMessage,
@@ -424,6 +427,16 @@ internal sealed partial class KioskForm
                             : "The kiosk is open for waivers.");
                     break;
 
+                case RemoteCommandTypes.ResetStart:
+                    await ResetForNextGuestAsync("remote POS reset", showStatus: false);
+                    SaveRemoteCommandResult(
+                        command.Id,
+                        true,
+                        _settings.StationClosed
+                            ? "The waiver was reset, but the station remains closed."
+                            : "The waiver station returned to its starting page.");
+                    break;
+
                 case RemoteCommandTypes.CheckUpdate:
                     var checkResult = await KioskUpdater.CheckForUpdateAsync();
                     SaveRemoteCommandResult(
@@ -460,6 +473,25 @@ internal sealed partial class KioskForm
             SaveRemoteCommandResult(command.Id, false, ex.Message);
             KioskLog.Write("Remote command error: " + ex.GetType().Name + " - " + ex.Message);
         }
+    }
+
+    private bool IsAvailableForGuests() =>
+        _browserReady &&
+        !_settings.StationClosed &&
+        !_showingClosedPage &&
+        !_showingBusinessClosedPage &&
+        !_showingBlackout;
+
+    private bool IsInErrorState() =>
+        !_settings.StationClosed && _showingClosedPage;
+
+    private string CurrentPosStatusMessage()
+    {
+        if (!_browserReady) return "Waiver application is starting.";
+        if (_settings.StationClosed) return "Closed by staff.";
+        if (_showingClosedPage) return "Waiver website or internet connection unavailable.";
+        if (_showingBusinessClosedPage || _showingBlackout) return "Closed outside business hours.";
+        return "Online and open to guests.";
     }
 
     private void SaveRemoteCommandResult(string commandId, bool success, string message)
@@ -502,6 +534,7 @@ internal sealed partial class KioskForm
 internal static class RemoteCommandTypes
 {
     public const string SetClosed = "set-closed";
+    public const string ResetStart = "reset-start";
     public const string CheckUpdate = "check-update";
     public const string InstallUpdate = "install-update";
     public const string SyncBusinessHours = "sync-business-hours";
@@ -514,6 +547,9 @@ internal sealed class KioskCheckInRequest
     public string MachineName { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public bool StationClosed { get; set; }
+    public bool AvailableForGuests { get; set; }
+    public bool HasError { get; set; }
+    public string StatusMessage { get; set; } = string.Empty;
     public string LastCommandId { get; set; } = string.Empty;
     public bool LastCommandSuccess { get; set; }
     public string LastCommandMessage { get; set; } = string.Empty;

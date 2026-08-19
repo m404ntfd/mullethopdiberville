@@ -95,6 +95,47 @@ internal sealed class ControllerServer : IDisposable
                 return;
             }
 
+            if (string.Equals(path, BasePath.TrimEnd('/') + "/api/pos/status", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteSignedResponseAsync(context, new
+                {
+                    serverTimeUtc = DateTime.UtcNow,
+                    kiosks = _state.PosStatusSnapshot()
+                });
+                return;
+            }
+
+            if (string.Equals(path, BasePath.TrimEnd('/') + "/api/pos/command", StringComparison.OrdinalIgnoreCase))
+            {
+                var commandRequest = JsonSerializer.Deserialize<PosCommandRequest>(body, JsonOptions);
+                if (commandRequest is null ||
+                    !Guid.TryParseExact(commandRequest.StationId, "N", out _) ||
+                    (commandRequest.Type != CommandTypes.SetClosed &&
+                     commandRequest.Type != CommandTypes.ResetStart) ||
+                    (commandRequest.Type == CommandTypes.SetClosed && !commandRequest.Closed.HasValue))
+                {
+                    await WritePlainResponseAsync(context, HttpStatusCode.BadRequest, "Invalid POS command.");
+                    return;
+                }
+
+                var accepted = _state.QueueCommand(
+                    commandRequest.StationId,
+                    commandRequest.Type,
+                    commandRequest.Closed);
+                if (!accepted)
+                {
+                    await WritePlainResponseAsync(context, HttpStatusCode.NotFound, "Kiosk not found.");
+                    return;
+                }
+
+                await WriteSignedResponseAsync(context, new
+                {
+                    accepted = true,
+                    message = "Command queued for the waiver kiosk."
+                });
+                return;
+            }
+
             if (string.Equals(path, BasePath.TrimEnd('/') + "/api/ads/sync", StringComparison.OrdinalIgnoreCase))
             {
                 var syncRequest = JsonSerializer.Deserialize<AdvertisementSyncRequest>(body, JsonOptions);

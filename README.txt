@@ -21,11 +21,15 @@ SOURCE FOLDER LAYOUT
 * controller\src\ contains the office Kiosk Controller application.
 * controller\install\ contains the controller installer and uninstaller.
 * controller\README.md contains controller setup and network instructions.
+* pos-controller\src\ contains the separate front-desk POS Controller application.
+* pos-controller\install\ contains its installer and uninstaller.
+* pos-controller\README.md contains POS setup, status-light, and linking instructions.
 * assets\ and scripts\ contain kiosk branding and screensaver build files.
-* MulletHopKioskSuite.sln opens both Windows applications together in Visual
+* MulletHopKioskSuite.sln opens all three Windows applications together in Visual
   Studio.
 
-The two applications remain separate installers, but they are built and released
+The three applications remain separate installers, settings, and update channels,
+but they are built and released
 together so their local-network commands remain compatible.
 
 
@@ -102,6 +106,28 @@ pairing key and signed timestamps. A kiosk does not accept unsolicited inbound
 connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
+
+
+FRONT-DESK POS CONTROLLER
+-------------------------
+
+The Mullet Hop POS Controller is a third, separate Windows application for
+front-desk and POS computers. It connects to Kiosk Controller version 1.7.0 or
+newer and displays four numbered kiosk panels. Waiver Kiosk version 2.6.0 or
+newer supplies the live guest-availability and error status used by its lights.
+
+A green light means the assigned kiosk is online and open to guests. A red light
+means it is closed, offline, outside business hours, unable to reach the waiver
+website, or in another error state. The dark red and green lenses remain visible
+when a slot is not linked. Front-desk staff can close a station, put it back in
+service, or reset the current waiver to its starting page.
+
+The dashboard has no shortcut key and its three daily-use controls do not ask for
+a passcode. Opening Settings requires the POS Controller's own 4-8 digit passcode.
+Settings finds the kiosks already paired with the on-site Kiosk Controller and
+automatically adds new devices to the next open Kiosk 1 through Kiosk 4 dashboard
+position without renumbering existing assignments. See the README
+inside the Mullet-Hop-POS-Controller download for complete installation steps.
 
 
 STAFF SETTINGS AND EXIT
@@ -374,6 +400,8 @@ The repository includes .github/workflows/release.yml. To publish a new version:
 
 1. Change the Version value in src\MulletHopWaiverKiosk.csproj. Use a three-part
    version such as 2.0.1, 2.1.0, or 3.0.0. Never reuse an earlier version.
+   When those applications change, also update the Version values in the Kiosk
+   Controller and POS Controller project files.
 2. Commit and push the tested change to the repository's main branch.
 3. Open the repository's Actions tab.
 4. Choose "Publish Kiosk Update" and select "Run workflow."

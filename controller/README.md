@@ -15,6 +15,7 @@ the same private network as the waiver kiosks. It provides:
   until that kiosk reconnects.
 * Optional secure Cloudflare synchronization for a controller installed away
   from the kiosk network.
+* A signed status/control connection for the separate front-desk POS Controller.
 
 
 INSTALL THE CONTROLLER PC
@@ -161,6 +162,10 @@ NETWORK NOTES
 * If the controller PC's IP address changes, copy its new address to the Remote
   Control Setup page on each kiosk.
 * Open/close commands normally appear on a kiosk within five seconds.
+
+Controller version 1.7.0 adds the separate POS Controller connection. Waiver
+Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus the
+reset-to-start command. Upgrade both before linking a POS Controller computer.
 
 
 REMOVE THE CONTROLLER

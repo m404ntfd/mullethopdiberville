@@ -6,6 +6,7 @@ namespace MulletHopKioskController;
 internal static class CommandTypes
 {
     public const string SetClosed = "set-closed";
+    public const string ResetStart = "reset-start";
     public const string CheckUpdate = "check-update";
     public const string InstallUpdate = "install-update";
     public const string SyncBusinessHours = "sync-business-hours";
@@ -18,6 +19,9 @@ internal sealed class KioskCheckInRequest
     public string MachineName { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public bool StationClosed { get; set; }
+    public bool AvailableForGuests { get; set; }
+    public bool HasError { get; set; }
+    public string StatusMessage { get; set; } = string.Empty;
     public string LastCommandId { get; set; } = string.Empty;
     public bool LastCommandSuccess { get; set; }
     public string LastCommandMessage { get; set; } = string.Empty;
@@ -57,6 +61,9 @@ internal sealed class ManagedKiosk
     public string MachineName { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public bool StationClosed { get; set; }
+    public bool AvailableForGuests { get; set; }
+    public bool HasError { get; set; }
+    public string StatusMessage { get; set; } = string.Empty;
     public DateTime LastSeenUtc { get; set; }
     public string LastIpAddress { get; set; } = string.Empty;
     public string LastResult { get; set; } = "Waiting for the first command.";
@@ -76,6 +83,9 @@ internal sealed class ManagedKiosk
         MachineName = MachineName,
         Version = Version,
         StationClosed = StationClosed,
+        AvailableForGuests = AvailableForGuests,
+        HasError = HasError,
+        StatusMessage = StatusMessage,
         LastSeenUtc = LastSeenUtc,
         LastIpAddress = LastIpAddress,
         LastResult = LastResult,
@@ -86,6 +96,26 @@ internal sealed class ManagedKiosk
         BusinessHoursLastSyncUtc = BusinessHoursLastSyncUtc,
         PendingCommand = PendingCommand?.Clone()
     };
+}
+
+internal sealed class PosKioskStatus
+{
+    public string StationId { get; set; } = string.Empty;
+    public string StationName { get; set; } = string.Empty;
+    public string MachineName { get; set; } = string.Empty;
+    public bool IsOnline { get; set; }
+    public bool StationClosed { get; set; }
+    public bool AvailableForGuests { get; set; }
+    public bool HasError { get; set; }
+    public string StatusMessage { get; set; } = string.Empty;
+    public DateTime LastSeenUtc { get; set; }
+}
+
+internal sealed class PosCommandRequest
+{
+    public string StationId { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public bool? Closed { get; set; }
 }
 
 internal sealed class ControllerData
@@ -210,6 +240,28 @@ internal sealed class ControllerState
                 .ToList();
     }
 
+    public IReadOnlyList<PosKioskStatus> PosStatusSnapshot()
+    {
+        lock (_gate)
+        {
+            return _data.Kiosks
+                .OrderBy(kiosk => kiosk.StationName, StringComparer.CurrentCultureIgnoreCase)
+                .Select(kiosk => new PosKioskStatus
+                {
+                    StationId = kiosk.StationId,
+                    StationName = kiosk.StationName,
+                    MachineName = kiosk.MachineName,
+                    IsOnline = kiosk.IsOnline,
+                    StationClosed = kiosk.StationClosed,
+                    AvailableForGuests = kiosk.AvailableForGuests,
+                    HasError = kiosk.HasError,
+                    StatusMessage = kiosk.StatusMessage,
+                    LastSeenUtc = kiosk.LastSeenUtc
+                })
+                .ToList();
+        }
+    }
+
     public IReadOnlyList<ControllerAdvertisement> AdvertisementSnapshot()
     {
         lock (_gate)
@@ -296,6 +348,12 @@ internal sealed class ControllerState
             kiosk.MachineName = Clean(request.MachineName, "Unknown PC", 80);
             kiosk.Version = Clean(request.Version, "Unknown", 30);
             kiosk.StationClosed = request.StationClosed;
+            kiosk.AvailableForGuests = request.AvailableForGuests;
+            kiosk.HasError = request.HasError;
+            kiosk.StatusMessage = Clean(
+                request.StatusMessage,
+                request.AvailableForGuests ? "Online and open to guests." : "Not available to guests.",
+                200);
             kiosk.LastSeenUtc = DateTime.UtcNow;
             kiosk.LastIpAddress = Clean(ipAddress, string.Empty, 80);
             kiosk.AdvertisementSyncRevision = Clean(
@@ -551,6 +609,7 @@ internal sealed class ControllerState
     {
         CommandTypes.SetClosed when closed == true => "Close-screen command queued.",
         CommandTypes.SetClosed => "Open-kiosk command queued.",
+        CommandTypes.ResetStart => "Reset-to-start command queued.",
         CommandTypes.CheckUpdate => "Update check queued.",
         CommandTypes.InstallUpdate => "Update installation queued.",
         CommandTypes.SyncBusinessHours => "Business Hours sync queued.",
