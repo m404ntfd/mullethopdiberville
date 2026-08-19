@@ -77,24 +77,28 @@ network discovery.
 
 1. Make sure the controller computer and waiver kiosk are on the same private
    network, then leave the Waiver Kiosk app open.
-2. On the controller, select **Discover Kiosks**.
-3. Select the available kiosk and choose **Request Add**.
-4. At the waiver kiosk, verify the controller computer and address shown in the
+2. On the kiosk, press **Ctrl + Alt + M**, open Staff Settings, and select
+   **Remote Control Options**.
+3. Check **Enable remote control and network discovery**, enter a unique kiosk
+   name, and save. No controller address or pairing key is needed.
+4. On the controller, select **Discover Kiosks**.
+5. Select the named kiosk and choose **Request Add**.
+6. At the waiver kiosk, verify the controller computer and address shown in the
    prompt, then select **Yes** within two minutes.
-5. The controller reports **Added and Saved** after the kiosk completes its
+7. The controller reports **Added and Saved** after the kiosk completes its
    first authenticated check-in.
 
 Repeat those steps for each kiosk. The discovery exchange encrypts the pairing
-key, and the kiosk saves the approved connection before remote management is
-enabled. The controller saves the kiosk in its managed-device history. A linked
-POS Controller then adds it to the next open Kiosk 1–4 position and saves that
-assignment automatically.
+key, and the kiosk saves the approved connection before authenticated remote
+check-ins begin. The controller saves the kiosk in its managed-device history. A
+linked POS Controller then adds it to the next open Kiosk 1–4 position and saves
+that assignment automatically.
 
-Manual setup remains available: copy the address and pairing key from the
-controller, then enter them under **Staff Settings → Remote Control Setup** on
-the kiosk. Treat the pairing key as a staff credential and do not post it
-publicly. Check-ins and commands are authenticated with an HMAC-SHA256 signature
-and a short-lived timestamp.
+The controller address and pairing key are exchanged automatically only after
+approval on the kiosk. Check-ins and commands remain authenticated with an
+HMAC-SHA256 signature and a short-lived timestamp. If the controller's local IP
+address changes, an enabled kiosk verifies the controller with its saved key and
+updates the saved address automatically.
 
 
 USE THE DASHBOARD
@@ -168,15 +172,16 @@ NETWORK NOTES
 * Windows network profile on the controller should be Private.
 * Kiosks make outbound connections to the controller; no inbound firewall rule
   is required on kiosk computers.
-* If the controller PC's IP address changes, copy its new address to the Remote
-  Control Setup page on each kiosk.
+* If the controller PC's IP address changes, enabled kiosks discover the new
+  address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Controller version 1.8.0 and Waiver Kiosk version 2.7.0 add approval-based local
-network discovery and saved pairing. Controller version 1.7.0 adds the separate
-POS Controller connection. Waiver Kiosk version 2.6.0 adds live open-to-guests
-and error-state reporting plus the reset-to-start command. Upgrade both before
-using network discovery.
+Waiver Kiosk version 2.8.0 simplifies Remote Control Options to an enable checkbox
+and kiosk name, with no network information entered by the kiosk user. Controller
+version 1.8.0 or newer supports approval-based local discovery and saved pairing.
+Controller version 1.7.0 adds the separate POS Controller connection. Waiver
+Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus the
+reset-to-start command.
 
 
 REMOVE THE CONTROLLER

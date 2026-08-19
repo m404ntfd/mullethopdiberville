@@ -13,8 +13,8 @@ It shows four numbered waiver-station controls based on the supplied layout:
   station to a fresh waiver.
 * **Reset to Start** clears the current waiver and returns to its starting page.
 
-The dashboard buttons do not require a passcode. The Settings button does.
-There is no settings shortcut key.
+The dashboard buttons and **Check for Updates** do not require a passcode. The
+Settings button does. There is no settings shortcut key.
 
 ## Installation
 
@@ -43,5 +43,9 @@ filled, additional devices remain available in Settings for manual reassignment.
 ## Updates and saved data
 
 The POS Controller is packaged separately under the `pos` Velopack channel and
-checks for updates when it starts. Its passcode and kiosk assignments are stored
-separately from both the Waiver Kiosk and Kiosk Controller settings.
+checks for updates when it starts. Select **Check for Updates** at the bottom-right
+of the dashboard to check manually. When an update is found, it is downloaded and
+the program asks whether to install it. If installation is postponed, the button
+changes to **Install Update** until the downloaded update is installed. Its
+passcode and kiosk assignments are stored separately from both the Waiver Kiosk
+and Kiosk Controller settings.

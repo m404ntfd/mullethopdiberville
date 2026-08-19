@@ -88,19 +88,16 @@ Download the controller package from:
 
 https://github.com/m404ntfd/mullethopdiberville/releases/latest
 
-Install it on the office PC, then select Discover Kiosks in its setup panel.
-Select a kiosk and choose Request Add. The kiosk displays the controller computer
-and address and requires someone at that kiosk to approve the request within two
-minutes. The encrypted pairing exchange saves the approved connection on the
-kiosk, and the first authenticated check-in saves the kiosk in the controller.
-A linked POS Controller then adds the kiosk to its next open Kiosk 1-4 position
-and saves that assignment automatically.
-
-Manual setup remains available. View Key temporarily reveals the complete key,
-while Copy Key places it on the Windows clipboard. On the kiosk, press
-Ctrl + Alt + M, open Staff Settings, and select Remote Control Setup. Give each
-station a unique name, paste the controller address and key, test the connection,
-and save.
+On each kiosk, press Ctrl + Alt + M, open Staff Settings, and select Remote
+Control Options. Check Enable remote control and network discovery, give the
+kiosk a unique name, and save. No controller address or pairing key is entered on
+the kiosk. On the office PC, select Discover Kiosks, select the named kiosk, and
+choose Request Add. The kiosk displays the controller computer and address and
+requires someone at that kiosk to approve the request within two minutes. The
+encrypted pairing exchange saves the connection information automatically, and
+the first authenticated check-in saves the kiosk in the controller. A linked POS
+Controller then adds the kiosk to its next open Kiosk 1-4 position and saves that
+assignment automatically.
 
 Controller version 1.1.0 or newer must be installed once with its Setup-based
 package to establish automatic updates. When a controller update is downloaded,
@@ -114,9 +111,10 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Waiver Kiosk version 2.7.0 and Kiosk Controller version 1.8.0 add approval-based
-network discovery and saved pairing. Both applications must be upgraded before
-using Discover Kiosks.
+Waiver Kiosk version 2.8.0 simplifies Remote Control Options to an enable checkbox
+and kiosk name. It becomes discoverable only when enabled and securely reconnects
+to its saved controller if that controller's local IP address changes. Kiosk
+Controller version 1.8.0 or newer is required for approval-based discovery.
 
 
 FRONT-DESK POS CONTROLLER
@@ -133,12 +131,13 @@ website, or in another error state. The dark red and green lenses remain visible
 when a slot is not linked. Front-desk staff can close a station, put it back in
 service, or reset the current waiver to its starting page.
 
-The dashboard has no shortcut key and its three daily-use controls do not ask for
-a passcode. Opening Settings requires the POS Controller's own 4-8 digit passcode.
-Settings finds the kiosks already paired with the on-site Kiosk Controller and
-automatically adds new devices to the next open Kiosk 1 through Kiosk 4 dashboard
-position without renumbering existing assignments. See the README
-inside the Mullet-Hop-POS-Controller download for complete installation steps.
+The dashboard has no shortcut key. Its three daily-use controls and the visible
+Check for Updates button do not ask for a passcode. Opening Settings requires the
+POS Controller's own 4-8 digit passcode. Settings finds the kiosks already paired
+with the on-site Kiosk Controller and automatically adds new devices to the next
+open Kiosk 1 through Kiosk 4 dashboard position without renumbering existing
+assignments. See the README inside the Mullet-Hop-POS-Controller download for
+complete installation steps.
 
 
 STAFF SETTINGS AND EXIT

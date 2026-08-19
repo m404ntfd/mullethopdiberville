@@ -7,8 +7,10 @@ internal sealed class PosControllerForm : Form
     private readonly PosSettings _settings;
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 2000 };
     private readonly Label _connectionStatus = new();
+    private readonly Button _checkUpdateButton = new();
     private readonly KioskControlCard[] _cards = new KioskControlCard[4];
     private bool _refreshInProgress;
+    private bool _updateCheckInProgress;
 
     public PosControllerForm(PosSettings settings)
     {
@@ -121,13 +123,109 @@ internal sealed class PosControllerForm : Form
             Padding = new Padding(22, 8, 22, 8),
             BackColor = Color.White
         };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = Color.White
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 205));
+
         _connectionStatus.Dock = DockStyle.Fill;
         _connectionStatus.Text = "Starting POS Controller…";
         _connectionStatus.ForeColor = Color.FromArgb(83, 97, 109);
         _connectionStatus.Font = new Font("Segoe UI", 10, FontStyle.Bold);
         _connectionStatus.TextAlign = ContentAlignment.MiddleLeft;
-        bar.Controls.Add(_connectionStatus);
+
+        _checkUpdateButton.Text = "CHECK FOR UPDATES";
+        _checkUpdateButton.Dock = DockStyle.Fill;
+        _checkUpdateButton.Margin = Padding.Empty;
+        _checkUpdateButton.BackColor = Color.FromArgb(8, 119, 189);
+        _checkUpdateButton.ForeColor = Color.White;
+        _checkUpdateButton.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _checkUpdateButton.FlatStyle = FlatStyle.Flat;
+        _checkUpdateButton.FlatAppearance.BorderSize = 0;
+        _checkUpdateButton.Cursor = Cursors.Hand;
+        _checkUpdateButton.UseVisualStyleBackColor = false;
+        _checkUpdateButton.Click += async (_, _) => await CheckForPosUpdateAsync();
+
+        layout.Controls.Add(_connectionStatus, 0, 0);
+        layout.Controls.Add(_checkUpdateButton, 1, 0);
+        bar.Controls.Add(layout);
         return bar;
+    }
+
+    private async Task CheckForPosUpdateAsync()
+    {
+        if (_updateCheckInProgress)
+            return;
+
+        _updateCheckInProgress = true;
+        _checkUpdateButton.Enabled = false;
+        try
+        {
+            if (PosUpdater.HasStagedUpdate)
+            {
+                PromptToInstallPosUpdate(
+                    "A downloaded POS Controller update is ready to install.");
+                return;
+            }
+
+            _checkUpdateButton.Text = "CHECKING…";
+            var result = await PosUpdater.CheckAndStageUpdateAsync();
+            if (IsDisposed)
+                return;
+
+            if (result.Status == PosUpdateStatus.ReadyToInstall)
+            {
+                PromptToInstallPosUpdate(result.Message);
+                return;
+            }
+
+            MessageBox.Show(this, result.Message, "POS Controller Update",
+                MessageBoxButtons.OK,
+                result.Status == PosUpdateStatus.Failed
+                    ? MessageBoxIcon.Warning
+                    : MessageBoxIcon.Information);
+        }
+        finally
+        {
+            _updateCheckInProgress = false;
+            if (!IsDisposed)
+            {
+                _checkUpdateButton.Text = PosUpdater.HasStagedUpdate
+                    ? "INSTALL UPDATE"
+                    : "CHECK FOR UPDATES";
+                _checkUpdateButton.Enabled = true;
+            }
+        }
+    }
+
+    private void PromptToInstallPosUpdate(string message)
+    {
+        var answer = MessageBox.Show(this,
+            message + "\n\nInstall it now? The POS Controller will close and restart automatically.",
+            "Install POS Controller Update",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (answer != DialogResult.Yes)
+            return;
+
+        _checkUpdateButton.Text = "INSTALLING…";
+        var result = PosUpdater.ApplyStagedUpdateAndRestart();
+        if (!IsDisposed && result.Status != PosUpdateStatus.Applying)
+        {
+            MessageBox.Show(this, result.Message, "POS Controller Update",
+                MessageBoxButtons.OK,
+                result.Status == PosUpdateStatus.Failed
+                    ? MessageBoxIcon.Warning
+                    : MessageBoxIcon.Information);
+        }
     }
 
     private async Task RefreshStatusesAsync()

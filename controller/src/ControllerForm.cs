@@ -127,7 +127,7 @@ internal sealed class ControllerForm : Form
             Dock = DockStyle.Top,
             Height = 175,
             Padding = new Padding(18, 24, 18, 10),
-            Text = "One-Time Kiosk Pairing Information",
+            Text = "Controller Connection Information",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(8, 119, 189),
             BackColor = Color.White
@@ -200,7 +200,7 @@ internal sealed class ControllerForm : Form
         {
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Text = "Use Discover Kiosks for approval-based network setup. Manual address and key pairing remains available in each kiosk's Staff Settings.",
+            Text = "Enable network discovery and set a name in each kiosk's Remote Control Options, then use Discover Kiosks. Connection information is exchanged automatically after kiosk approval.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f),
             TextAlign = ContentAlignment.MiddleLeft,

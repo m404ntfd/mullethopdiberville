@@ -22,6 +22,7 @@ internal sealed class KioskDiscoveryClient : IDisposable
     private readonly CancellationTokenSource _stopping = new();
     private Task? _loopTask;
     private KioskPairingResult? _pendingResult;
+    private int _controllerRecoveryInProgress;
     private bool _disposed;
 
     public KioskDiscoveryClient(
@@ -64,6 +65,13 @@ internal sealed class KioskDiscoveryClient : IDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
+                if (!_settings.RemoteManagementEnabled)
+                {
+                    nextFullScanUtc = DateTime.MinValue;
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                    continue;
+                }
+
                 string[] known;
                 KioskPairingResult? pendingResult;
                 lock (_gate)
@@ -81,8 +89,7 @@ internal sealed class KioskDiscoveryClient : IDisposable
                         .Except(known, StringComparer.OrdinalIgnoreCase)
                         .ToArray();
                     await ProbeControllersAsync(subnetControllers, cancellationToken);
-                    nextFullScanUtc = DateTime.UtcNow.AddSeconds(
-                        _settings.RemoteManagementEnabled ? 60 : 15);
+                    nextFullScanUtc = DateTime.UtcNow.AddSeconds(60);
                 }
 
                 var delay = pendingResult is not null
@@ -153,7 +160,11 @@ internal sealed class KioskDiscoveryClient : IDisposable
                 MachineName = Environment.MachineName,
                 Version = KioskUpdater.CurrentVersion,
                 KioskPublicKey = KioskDiscoveryProtocol.ExportPublicKey(_kioskKey),
-                IsManaged = _settings.RemoteManagementEnabled,
+                IsManaged = _settings.RemoteManagementEnabled &&
+                            RemoteManagementProtocol.IsConfigurationValid(
+                                _settings.RemoteControllerUrl,
+                                _settings.RemotePairingKey,
+                                out _),
                 CurrentController = _settings.RemoteControllerUrl,
                 PairingResult = result
             };
@@ -188,6 +199,8 @@ internal sealed class KioskDiscoveryClient : IDisposable
                         _pendingResult = null;
                     }
                 }
+
+                await TryRestoreSavedControllerAddressAsync(actualAddress);
             }
 
             if (discoveryResponse.PairingOffer is not null)
@@ -205,6 +218,56 @@ internal sealed class KioskDiscoveryClient : IDisposable
                                    JsonException or IOException or ObjectDisposedException)
         {
             // Most addresses on a subnet are not controllers. Failed probes are expected.
+        }
+    }
+
+    private async Task TryRestoreSavedControllerAddressAsync(string discoveredAddress)
+    {
+        if (!_settings.RemoteManagementEnabled ||
+            string.IsNullOrWhiteSpace(_settings.RemotePairingKey) ||
+            _settings.RemotePairingKey.Trim().Length < 16 ||
+            Interlocked.CompareExchange(ref _controllerRecoveryInProgress, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (TryNormalizeControllerAddress(_settings.RemoteControllerUrl, out var savedAddress) &&
+                string.Equals(savedAddress, discoveredAddress, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var result = await RemoteManagementProtocol.TestAsync(
+                discoveredAddress,
+                _settings.RemotePairingKey);
+            if (!result.Success)
+                return;
+
+            var previousAddress = _settings.RemoteControllerUrl;
+            try
+            {
+                _settings.RemoteControllerUrl = discoveredAddress;
+                _settings.Save();
+            }
+            catch
+            {
+                _settings.RemoteControllerUrl = previousAddress;
+                throw;
+            }
+
+            KioskLog.Write(
+                $"Securely reconnected to the saved kiosk controller at {discoveredAddress}.");
+            _pairingApplied();
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Could not restore the saved controller connection: " + ex.Message);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _controllerRecoveryInProgress, 0);
         }
     }
 
@@ -232,6 +295,15 @@ internal sealed class KioskDiscoveryClient : IDisposable
         {
             KioskLog.Write("Rejected an invalid discovery pairing request: " + ex.Message);
             SetPendingResult(offer.RequestId, false, "The kiosk rejected an invalid pairing request.");
+            return;
+        }
+
+        if (!_settings.RemoteManagementEnabled)
+        {
+            SetPendingResult(
+                payload.RequestId,
+                false,
+                "Remote control and network discovery were turned off on the kiosk.");
             return;
         }
 
