@@ -86,7 +86,10 @@ The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
 restarts without changing the user's normal Firefox profile.
 
-Version 1.7.0 always opens one clean LilyPad login session, avoids stale cached
+Version 1.7.1 adds a loopback-only Firefox compatibility bridge for LilyPad's
+legacy login form. Focusing or clicking Password now asks LilyPad for the location
+and station list when Username contains a value, even if the page's Username
+change event did not fire. Version 1.7.0 always opens one clean LilyPad login session, avoids stale cached
 login responses, and strengthens cross-process Firefox focus after the POS window
 is activated. This preserves LilyPad's native username-change request when staff
 move into the password field, allowing LilyPad to display the employee's location

@@ -96,11 +96,15 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.6, Systems Controller version 1.14.1, and Mullet Hop POS
-version 1.7.0 are the matching package releases. Kiosk 2.11.6 and Systems Controller
-1.14.1 support controller and kiosk discovery on the Windows adapter's directly
-connected IPv4 subnet, including non-RFC 1918 installations such as
-128.0.0.0/25. Waiver Kiosk version 2.11.0 adds
+Waiver Kiosk version 2.11.7, Systems Controller version 1.14.2, and Mullet Hop POS
+version 1.7.1 are the matching package releases. Systems Controller 1.14.2 applies
+the directly connected IPv4-subnet rule to incoming controller requests as well
+as scans, preventing the master from returning HTTP 403 on installations such as
+128.0.0.0/25. Mullet Hop POS 1.7.1 adds a LilyPad login compatibility trigger so
+focusing Password requests the location and station list even when the legacy
+Username change event does not fire. Kiosk 2.11.6 and Systems Controller 1.14.1
+initially added discovery across the Windows adapter's directly connected IPv4
+subnet. Waiver Kiosk version 2.11.0 adds
 Last Jump Time Sold schedules, the editable looping closed video and next-opening
 time, closing-time blackout, and the reorganized staff settings navigation.
 Waiver Kiosk version 2.11.3 is the matching kiosk package for the controller and

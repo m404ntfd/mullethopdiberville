@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MulletHop.KioskDiscovery;
+using MulletHop.LocalNetworking;
 
 namespace MulletHopKioskController;
 
@@ -609,14 +610,7 @@ internal sealed class ControllerServer : IDisposable
         if (IPAddress.IsLoopback(address))
             return true;
         if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-        {
-            var bytes = address.GetAddressBytes();
-            return bytes[0] == 10 ||
-                   bytes[0] == 127 ||
-                   (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
-                   (bytes[0] == 192 && bytes[1] == 168) ||
-                   (bytes[0] == 169 && bytes[1] == 254);
-        }
+            return LocalNetworkAddress.IsPrivateOrDirectlyConnectedIpv4(address);
 
         if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
         {
