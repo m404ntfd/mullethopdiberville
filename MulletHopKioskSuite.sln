@@ -6,7 +6,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MulletHopWaiverKiosk", "src
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MulletHopKioskController", "controller\src\MulletHopKioskController.csproj", "{EA9D9606-D92A-4F39-965D-96C027DCC5AC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MulletHopKioskStatusViewer", "pos-controller\src\MulletHopPosController.csproj", "{0B2A7203-15CF-41F6-9A08-2C67D19B2E69}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MulletHopPOS", "pos-controller\src\MulletHopPosController.csproj", "{0B2A7203-15CF-41F6-9A08-2C67D19B2E69}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

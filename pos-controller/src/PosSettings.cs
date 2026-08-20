@@ -30,8 +30,8 @@ internal sealed class PosSettings
             {
                 PosLog.Write("Settings read error: " + ex.Message);
                 MessageBox.Show(
-                    "The saved Kiosk Status Viewer settings could not be read. A new settings passcode is required.",
-                    "Mullet Hop Kiosk Status Viewer",
+                    "The saved Mullet Hop POS settings could not be read. A new settings passcode is required.",
+                    "Mullet Hop POS",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 settings = new PosSettings();

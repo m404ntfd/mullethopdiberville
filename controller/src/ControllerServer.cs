@@ -186,11 +186,14 @@ internal sealed class ControllerServer : IDisposable
                 if (commandRequest is null ||
                     !Guid.TryParseExact(commandRequest.StationId, "N", out _) ||
                     (commandRequest.Type != CommandTypes.SetClosed &&
+                     commandRequest.Type != CommandTypes.SetBusinessClosed &&
                      commandRequest.Type != CommandTypes.ResetStart &&
                      commandRequest.Type != CommandTypes.AcknowledgeAssistance) ||
-                    (commandRequest.Type == CommandTypes.SetClosed && !commandRequest.Closed.HasValue))
+                    ((commandRequest.Type == CommandTypes.SetClosed ||
+                      commandRequest.Type == CommandTypes.SetBusinessClosed) &&
+                     !commandRequest.Closed.HasValue))
                 {
-                    await WritePlainResponseAsync(context, HttpStatusCode.BadRequest, "Invalid Kiosk Status Viewer command.");
+                    await WritePlainResponseAsync(context, HttpStatusCode.BadRequest, "Invalid Mullet Hop POS command.");
                     return;
                 }
 

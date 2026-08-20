@@ -8,6 +8,7 @@ namespace MulletHopPosController;
 internal static class PosCommandTypes
 {
     public const string SetClosed = "set-closed";
+    public const string SetBusinessClosed = "set-business-closed";
     public const string ResetStart = "reset-start";
     public const string AcknowledgeAssistance = "acknowledge-assistance";
 }
@@ -19,6 +20,7 @@ internal sealed class PosKioskStatus
     public string MachineName { get; set; } = string.Empty;
     public bool IsOnline { get; set; }
     public bool StationClosed { get; set; }
+    public bool BusinessHoursClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }

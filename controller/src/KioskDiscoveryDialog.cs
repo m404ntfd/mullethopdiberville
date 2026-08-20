@@ -184,7 +184,7 @@ internal sealed class KioskDiscoveryDialog : Form
                     _reportedPairings.Add(kiosk.PairingRequestId))
                 {
                     _status.Text =
-                        $"{kiosk.StationName} was approved and saved. Linked Kiosk Status Viewers will add and save it automatically.";
+                        $"{kiosk.StationName} was approved and saved. Linked Mullet Hop POS applications will add and save it automatically.";
                     _status.ForeColor = ControllerTheme.SuccessText;
                 }
                 else if (kiosk.PairingState is DiscoveryPairingState.Declined or

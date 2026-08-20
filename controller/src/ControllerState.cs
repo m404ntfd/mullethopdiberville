@@ -6,6 +6,7 @@ namespace MulletHopKioskController;
 internal static class CommandTypes
 {
     public const string SetClosed = "set-closed";
+    public const string SetBusinessClosed = "set-business-closed";
     public const string ResetStart = "reset-start";
     public const string CheckUpdate = "check-update";
     public const string InstallUpdate = "install-update";
@@ -20,6 +21,7 @@ internal sealed class KioskCheckInRequest
     public string MachineName { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public bool StationClosed { get; set; }
+    public bool BusinessHoursClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
@@ -64,6 +66,7 @@ internal sealed class ManagedKiosk
     public string MachineName { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public bool StationClosed { get; set; }
+    public bool BusinessHoursClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
@@ -88,6 +91,7 @@ internal sealed class ManagedKiosk
         MachineName = MachineName,
         Version = Version,
         StationClosed = StationClosed,
+        BusinessHoursClosed = BusinessHoursClosed,
         AvailableForGuests = AvailableForGuests,
         HasError = HasError,
         AssistanceRequested = AssistanceRequested,
@@ -112,6 +116,7 @@ internal sealed class PosKioskStatus
     public string MachineName { get; set; } = string.Empty;
     public bool IsOnline { get; set; }
     public bool StationClosed { get; set; }
+    public bool BusinessHoursClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
@@ -312,6 +317,7 @@ internal sealed class ControllerState
                     MachineName = kiosk.MachineName,
                     IsOnline = kiosk.IsOnline,
                     StationClosed = kiosk.StationClosed,
+                    BusinessHoursClosed = kiosk.BusinessHoursClosed,
                     AvailableForGuests = kiosk.AvailableForGuests,
                     HasError = kiosk.HasError,
                     AssistanceRequested = kiosk.AssistanceRequested,
@@ -409,6 +415,7 @@ internal sealed class ControllerState
             kiosk.MachineName = Clean(request.MachineName, "Unknown PC", 80);
             kiosk.Version = Clean(request.Version, "Unknown", 30);
             kiosk.StationClosed = request.StationClosed;
+            kiosk.BusinessHoursClosed = request.BusinessHoursClosed;
             kiosk.AvailableForGuests = request.AvailableForGuests;
             kiosk.HasError = request.HasError;
             kiosk.AssistanceRequested = request.AssistanceRequested;
@@ -673,6 +680,8 @@ internal sealed class ControllerState
     {
         CommandTypes.SetClosed when closed == true => "Close-screen command queued.",
         CommandTypes.SetClosed => "Open-kiosk command queued.",
+        CommandTypes.SetBusinessClosed when closed == true => "Business-closure command queued.",
+        CommandTypes.SetBusinessClosed => "End-business-closure command queued.",
         CommandTypes.ResetStart => "Reset-to-start command queued.",
         CommandTypes.CheckUpdate => "Update check queued.",
         CommandTypes.InstallUpdate => "Update installation queued.",

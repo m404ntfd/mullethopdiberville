@@ -49,13 +49,13 @@ jobs:
           }
           "value=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Read Kiosk Status Viewer version
+      - name: Read Mullet Hop POS version
         id: pos_version
         shell: pwsh
         run: |
           $projectText = Get-Content -LiteralPath "pos-controller/src/MulletHopPosController.csproj" -Raw
           if ($projectText -notmatch '<Version>([^<]+)</Version>') {
-            throw 'The Kiosk Status Viewer project file does not contain a Version value.'
+            throw 'The Mullet Hop POS project file does not contain a Version value.'
           }
           "value=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
@@ -125,7 +125,7 @@ jobs:
             -p:DebugType=None `
             --output controller-publish
 
-      - name: Publish Kiosk Status Viewer
+      - name: Publish Mullet Hop POS
         shell: pwsh
         run: |
           dotnet publish pos-controller/src/MulletHopPosController.csproj `
@@ -139,7 +139,7 @@ jobs:
             -p:DebugType=None `
             --output pos-publish
 
-      - name: Verify Kiosk Status Viewer startup
+      - name: Verify Mullet Hop POS startup
         shell: pwsh
         run: |
           $process = Start-Process `
@@ -148,7 +148,7 @@ jobs:
             -Wait `
             -PassThru
           if ($process.ExitCode -ne 0) {
-            throw "The Kiosk Status Viewer startup smoke test failed with exit code $($process.ExitCode)."
+            throw "The Mullet Hop POS startup smoke test failed with exit code $($process.ExitCode)."
           }
 
       - name: Install matching Velopack command-line tool
@@ -243,7 +243,7 @@ jobs:
             --channel win `
             --outputDir Releases
 
-      - name: Download prior Kiosk Status Viewer release information
+      - name: Download prior Mullet Hop POS release information
         id: pos_feed
         shell: pwsh
         run: |
@@ -256,7 +256,7 @@ jobs:
               --outputDir PosReleases
           }
           catch {
-            Write-Host "No earlier Kiosk Status Viewer update feed exists. Building the first full installer."
+            Write-Host "No earlier Mullet Hop POS update feed exists. Building the first full installer."
             New-Item -ItemType Directory -Path PosReleases -Force | Out-Null
           }
 
@@ -272,7 +272,7 @@ jobs:
 
           if ($matchingAsset.Count -gt 0) {
             $needsPack = $false
-            Write-Host "Kiosk Status Viewer $currentVersion is already packaged; reusing its release files."
+            Write-Host "Mullet Hop POS $currentVersion is already packaged; reusing its release files."
 
             $posAssets = @(
               $latestRelease.assets | Where-Object {
@@ -312,7 +312,7 @@ jobs:
             --channel controller `
             --outputDir ControllerReleases
 
-      - name: Build Kiosk Status Viewer Velopack installer and update packages
+      - name: Build Mullet Hop POS Velopack installer and update packages
         if: steps.pos_feed.outputs.needs_pack == 'true'
         shell: pwsh
         run: |
@@ -321,7 +321,7 @@ jobs:
             --packVersion ${{ steps.pos_version.outputs.value }} `
             --packDir pos-publish `
             --mainExe MulletHopPosController.exe `
-            --packTitle "Mullet Hop Kiosk Status Viewer" `
+            --packTitle "Mullet Hop POS" `
             --packAuthors "Mullet Hop" `
             --icon assets/MulletHopStatusViewerFish.ico `
             --runtime win-x64 `
@@ -351,7 +351,7 @@ jobs:
             -DestinationPath "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
             -Force
 
-      - name: Package Kiosk Status Viewer
+      - name: Package Mullet Hop POS
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path PosPackage -Force | Out-Null
@@ -359,18 +359,18 @@ jobs:
             -LiteralPath PosReleases `
             -Filter '*-Setup.exe' | Select-Object -First 1
           if ($null -eq $posSetup) {
-            throw 'The Kiosk Status Viewer Setup executable was not generated.'
+            throw 'The Mullet Hop POS Setup executable was not generated.'
           }
           Copy-Item `
             -LiteralPath $posSetup.FullName `
-            -Destination PosPackage/MulletHop.KioskStatusViewer-Setup.exe
-          Copy-Item pos-controller/install/Install-Kiosk-Status-Viewer.cmd PosPackage/
-          Copy-Item pos-controller/install/Install-Kiosk-Status-Viewer.ps1 PosPackage/
-          Copy-Item pos-controller/install/Uninstall-Kiosk-Status-Viewer.ps1 PosPackage/
+            -Destination PosPackage/MulletHop.POS-Setup.exe
+          Copy-Item pos-controller/install/Install-Mullet-Hop-POS.cmd PosPackage/
+          Copy-Item pos-controller/install/Install-Mullet-Hop-POS.ps1 PosPackage/
+          Copy-Item pos-controller/install/Uninstall-Mullet-Hop-POS.ps1 PosPackage/
           Copy-Item pos-controller/README.md PosPackage/
           Compress-Archive `
             -Path PosPackage/* `
-            -DestinationPath "Mullet-Hop-Kiosk-Status-Viewer-${{ steps.pos_version.outputs.value }}.zip" `
+            -DestinationPath "Mullet-Hop-POS-${{ steps.pos_version.outputs.value }}.zip" `
             -Force
 
       - name: Publish GitHub release
@@ -393,7 +393,7 @@ jobs:
           gh release upload `
             "v${{ steps.version.outputs.value }}" `
             "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
-            "Mullet-Hop-Kiosk-Status-Viewer-${{ steps.pos_version.outputs.value }}.zip" `
+            "Mullet-Hop-POS-${{ steps.pos_version.outputs.value }}.zip" `
             'ControllerReleases/*' `
             'PosReleases/*' `
             --repo "${{ github.repository }}" `
@@ -411,5 +411,5 @@ jobs:
             PosReleases/*-Setup.exe
             PosReleases/releases.*.json
             Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip
-            Mullet-Hop-Kiosk-Status-Viewer-${{ steps.pos_version.outputs.value }}.zip
+            Mullet-Hop-POS-${{ steps.pos_version.outputs.value }}.zip
           if-no-files-found: error

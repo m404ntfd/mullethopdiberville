@@ -76,7 +76,7 @@ internal sealed partial class KioskForm
                     Form.ActiveForm ?? this,
                     $"The Kiosk Controller on {payload.ControllerName} is requesting permission to add this waiver kiosk.\n\n" +
                     $"Controller address: {payload.ControllerAddress}\n\n" +
-                    "If allowed, the controller and linked Kiosk Status Viewer can view this kiosk's status and send Open, Close, and Reset commands." +
+                    "If allowed, the controller and linked Mullet Hop POS can view this kiosk's status and send Open, Close, and Reset commands." +
                     replacing +
                     "\n\nOnly allow this request if you recognize the controller computer.",
                     "Allow Kiosk Controller?",
@@ -187,6 +187,7 @@ internal sealed partial class KioskForm
         MachineName = Environment.MachineName,
         Version = KioskUpdater.CurrentVersion,
         StationClosed = _settings.StationClosed,
+        BusinessHoursClosed = _showingBusinessClosedPage || _showingBlackout,
         AvailableForGuests = IsAvailableForGuests(),
         HasError = IsInErrorState(),
         AssistanceRequested = _settings.AssistanceRequested,
@@ -520,6 +521,16 @@ internal sealed partial class KioskForm
                             : "The kiosk is open for waivers.");
                     break;
 
+                case RemoteCommandTypes.SetBusinessClosed when command.Closed.HasValue:
+                    await SetBusinessClosedAsync(command.Closed.Value, "remote controller");
+                    SaveRemoteCommandResult(
+                        command.Id,
+                        true,
+                        command.Closed.Value
+                            ? "The business-closure blackout is on."
+                            : "The business-closure blackout is off.");
+                    break;
+
                 case RemoteCommandTypes.ResetStart:
                     await ResetForNextGuestAsync("remote POS reset", showStatus: false);
                     SaveRemoteCommandResult(
@@ -618,13 +629,17 @@ internal sealed partial class KioskForm
 
     private async Task SetStationClosedAsync(bool closed, string source)
     {
-        if (_settings.StationClosed == closed)
+        if (_settings.StationClosed == closed &&
+            !_settings.ManualBusinessBlackout && !_manualBusinessBlackout)
             return;
 
         var previousValue = _settings.StationClosed;
+        var previousBusinessBlackout = _settings.ManualBusinessBlackout;
         try
         {
             _settings.StationClosed = closed;
+            _settings.ManualBusinessBlackout = false;
+            _manualBusinessBlackout = false;
             _settings.Save();
 
             if (closed)
@@ -639,6 +654,42 @@ internal sealed partial class KioskForm
         catch
         {
             _settings.StationClosed = previousValue;
+            _settings.ManualBusinessBlackout = previousBusinessBlackout;
+            _manualBusinessBlackout = previousBusinessBlackout;
+            throw;
+        }
+    }
+
+    private async Task SetBusinessClosedAsync(bool closed, string source)
+    {
+        if (_settings.ManualBusinessBlackout == closed &&
+            _manualBusinessBlackout == closed &&
+            (!closed || !_settings.StationClosed))
+            return;
+
+        var previousStationClosed = _settings.StationClosed;
+        var previousBusinessBlackout = _settings.ManualBusinessBlackout;
+        try
+        {
+            _settings.StationClosed = false;
+            _settings.ManualBusinessBlackout = closed;
+            _manualBusinessBlackout = closed;
+            _settings.Save();
+
+            if (closed)
+                ShowBlackoutPage(manual: true);
+            else
+                await ResetForNextGuestAsync(source + " ended business closure", showStatus: false);
+
+            KioskLog.Write(closed
+                ? source + " started the business-closure blackout."
+                : source + " ended the business-closure blackout.");
+        }
+        catch
+        {
+            _settings.StationClosed = previousStationClosed;
+            _settings.ManualBusinessBlackout = previousBusinessBlackout;
+            _manualBusinessBlackout = previousBusinessBlackout;
             throw;
         }
     }
@@ -647,6 +698,7 @@ internal sealed partial class KioskForm
 internal static class RemoteCommandTypes
 {
     public const string SetClosed = "set-closed";
+    public const string SetBusinessClosed = "set-business-closed";
     public const string ResetStart = "reset-start";
     public const string CheckUpdate = "check-update";
     public const string InstallUpdate = "install-update";
@@ -661,6 +713,7 @@ internal sealed class KioskCheckInRequest
     public string MachineName { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public bool StationClosed { get; set; }
+    public bool BusinessHoursClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
