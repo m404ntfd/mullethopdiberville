@@ -9,7 +9,7 @@
     <RootNamespace>MulletHopPosController</RootNamespace>
     <AssemblyTitle>Mullet Hop POS Controller</AssemblyTitle>
     <ApplicationIcon>..\..\assets\MulletHopFish.ico</ApplicationIcon>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop POS Controller</Product>
     <Description>Front-desk controls and live status for Mullet Hop waiver kiosks.</Description>

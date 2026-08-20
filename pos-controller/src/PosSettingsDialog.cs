@@ -12,7 +12,10 @@ internal sealed class PosSettingsDialog : Form
     private readonly TextBox _pairingKey = new();
     private readonly ComboBox[] _slots = [new(), new(), new(), new()];
     private readonly Label _connectionStatus = new();
+    private readonly Label _assignmentStatus = new();
     private List<PosKioskStatus> _knownKiosks = [];
+    private List<string> _pendingAssignments = [string.Empty, string.Empty, string.Empty, string.Empty];
+    private bool _updatingSlotControls;
 
     public PosSettings Settings => _working;
     public PosSettings? AppliedSettings { get; private set; }
@@ -20,7 +23,7 @@ internal sealed class PosSettingsDialog : Form
     public PosSettingsDialog(PosSettings current)
     {
         _working = current.Clone();
-        Text = "Mullet Hop POS Controller Settings";
+        Text = "Mullet Hop POS Controller Staff Menu";
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(760, 650);
         ClientSize = new Size(820, 690);
@@ -30,7 +33,7 @@ internal sealed class PosSettingsDialog : Form
         var header = new Panel { Dock = DockStyle.Top, Height = 76, BackColor = Color.FromArgb(117, 68, 154) };
         header.Controls.Add(new Label
         {
-            Text = "POS CONTROLLER SETTINGS",
+            Text = "POS CONTROLLER STAFF MENU",
             ForeColor = Color.White,
             Font = new Font("Segoe UI", 21, FontStyle.Bold),
             Bounds = new Rectangle(24, 10, 600, 52),
@@ -111,12 +114,12 @@ internal sealed class PosSettingsDialog : Form
 
     private GroupBox BuildAssignmentsGroup()
     {
-        var group = MakeGroup("Dashboard Kiosk Assignments", 238);
+        var group = MakeGroup("Known Machines & Dashboard Assignments", 270);
         group.Dock = DockStyle.Top;
         group.Padding = new Padding(18, 24, 18, 12);
         var note = new Label
         {
-            Text = "Paired devices are added automatically to the next open position. You can change their Kiosk 1–4 assignments below.",
+            Text = "Choose which known machine appears in each Kiosk 1–4 position. Selecting a machine already in another position moves or swaps it automatically.",
             Bounds = new Rectangle(18, 30, 525, 44),
             ForeColor = Color.FromArgb(52, 65, 76)
         };
@@ -139,8 +142,16 @@ internal sealed class PosSettingsDialog : Form
             });
             _slots[index].Bounds = new Rectangle(155, y, 500, 32);
             _slots[index].DropDownStyle = ComboBoxStyle.DropDownList;
+            var changedSlot = index;
+            _slots[index].SelectionChangeCommitted += (_, _) =>
+                MoveOrSwapKioskAssignment(changedSlot);
             group.Controls.Add(_slots[index]);
         }
+        _assignmentStatus.Text = "Assignments remain unchanged until you select Save Kiosk Assignments or Save Settings.";
+        _assignmentStatus.Bounds = new Rectangle(18, 230, 732, 28);
+        _assignmentStatus.ForeColor = Color.FromArgb(83, 97, 109);
+        _assignmentStatus.Font = new Font("Segoe UI", 9, FontStyle.Regular);
+        group.Controls.Add(_assignmentStatus);
         return group;
     }
 
@@ -150,7 +161,7 @@ internal sealed class PosSettingsDialog : Form
         group.Dock = DockStyle.Top;
         group.Controls.Add(new Label
         {
-            Text = "A passcode is required for Settings. Dashboard control buttons do not require a passcode.",
+            Text = "Ctrl + Alt + M or the Staff Menu button opens this protected menu. Dashboard control buttons do not require a passcode.",
             Bounds = new Rectangle(18, 33, 545, 45),
             ForeColor = Color.FromArgb(52, 65, 76)
         });
@@ -220,9 +231,47 @@ internal sealed class PosSettingsDialog : Form
 
     private void CaptureSlotSelections()
     {
-        _working.KioskSlots = _slots
+        _pendingAssignments = _slots
             .Select(slot => (slot.SelectedItem as KioskChoice)?.Id ?? string.Empty)
             .ToList();
+        _working.KioskSlots = [.. _pendingAssignments];
+    }
+
+    private void MoveOrSwapKioskAssignment(int targetSlot)
+    {
+        if (_updatingSlotControls || targetSlot < 0 || targetSlot >= _slots.Length)
+            return;
+
+        var selected = (_slots[targetSlot].SelectedItem as KioskChoice)?.Id ?? string.Empty;
+        var previous = _pendingAssignments[targetSlot];
+        var previousSlot = -1;
+        if (!string.IsNullOrWhiteSpace(selected))
+        {
+            for (var index = 0; index < _pendingAssignments.Count; index++)
+            {
+                if (index != targetSlot &&
+                    string.Equals(_pendingAssignments[index], selected, StringComparison.Ordinal))
+                {
+                    previousSlot = index;
+                    break;
+                }
+            }
+        }
+
+        _pendingAssignments[targetSlot] = selected;
+        if (previousSlot >= 0)
+            _pendingAssignments[previousSlot] = previous;
+        _working.KioskSlots = [.. _pendingAssignments];
+        ApplyPendingSelections();
+
+        var selectedName = _knownKiosks.FirstOrDefault(kiosk =>
+            string.Equals(kiosk.StationId, selected, StringComparison.Ordinal))?.StationName;
+        _assignmentStatus.Text = string.IsNullOrWhiteSpace(selected)
+            ? $"Kiosk {targetSlot + 1} will be left unassigned after you save."
+            : previousSlot >= 0
+                ? $"{selectedName ?? "The selected machine"} was moved to Kiosk {targetSlot + 1}; the two positions were swapped. Select Save to confirm."
+                : $"{selectedName ?? "The selected machine"} is now assigned to Kiosk {targetSlot + 1}. Select Save to confirm.";
+        _assignmentStatus.ForeColor = Color.FromArgb(143, 91, 10);
     }
 
     private void SaveKioskAssignments()
@@ -235,6 +284,8 @@ internal sealed class PosSettingsDialog : Form
         {
             _working.Save();
             AppliedSettings = _working.Clone();
+            _assignmentStatus.Text = "Assignments saved. The POS dashboard will use these Kiosk 1–4 positions.";
+            _assignmentStatus.ForeColor = Color.FromArgb(44, 116, 29);
             MessageBox.Show(this,
                 "The Kiosk 1–4 assignments were saved and will remain assigned after the POS Controller restarts.",
                 "Kiosk Assignments Saved",
@@ -250,9 +301,8 @@ internal sealed class PosSettingsDialog : Form
 
     private bool TryGetUniqueSlotAssignments(out List<string> assignments)
     {
-        assignments = _slots
-            .Select(slot => (slot.SelectedItem as KioskChoice)?.Id ?? string.Empty)
-            .ToList();
+        CaptureSlotSelections();
+        assignments = [.. _pendingAssignments];
         var selectedIds = assignments
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .ToList();
@@ -267,28 +317,64 @@ internal sealed class PosSettingsDialog : Form
 
     private void PopulateSlots(IReadOnlyList<PosKioskStatus> kiosks)
     {
-        for (var slotIndex = 0; slotIndex < _slots.Length; slotIndex++)
+        _knownKiosks = kiosks.ToList();
+        _pendingAssignments = _working.KioskSlots
+            .Take(_slots.Length)
+            .Select(id => id?.Trim() ?? string.Empty)
+            .ToList();
+        while (_pendingAssignments.Count < _slots.Length)
+            _pendingAssignments.Add(string.Empty);
+
+        _updatingSlotControls = true;
+        try
         {
-            var selectedId = _working.KioskSlots[slotIndex];
-            if (_slots[slotIndex].SelectedItem is KioskChoice current)
-                selectedId = current.Id;
-            _slots[slotIndex].Items.Clear();
-            _slots[slotIndex].Items.Add(new KioskChoice(string.Empty, "Not linked"));
-            foreach (var kiosk in kiosks)
-                _slots[slotIndex].Items.Add(new KioskChoice(
-                    kiosk.StationId,
-                    $"{kiosk.StationName} ({kiosk.MachineName})"));
-            if (!string.IsNullOrWhiteSpace(selectedId) &&
-                !kiosks.Any(kiosk => kiosk.StationId == selectedId))
-                _slots[slotIndex].Items.Add(new KioskChoice(
-                    selectedId,
-                    "Previously linked kiosk (currently unavailable)"));
-            var matchingChoice = _slots[slotIndex].Items
-                .Cast<KioskChoice>()
-                .FirstOrDefault(choice => choice.Id == selectedId);
-            _slots[slotIndex].SelectedIndex = matchingChoice is null
-                ? 0
-                : _slots[slotIndex].Items.IndexOf(matchingChoice);
+            for (var slotIndex = 0; slotIndex < _slots.Length; slotIndex++)
+            {
+                var selectedId = _pendingAssignments[slotIndex];
+                _slots[slotIndex].Items.Clear();
+                _slots[slotIndex].Items.Add(new KioskChoice(string.Empty, "Not linked"));
+                foreach (var kiosk in kiosks)
+                    _slots[slotIndex].Items.Add(new KioskChoice(
+                        kiosk.StationId,
+                        $"{kiosk.StationName} ({kiosk.MachineName})"));
+                if (!string.IsNullOrWhiteSpace(selectedId) &&
+                    !kiosks.Any(kiosk => kiosk.StationId == selectedId))
+                    _slots[slotIndex].Items.Add(new KioskChoice(
+                        selectedId,
+                        "Previously linked kiosk (currently unavailable)"));
+                var matchingChoice = _slots[slotIndex].Items
+                    .Cast<KioskChoice>()
+                    .FirstOrDefault(choice => choice.Id == selectedId);
+                _slots[slotIndex].SelectedIndex = matchingChoice is null
+                    ? 0
+                    : _slots[slotIndex].Items.IndexOf(matchingChoice);
+            }
+        }
+        finally
+        {
+            _updatingSlotControls = false;
+        }
+    }
+
+    private void ApplyPendingSelections()
+    {
+        _updatingSlotControls = true;
+        try
+        {
+            for (var slotIndex = 0; slotIndex < _slots.Length; slotIndex++)
+            {
+                var selectedId = _pendingAssignments[slotIndex];
+                var matchingChoice = _slots[slotIndex].Items
+                    .Cast<KioskChoice>()
+                    .FirstOrDefault(choice => choice.Id == selectedId);
+                _slots[slotIndex].SelectedIndex = matchingChoice is null
+                    ? 0
+                    : _slots[slotIndex].Items.IndexOf(matchingChoice);
+            }
+        }
+        finally
+        {
+            _updatingSlotControls = false;
         }
     }
 

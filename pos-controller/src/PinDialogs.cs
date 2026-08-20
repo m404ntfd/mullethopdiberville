@@ -24,7 +24,7 @@ internal sealed class PinEntryDialog : Form
 
     public PinEntryDialog()
     {
-        Text = "POS Controller Settings";
+        Text = "POS Controller Staff Menu";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -34,14 +34,14 @@ internal sealed class PinEntryDialog : Form
 
         var heading = new Label
         {
-            Text = "Enter the settings passcode",
+            Text = "Enter the Staff Menu passcode",
             Font = new Font("Segoe UI", 14, FontStyle.Bold),
             Bounds = new Rectangle(25, 22, 370, 34),
             TextAlign = ContentAlignment.MiddleCenter
         };
         var note = new Label
         {
-            Text = "A 4–8 digit passcode is required to open Settings.",
+            Text = "A 4–8 digit passcode is required to open the Staff Menu.",
             Bounds = new Rectangle(25, 60, 370, 28),
             TextAlign = ContentAlignment.MiddleCenter
         };
@@ -50,7 +50,7 @@ internal sealed class PinEntryDialog : Form
         NumericPinInput.Configure(_pin);
         var open = new Button
         {
-            Text = "Open Settings",
+            Text = "Open Staff Menu",
             Bounds = new Rectangle(105, 150, 135, 38),
             BackColor = Color.FromArgb(117, 68, 154),
             ForeColor = Color.White,

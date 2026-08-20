@@ -18,7 +18,8 @@ It shows four numbered waiver-station controls based on the supplied layout:
   The kiosk continues flashing until the call is cleared on that kiosk.
 
 The dashboard buttons and **Check for Updates** do not require a passcode. The
-Settings button does. There is no settings shortcut key.
+Staff Menu button does. Press **Ctrl + Alt + M** while the POS Controller is
+active to open the same passcode-protected Staff Menu.
 
 ## Installation
 
@@ -27,11 +28,13 @@ Settings button does. There is no settings shortcut key.
 2. Extract the complete Mullet-Hop-POS-Controller ZIP package.
 3. Run `Install-POS-Controller.cmd`.
 4. Create a 4–8 digit Settings passcode on the first launch.
-5. Select **Settings** and enter that passcode.
+5. Select **Staff Menu** (or press **Ctrl + Alt + M**) and enter that passcode.
 6. Copy the controller address and pairing key from the main Kiosk Controller.
 7. Select **Connect & Remember**. The verified controller address and pairing
    key are saved immediately. Paired devices are automatically added to the next
-   open Kiosk 1–4 position. Change the number assignments if needed.
+   open Kiosk 1–4 position. In **Known Machines & Dashboard Assignments**, select
+   the machine for each numbered position. Choosing a machine that is already in
+   another position automatically moves or swaps it.
 8. Select **Save Kiosk Assignments** inside the assignment section to confirm
    and save the Kiosk 1–4 positions immediately. **Save Settings** also saves all
    connection, assignment, and passcode changes.
@@ -62,6 +65,11 @@ and Kiosk Controller settings.
 POS Controller version 1.2.0 adds a flashing yellow guest-assistance light and a
 per-kiosk response button. Version 1.1.1 immediately remembers every verified
 controller connection and preserves the identity and Kiosk 1–4 position of each
-linked waiver station. Use the visible **Settings** button in the upper-right
-corner to change the controller address, pairing key, assignments, or Settings
+linked waiver station. Use the visible **Staff Menu** button in the upper-right
+corner to change the controller address, pairing key, assignments, or Staff Menu
 passcode.
+
+POS Controller version 1.3.0 adds **Ctrl + Alt + M** Staff Menu access and a
+clear known-machines assignment menu. Moving a machine to another Kiosk 1–4
+position now swaps the affected positions automatically and saves without
+changing the controller connection or pairing key.

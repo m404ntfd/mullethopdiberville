@@ -11,6 +11,7 @@ internal sealed class PosControllerForm : Form
     private readonly KioskControlCard[] _cards = new KioskControlCard[4];
     private bool _refreshInProgress;
     private bool _updateCheckInProgress;
+    private bool _staffMenuOpen;
 
     public PosControllerForm(PosSettings settings)
     {
@@ -24,6 +25,7 @@ internal sealed class PosControllerForm : Form
         ClientSize = new Size(1280, 720);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(239, 244, 248);
+        KeyPreview = true;
 
         Controls.Add(BuildDashboard());
         Controls.Add(BuildStatusBar());
@@ -66,12 +68,12 @@ internal sealed class PosControllerForm : Form
         };
         var settings = new Button
         {
-            Text = "⚙  SETTINGS",
-            Bounds = new Rectangle(1080, 24, 165, 46),
+            Text = "⚙  STAFF MENU\nCtrl + Alt + M",
+            Bounds = new Rectangle(1050, 14, 195, 64),
             Anchor = AnchorStyles.Top | AnchorStyles.Right,
             BackColor = Color.FromArgb(255, 217, 188),
             ForeColor = Color.FromArgb(30, 20, 36),
-            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand
         };
@@ -237,7 +239,7 @@ internal sealed class PosControllerForm : Form
         if (!_settings.HasConnectionSettings)
         {
             UpdateUnlinkedCards();
-            SetConnectionStatus("Open Settings to connect this POS Controller to the waiver kiosks.", false);
+            SetConnectionStatus("Open the Staff Menu to connect this POS Controller to the waiver kiosks.", false);
             return;
         }
 
@@ -298,7 +300,7 @@ internal sealed class PosControllerForm : Form
         if (string.IsNullOrWhiteSpace(stationId))
         {
             MessageBox.Show(this,
-                $"Kiosk {slot + 1} is not linked. Open Settings to assign a waiver kiosk.",
+                $"Kiosk {slot + 1} is not linked. Open the Staff Menu to assign a waiver kiosk.",
                 Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -336,27 +338,54 @@ internal sealed class PosControllerForm : Form
 
     private void OpenSettings()
     {
-        using var pin = new PinEntryDialog();
-        if (pin.ShowDialog(this) != DialogResult.OK)
+        if (_staffMenuOpen)
             return;
-        if (!_settings.VerifyPin(pin.Pin))
+
+        _staffMenuOpen = true;
+        try
         {
-            MessageBox.Show(this,
-                "The Settings passcode was not correct.",
-                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            PosLog.Write("Incorrect POS settings passcode entered.");
-            return;
+            if (WindowState == FormWindowState.Minimized)
+                WindowState = FormWindowState.Normal;
+            Show();
+            Activate();
+
+            using var pin = new PinEntryDialog();
+            if (pin.ShowDialog(this) != DialogResult.OK)
+                return;
+            if (!_settings.VerifyPin(pin.Pin))
+            {
+                MessageBox.Show(this,
+                    "The Staff Menu passcode was not correct.",
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                PosLog.Write("Incorrect POS staff-menu passcode entered.");
+                return;
+            }
+
+            using var dialog = new PosSettingsDialog(_settings);
+            var result = dialog.ShowDialog(this);
+            if (result != DialogResult.OK && dialog.AppliedSettings is null)
+                return;
+            _settings.CopyFrom(result == DialogResult.OK
+                ? dialog.Settings
+                : dialog.AppliedSettings!);
+            UpdateUnlinkedCards();
+            _ = RefreshStatusesAsync();
+        }
+        finally
+        {
+            _staffMenuOpen = false;
+        }
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Alt | Keys.M))
+        {
+            BeginInvoke(new Action(OpenSettings));
+            return true;
         }
 
-        using var dialog = new PosSettingsDialog(_settings);
-        var result = dialog.ShowDialog(this);
-        if (result != DialogResult.OK && dialog.AppliedSettings is null)
-            return;
-        _settings.CopyFrom(result == DialogResult.OK
-            ? dialog.Settings
-            : dialog.AppliedSettings!);
-        UpdateUnlinkedCards();
-        _ = RefreshStatusesAsync();
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     private void UpdateUnlinkedCards()
@@ -518,7 +547,7 @@ internal sealed class KioskControlCard : Panel
         _red.Active = false;
         _green.Active = false;
         SetAssistanceState(false, false);
-        _status.Text = "Not linked\nOpen Settings to assign a kiosk";
+        _status.Text = "Not linked\nOpen Staff Menu to assign a kiosk";
         _status.ForeColor = Color.FromArgb(83, 97, 109);
         SetButtonsEnabled(false);
     }

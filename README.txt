@@ -85,7 +85,8 @@ controller, restart the controller, or close it. Red and green lenses show the
 saved master role, and local controllers discover each other when they launch.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.10.1 places guest assistance in a compact highlighted card
+Waiver Kiosk version 2.10.2 is the matching package release for POS Controller
+1.3.0. Waiver Kiosk version 2.10.1 places guest assistance in a compact highlighted card
 with the other right-side waiver controls and moves that card stack near the top
 so it does not cover waiver information. Version 2.10.0 adds the guest-assistance
 request itself. A guest can call for help, which produces a flashing yellow alert
@@ -176,18 +177,21 @@ a slot is not linked. Front-desk staff can close a station, put it back in
 service, reset the current waiver to its starting page, or acknowledge an
 assistance call so the guest sees that help is on the way.
 
-The dashboard has no shortcut key. Its four daily-use controls and the visible
-Check for Updates button do not ask for a passcode. Opening Settings requires the
-POS Controller's own 4-8 digit passcode. Settings finds the kiosks already paired
-with the on-site Kiosk Controller and automatically adds new devices to the next
-open Kiosk 1 through Kiosk 4 dashboard position without renumbering existing
-assignments. POS Controller version 1.2.0 adds the assistance alert and response
-button. Version 1.1.1 saves a verified controller address and
-pairing key immediately, and remembers each kiosk's identity, name, and assigned
-number across application and computer restarts. The visible Settings button in
-the upper-right corner can change the saved connection, assignments, or POS
-Settings passcode. A dedicated Save Kiosk Assignments button inside the Kiosk
-1-4 assignment area validates and applies those positions immediately. See the
+Its four daily-use controls and the visible Check for Updates button do not ask
+for a passcode. Opening the Staff Menu with its visible button or Ctrl + Alt + M
+requires the POS Controller's own 4-8 digit passcode. The Staff Menu finds the
+kiosks already paired with the on-site Kiosk Controller and automatically adds
+new devices to the next open Kiosk 1 through Kiosk 4 dashboard position without
+renumbering existing assignments. POS Controller version 1.2.0 adds the
+assistance alert and response button. Version 1.1.1 saves a verified controller
+address and pairing key immediately, and remembers each kiosk's identity, name,
+and assigned number across application and computer restarts. The visible Staff
+Menu button in the upper-right corner can change the saved connection,
+assignments, or POS Staff Menu passcode. POS Controller version 1.3.0 adds a
+known-machines assignment menu. Selecting a machine already assigned elsewhere
+moves or swaps it into the chosen Kiosk 1-4 position without changing the saved
+controller connection. A dedicated Save Kiosk Assignments button validates and
+applies those positions immediately. See the
 README inside the Mullet-Hop-POS-Controller download for complete installation
 steps.
 
