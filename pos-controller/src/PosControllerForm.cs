@@ -17,8 +17,6 @@ internal sealed class PosControllerForm : Form
     private readonly Button _staffMenuButton = new();
     private readonly Button _minimizeButton = new();
     private readonly Button _exitButton = new();
-    private readonly NotifyIcon _trayIcon = new();
-    private readonly ContextMenuStrip _trayMenu = new();
     private readonly Panel _sidebar = new();
     private readonly Panel _browserPanel = new();
     private readonly Panel _browserHostPanel = new();
@@ -36,7 +34,6 @@ internal sealed class PosControllerForm : Form
     private bool _staffMenuOpen;
     private bool _exitApproved;
     private bool _cleanupComplete;
-    private bool _hiddenToTray;
     private Rectangle _fullScreenBounds;
 
     public PosControllerForm(PosSettings settings)
@@ -57,7 +54,6 @@ internal sealed class PosControllerForm : Form
         Controls.Add(BuildBrowserArea());
         Controls.Add(BuildSidebar());
         SetSidebarExpanded(expanded: true);
-        ConfigureTrayIcon();
 
         _firefoxHost = new FirefoxHost(_browserHostPanel);
         _firefoxHost.StatusChanged += (_, status) => SetBrowserStatus(status);
@@ -75,11 +71,7 @@ internal sealed class PosControllerForm : Form
             await RefreshStatusesAsync();
             _refreshTimer.Start();
         };
-        Resize += (_, _) =>
-        {
-            if (WindowState == FormWindowState.Minimized && !_hiddenToTray)
-                BeginInvoke(new Action(HideToTray));
-        };
+        Activated += (_, _) => _firefoxHost?.FocusBrowser();
         FormClosing += HandleFormClosing;
     }
 
@@ -111,14 +103,14 @@ internal sealed class PosControllerForm : Form
         _browserErrorLabel.Font = new Font("Segoe UI", 12, FontStyle.Bold);
         _browserErrorLabel.TextAlign = ContentAlignment.MiddleLeft;
         _browserErrorLabel.Padding = new Padding(8, 0, 12, 0);
-        _browserRestartButton.Text = "RELOAD LILYPAD";
+        _browserRestartButton.Text = "REFRESH LILYPAD";
         _browserRestartButton.Dock = DockStyle.Right;
         _browserRestartButton.Width = 190;
         _browserRestartButton.BackColor = Color.White;
         _browserRestartButton.ForeColor = Color.FromArgb(133, 19, 31);
         _browserRestartButton.FlatStyle = FlatStyle.Flat;
         _browserRestartButton.Font = new Font("Segoe UI", 10, FontStyle.Bold);
-        _browserRestartButton.Click += (_, _) => RestartFirefox();
+        _browserRestartButton.Click += (_, _) => RefreshLilypad();
         _browserErrorPanel.Controls.Add(_browserErrorLabel);
         _browserErrorPanel.Controls.Add(_browserRestartButton);
 
@@ -235,13 +227,13 @@ internal sealed class PosControllerForm : Form
         panel.Controls.Add(_connectionStatus, 0, 0);
         panel.SetColumnSpan(_connectionStatus, 2);
 
-        ConfigureSidebarButton(_reloadBrowserButton, "RELOAD LILYPAD",
+        ConfigureSidebarButton(_reloadBrowserButton, "REFRESH LILYPAD",
             Color.FromArgb(8, 119, 189), Color.White);
-        _reloadBrowserButton.Click += (_, _) => RestartFirefox();
+        _reloadBrowserButton.Click += (_, _) => RefreshLilypad();
         panel.Controls.Add(_reloadBrowserButton, 0, 1);
         panel.SetColumnSpan(_reloadBrowserButton, 2);
 
-        ConfigureSidebarButton(_staffMenuButton, "STAFF MENU",
+        ConfigureSidebarButton(_staffMenuButton, "SETTINGS",
             Color.FromArgb(255, 217, 188), Color.FromArgb(30, 20, 36));
         _staffMenuButton.Click += (_, _) => OpenSettings();
         panel.Controls.Add(_staffMenuButton, 0, 2);
@@ -255,7 +247,7 @@ internal sealed class PosControllerForm : Form
 
         ConfigureSidebarButton(_minimizeButton, "MINIMIZE",
             Color.FromArgb(66, 75, 86), Color.White);
-        _minimizeButton.Click += (_, _) => HideToTray();
+        _minimizeButton.Click += (_, _) => MinimizeToTaskbar();
         panel.Controls.Add(_minimizeButton, 0, 4);
 
         ConfigureSidebarButton(_exitButton, "EXIT APP",
@@ -274,8 +266,8 @@ internal sealed class PosControllerForm : Form
         _brandLayout.ColumnStyles[0].Width = expanded ? 66 : Math.Max(1, CollapsedSidebarWidth - 16);
         _brandLayout.ColumnStyles[1].Width = expanded ? 100 : 0;
         _connectionStatus.Visible = expanded;
-        _reloadBrowserButton.Text = expanded ? "RELOAD LILYPAD" : "RELOAD";
-        _staffMenuButton.Text = expanded ? "STAFF MENU" : "STAFF";
+        _reloadBrowserButton.Text = expanded ? "REFRESH LILYPAD" : "REFRESH";
+        _staffMenuButton.Text = "SETTINGS";
         _checkUpdateButton.Text = expanded
             ? (PosUpdater.HasStagedUpdate ? "INSTALL UPDATE" : "CHECK FOR UPDATES")
             : (PosUpdater.HasStagedUpdate ? "INSTALL" : "UPDATE");
@@ -366,7 +358,7 @@ internal sealed class PosControllerForm : Form
         if (!_settings.HasConnectionSettings)
         {
             UpdateUnlinkedCards();
-            SetConnectionStatus("Open Staff Menu to connect Mullet Hop POS.", false);
+            SetConnectionStatus("Open Settings to connect Mullet Hop POS.", false);
             return;
         }
 
@@ -439,7 +431,7 @@ internal sealed class PosControllerForm : Form
         if (string.IsNullOrWhiteSpace(stationId))
         {
             MessageBox.Show(this,
-                $"Kiosk {slot + 1} is not linked. Open the Staff Menu to assign a waiver kiosk.",
+                $"Kiosk {slot + 1} is not linked. Open Settings to assign a waiver kiosk.",
                 Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -521,7 +513,7 @@ internal sealed class PosControllerForm : Form
         _staffMenuOpen = true;
         try
         {
-            RestoreFromTray();
+            RestoreFromTaskbar();
             using var pin = new PinEntryDialog(
                 "Exit Mullet Hop POS",
                 "Enter the Staff Menu passcode to close Firefox and Mullet Hop POS.",
@@ -556,59 +548,32 @@ internal sealed class PosControllerForm : Form
         if (!_exitApproved && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
-            HideToTray();
+            BeginInvoke(new Action(RequestApplicationExit));
             return;
         }
         Cleanup();
     }
 
-    private void ConfigureTrayIcon()
-    {
-        var showItem = new ToolStripMenuItem("Show Mullet Hop POS");
-        showItem.Click += (_, _) => RestoreFromTray();
-        var staffItem = new ToolStripMenuItem("Staff Menu");
-        staffItem.Click += (_, _) =>
-        {
-            RestoreFromTray();
-            BeginInvoke(new Action(OpenSettings));
-        };
-        var exitItem = new ToolStripMenuItem("Exit Application…");
-        exitItem.Click += (_, _) => RequestApplicationExit();
-        _trayMenu.Items.Add(showItem);
-        _trayMenu.Items.Add(staffItem);
-        _trayMenu.Items.Add(new ToolStripSeparator());
-        _trayMenu.Items.Add(exitItem);
-
-        _trayIcon.ContextMenuStrip = _trayMenu;
-        _trayIcon.Icon = Icon ?? SystemIcons.Application;
-        _trayIcon.Text = "Mullet Hop POS";
-        _trayIcon.Visible = true;
-        _trayIcon.DoubleClick += (_, _) => RestoreFromTray();
-    }
-
-    private void HideToTray()
-    {
-        if (_cleanupComplete || _hiddenToTray)
-            return;
-
-        if (WindowState == FormWindowState.Normal && !Bounds.IsEmpty)
-            _fullScreenBounds = Bounds;
-        _hiddenToTray = true;
-        ShowInTaskbar = false;
-        Hide();
-        WindowState = FormWindowState.Normal;
-        PosLog.Write("Mullet Hop POS minimized to the notification area.");
-    }
-
-    private void RestoreFromTray()
+    private void MinimizeToTaskbar()
     {
         if (_cleanupComplete || IsDisposed)
             return;
 
-        _hiddenToTray = false;
+        if (WindowState == FormWindowState.Normal && !Bounds.IsEmpty)
+            _fullScreenBounds = Bounds;
         ShowInTaskbar = true;
-        Show();
+        WindowState = FormWindowState.Minimized;
+        PosLog.Write("Mullet Hop POS minimized to the Windows taskbar.");
+    }
+
+    private void RestoreFromTaskbar()
+    {
+        if (_cleanupComplete || IsDisposed)
+            return;
+
+        ShowInTaskbar = true;
         WindowState = FormWindowState.Normal;
+        Show();
         if (!_fullScreenBounds.IsEmpty)
             Bounds = _fullScreenBounds;
         else
@@ -635,9 +600,6 @@ internal sealed class PosControllerForm : Form
         _cleanupComplete = true;
         _refreshTimer.Stop();
         _firefoxHost?.Dispose();
-        _trayIcon.Visible = false;
-        _trayIcon.Dispose();
-        _trayMenu.Dispose();
     }
 
     private void UpdateUnlinkedCards()
@@ -659,16 +621,16 @@ internal sealed class PosControllerForm : Form
             : Color.FromArgb(255, 170, 176);
     }
 
-    private void RestartFirefox()
+    private void RefreshLilypad()
     {
         if (InvokeRequired)
         {
-            BeginInvoke(new Action(RestartFirefox));
+            BeginInvoke(new Action(RefreshLilypad));
             return;
         }
 
         _browserErrorPanel.Visible = false;
-        SetBrowserStatus("Restarting Firefox and loading LilyPad POS…");
+        SetBrowserStatus("Closing the Firefox session and reopening LilyPad POS…");
         _firefoxHost?.Restart();
     }
 
@@ -983,7 +945,7 @@ internal sealed class KioskControlCard : Panel
         IsLinked = false;
         SetBaseStatusColor(UnlinkedColor);
         SetAssistanceState(false, false);
-        _status.Text = "Not linked\nOpen Staff Menu to assign a kiosk";
+        _status.Text = "Not linked\nOpen Settings to assign a kiosk";
         _status.ForeColor = Color.FromArgb(83, 97, 109);
         _dot.AccessibleDescription = $"Kiosk {_kioskNumber}: not linked";
         SetButtonsEnabled(false);
