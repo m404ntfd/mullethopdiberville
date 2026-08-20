@@ -69,6 +69,7 @@ jobs:
           dotnet restore src/MulletHopWaiverKiosk.csproj
           dotnet restore controller/src/MulletHopKioskController.csproj
           dotnet restore pos-controller/src/MulletHopPosController.csproj
+          dotnet restore installer/src/MulletHopInstaller.csproj
 
       - name: Publish kiosk application
         shell: pwsh
@@ -151,6 +152,21 @@ jobs:
             -p:DebugType=None `
             --output pos-publish
 
+      - name: Publish all-programs installer
+        shell: pwsh
+        run: |
+          dotnet publish installer/src/MulletHopInstaller.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            --output installer-publish
+          Copy-Item `
+            installer-publish/MulletHopAllProgramsInstaller.exe `
+            MulletHop-All-Programs-Installer.exe
+
       - name: Verify Mullet Hop POS startup
         shell: pwsh
         run: |
@@ -161,6 +177,34 @@ jobs:
             -PassThru
           if ($process.ExitCode -ne 0) {
             throw "The Mullet Hop POS startup smoke test failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Verify kiosk schedule and installer startup
+        shell: pwsh
+        run: |
+          $kiosk = Start-Process `
+            -FilePath "publish/MulletHopWaiverKiosk.exe" `
+            -ArgumentList "--business-hours-smoke-test" `
+            -Wait `
+            -PassThru
+          if ($kiosk.ExitCode -ne 0) {
+            throw "The kiosk business-hours boundary test failed with exit code $($kiosk.ExitCode)."
+          }
+          $controller = Start-Process `
+            -FilePath "controller-publish/MulletHopKioskController.exe" `
+            -ArgumentList "--master-election-smoke-test" `
+            -Wait `
+            -PassThru
+          if ($controller.ExitCode -ne 0) {
+            throw "The Systems Controller master-election test failed with exit code $($controller.ExitCode)."
+          }
+          $installer = Start-Process `
+            -FilePath "installer-publish/MulletHopAllProgramsInstaller.exe" `
+            -ArgumentList "--startup-smoke-test" `
+            -Wait `
+            -PassThru
+          if ($installer.ExitCode -ne 0) {
+            throw "The all-programs installer startup test failed with exit code $($installer.ExitCode)."
           }
 
       - name: Install matching Velopack command-line tool
@@ -404,6 +448,7 @@ jobs:
         run: |
           gh release upload `
             "v${{ steps.version.outputs.value }}" `
+            "MulletHop-All-Programs-Installer.exe" `
             "Mullet-Hop-Systems-Controller-${{ steps.controller_version.outputs.value }}.zip" `
             "Mullet-Hop-POS-${{ steps.pos_version.outputs.value }}.zip" `
             'ControllerReleases/*' `
@@ -422,6 +467,7 @@ jobs:
             ControllerReleases/releases.*.json
             PosReleases/*-Setup.exe
             PosReleases/releases.*.json
+            MulletHop-All-Programs-Installer.exe
             Mullet-Hop-Systems-Controller-${{ steps.controller_version.outputs.value }}.zip
             Mullet-Hop-POS-${{ steps.pos_version.outputs.value }}.zip
           if-no-files-found: error

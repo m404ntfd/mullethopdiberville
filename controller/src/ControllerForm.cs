@@ -41,6 +41,7 @@ internal sealed class ControllerForm : Form
         Color.FromArgb(38, 205, 91), Color.FromArgb(23, 75, 42));
     private readonly Label _masterStatus = new();
     private readonly Button _masterToggleButton = new();
+    private readonly Button _masterPriorityButton = new();
     private readonly NotifyIcon _trayIcon = new();
     private readonly ContextMenuStrip _trayMenu = new();
     private readonly HashSet<string> _checkedKioskIds = new(StringComparer.Ordinal);
@@ -656,7 +657,7 @@ internal sealed class ControllerForm : Form
         var masterPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 4,
+            ColumnCount = 5,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = new Padding(0, 3, 0, 3)
@@ -664,7 +665,8 @@ internal sealed class ControllerForm : Form
         masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
         masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
         masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 135));
+        masterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145));
         _masterRed.Dock = DockStyle.Fill;
         _masterRed.Margin = new Padding(1);
         _masterGreen.Dock = DockStyle.Fill;
@@ -680,10 +682,19 @@ internal sealed class ControllerForm : Form
         _masterToggleButton.FlatStyle = FlatStyle.Flat;
         _masterToggleButton.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
         _masterToggleButton.Click += async (_, _) => await ToggleMasterAsync();
+        _masterPriorityButton.Dock = DockStyle.Fill;
+        _masterPriorityButton.Margin = new Padding(3, 1, 0, 1);
+        _masterPriorityButton.FlatStyle = FlatStyle.Flat;
+        _masterPriorityButton.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+        _masterPriorityButton.Text = "Master Priority";
+        _masterPriorityButton.BackColor = Color.FromArgb(105, 210, 236);
+        _masterPriorityButton.ForeColor = Color.FromArgb(16, 24, 32);
+        _masterPriorityButton.Click += (_, _) => OpenMasterPriority();
         masterPanel.Controls.Add(_masterRed, 0, 0);
         masterPanel.Controls.Add(_masterGreen, 1, 0);
         masterPanel.Controls.Add(_masterStatus, 2, 0);
         masterPanel.Controls.Add(_masterToggleButton, 3, 0);
+        masterPanel.Controls.Add(_masterPriorityButton, 4, 0);
 
         var controllerButtons = new TableLayoutPanel
         {
@@ -1135,6 +1146,7 @@ internal sealed class ControllerForm : Form
             _masterStatus.Text = "Remote controller — not eligible for local master";
             _masterToggleButton.Text = "Local Controllers Only";
             _masterToggleButton.Enabled = false;
+            _masterPriorityButton.Enabled = false;
             _masterToggleButton.BackColor = Color.FromArgb(235, 238, 241);
             return;
         }
@@ -1168,6 +1180,7 @@ internal sealed class ControllerForm : Form
         }
         _masterToggleButton.ForeColor = Color.FromArgb(16, 24, 32);
         _masterToggleButton.Enabled = !_masterChangeInProgress;
+        _masterPriorityButton.Enabled = !_masterChangeInProgress;
         if (!_masterConnectionInProgress)
         {
             _pullConnectionsButton.Text = !isMaster && otherMaster is null
@@ -1175,6 +1188,13 @@ internal sealed class ControllerForm : Form
                 : "Pull Connections";
             _pullConnectionsButton.Enabled = !_remoteSettings.IsRemoteMachine;
         }
+    }
+
+    private void OpenMasterPriority()
+    {
+        using var dialog = new MasterPriorityDialog(_state, _server.Peers.Snapshot());
+        dialog.ShowDialog(this);
+        UpdateMasterStatus();
     }
 
     private async Task ToggleMasterAsync()

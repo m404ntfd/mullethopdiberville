@@ -14,6 +14,12 @@ internal static class Program
         // update, and uninstall hooks can finish without opening the dashboard.
         VelopackApp.Build().Run();
 
+        if (args.Contains("--master-election-smoke-test", StringComparer.OrdinalIgnoreCase))
+        {
+            Environment.ExitCode = ControllerMasterElection.SmokeTest() ? 0 : 1;
+            return;
+        }
+
         WaitForPreviousInstance(args);
 
         using var mutex = new Mutex(true, MutexName, out var ownsMutex);

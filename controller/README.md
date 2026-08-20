@@ -23,6 +23,7 @@ computers discover each other, and one can be designated as the master. It provi
 * Local-network kiosk discovery with a required approval prompt on the kiosk.
 * Code-free manual pairing by kiosk IPv4 address, plus a self-contained setup-code fallback.
 * A persistent red/green master-controller indicator with single-master checks.
+* A stable Device-ID master priority list with automatic controller failover.
 
 
 INSTALL THE CONTROLLER PC
@@ -36,8 +37,9 @@ https://github.com/m404ntfd/mullethopdiberville/releases/latest
 2. Right-click Install-Kiosk-Controller.cmd and choose Run as administrator.
 3. Allow the Windows prompt. The installer adds the required private-network
    firewall rule and starts the controller.
-4. Leave the controller installed on a computer whose local IP address will not
-   change. A DHCP reservation in the router is recommended.
+4. Leave the controller installed on a computer with a consistent Windows
+   computer name. DHCP address changes are supported because controllers are
+   saved and elected by permanent Device ID; a router reservation remains optional.
 
 The controller starts automatically when that Windows account signs in. It also
 checks GitHub for controller updates whenever it opens. When an update is found,
@@ -159,6 +161,20 @@ claim the role, they use the saved master time and stable controller ID to
 resolve the conflict automatically, leaving one master. Off-site Remote Mode
 controllers cannot be assigned as the local master.
 
+Select **Master Priority** beside the status lights on the active master to add
+detected controllers or enter a controller Device ID manually, then move the
+eligible computers into the desired order. The priority list is stored locally
+and mirrored to every controller with the kiosk connections, advertisements,
+Business Hours, and Kiosk Appearance profile. Controller IP addresses are only
+last-known routing hints; election identity always uses the permanent Device ID.
+
+If the active master stops responding, controllers wait through a confirmed
+offline interval and the highest-priority reachable Device ID automatically
+becomes master. The delay prevents one missed network check from creating a
+second master. A newly started non-master finds the active master and refreshes
+the complete replica automatically, so every failover candidate has the latest
+settings before it is needed.
+
 
 USE THE DASHBOARD
 -----------------
@@ -191,8 +207,9 @@ Mullet Hop POS and the Systems Controller both ask staff to choose Staff Closure
 Business Closure before they queue a Close command, ensuring the kiosk reports the
 intended red or blue state.
 Business Hours profiles include opening, Last Jump Time Sold, and closing times
-for each day, plus Show Closed Video, Blackout at closing time, and the existing
-pre-opening screensaver setting.
+for each day, plus Show Closed Video at Last Jump time, blackout one minute after
+closing, and the existing pre-opening screensaver setting. A 12:00 AM closing is
+midnight at the end of that business day, not the beginning of it.
 
 Open All and Close All apply to every known station. Close All asks for the closure
 reason before applying it. Offline stations retain the latest queued command and carry it out
@@ -202,8 +219,9 @@ The lower-right Systems Controller Program section includes the controller's own
 Auto/Light/Dark appearance selector, master-controller indicator and toggle,
 plus Check Updates, Systems & POS Updates, Manage Ads, Business Hours, Download Apps, Remote Access,
 Restart Controller, Exit Program, and Pull Connections buttons. Download Apps opens a Software
-Downloads window that finds the latest published Waiver Kiosk installer or Mullet
-Hop POS package, asks where to save it, and shows progress. If a downloaded
+Downloads window that finds the latest published all-programs installer, standalone
+Waiver Kiosk installer, or Mullet Hop POS package, asks where to save it, and shows
+progress. If a downloaded
 update is waiting, Restart Controller offers to install it. Minimizing the window
 or selecting X sends the controller to the Windows system tray while its network
 service continues running. Single-click or double-click the fish-and-springs tray
@@ -249,11 +267,12 @@ MANAGE HOURS AND KIOSK APPEARANCE
 
 Select Business Hours in the Systems Controller Program section. The Business Hours tab
 sets each day's opening, Last Jump Time Sold, and closing time; whether to show
-the Business Closed video at the cutoff; whether to black out at closing; and
-the pre-opening screensaver time. The Business Closed video displays the next
-opening day and time from this synced schedule. The Kiosk Appearance tab selects Auto,
-Light, or Dark for the kiosks and can schedule selected days and a time to switch
-Light kiosks to Dark.
+the Business Closed video at the Last Jump cutoff; whether to black out one minute after
+closing; and the pre-opening screensaver time. The Business Closed video displays
+the next opening day and time from this synced schedule. Closing at 12:00 AM is
+understood as midnight following that day's operating hours. The Kiosk Appearance
+tab selects Auto, Light, or Dark for the kiosks and gives every day its own optional
+time to switch a Light kiosk to Dark. Light is the default theme on a new kiosk.
 
 A scheduled Dark override ends at the next configured business opening. Auto
 then follows the kiosk's Windows setting; if Windows is still using Dark mode,
@@ -284,7 +303,9 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.14.3 adds a responsive windowed layout, preserves
+Systems Controller version 1.15.0 adds Device-ID master priorities, confirmed
+automatic failover, and complete controller replication of kiosk connections,
+advertisements, Business Hours, and Kiosk Appearance settings. Version 1.14.3 adds a responsive windowed layout, preserves
 minimum button sizes, and prevents the header, status, and controller controls from
 overlapping when the application is restored from a maximized window. Version 1.14.2 also accepts incoming discovery, synchronization,
 and command requests from every usable address on the Windows adapter's directly

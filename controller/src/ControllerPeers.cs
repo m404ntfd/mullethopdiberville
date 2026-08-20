@@ -104,6 +104,31 @@ internal sealed record ControllerConnectionPullResult(bool Success, string Messa
 
 internal sealed record ControllerMasterConnectionResult(bool Success, string Message);
 
+internal static class ControllerMasterElection
+{
+    public static MasterPriorityEntry? SelectWinner(
+        IEnumerable<MasterPriorityEntry> priority,
+        IEnumerable<string> reachableControllerIds)
+    {
+        var reachable = reachableControllerIds.ToHashSet(StringComparer.Ordinal);
+        return priority.FirstOrDefault(entry => reachable.Contains(entry.ControllerId));
+    }
+
+    public static bool SmokeTest()
+    {
+        const string first = "11111111111111111111111111111111";
+        const string second = "22222222222222222222222222222222";
+        var priority = new[]
+        {
+            new MasterPriorityEntry { ControllerId = first },
+            new MasterPriorityEntry { ControllerId = second }
+        };
+        return SelectWinner(priority, new[] { first, second })?.ControllerId == first &&
+               SelectWinner(priority, new[] { second })?.ControllerId == second &&
+               SelectWinner(priority, Array.Empty<string>()) is null;
+    }
+}
+
 internal sealed class ControllerPeerCoordinator : IDisposable
 {
     public const string PresencePath = "api/controller/presence";
@@ -120,6 +145,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly SemaphoreSlim _replicaGate = new(1, 1);
+    private readonly DateTime _startedUtc = DateTime.UtcNow;
+    private DateTime? _noMasterSinceUtc;
     private Task? _worker;
     private bool _disposed;
 
@@ -536,6 +563,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                     await ProbeStoredMasterAsync(stored, cancellationToken);
                 }
 
+                await ProbePriorityCandidatesAsync(cancellationToken);
+
                 var known = Snapshot()
                     .Select(peer => peer.ControllerAddress)
                     .Where(address => !string.IsNullOrWhiteSpace(address))
@@ -559,6 +588,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                         _scanGate.Release();
                     }
                 }
+                EvaluateMasterElection();
                 await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
             }
         }
@@ -781,6 +811,11 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             peer.LastSeenUtc = DateTime.UtcNow;
         }
 
+        _state.RememberControllerPresence(
+            presence.ControllerId,
+            presence.MachineName,
+            presence.ControllerAddress);
+
         if (presence.IsMaster && _state.IsMaster && !LocalMasterWins(presence))
         {
             _state.SetMaster(
@@ -794,11 +829,62 @@ internal sealed class ControllerPeerCoordinator : IDisposable
 
     private bool LocalMasterWins(ControllerPeerPresence peer)
     {
+        var localPriority = _state.MasterPriorityRank(_state.ControllerId);
+        var peerPriority = _state.MasterPriorityRank(peer.ControllerId);
+        if (localPriority != peerPriority)
+            return localPriority < peerPriority;
         var localSince = _state.MasterSinceUtc ?? DateTime.MaxValue;
         var peerSince = peer.MasterSinceUtc ?? DateTime.MaxValue;
         var timeComparison = localSince.CompareTo(peerSince);
         return timeComparison < 0 ||
                (timeComparison == 0 && string.CompareOrdinal(_state.ControllerId, peer.ControllerId) < 0);
+    }
+
+    private void EvaluateMasterElection()
+    {
+        if (_state.IsMaster)
+        {
+            _noMasterSinceUtc = null;
+            return;
+        }
+
+        var peers = Snapshot();
+        if (peers.Any(peer => peer.IsMaster))
+        {
+            _noMasterSinceUtc = null;
+            return;
+        }
+
+        var priority = _state.MasterPrioritySnapshot();
+        if (priority.Count == 0 ||
+            !priority.Any(entry =>
+                string.Equals(entry.ControllerId, _state.ControllerId, StringComparison.Ordinal)))
+        {
+            _noMasterSinceUtc = null;
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        _noMasterSinceUtc ??= now;
+        if (now - _startedUtc < TimeSpan.FromSeconds(30) ||
+            now - _noMasterSinceUtc < TimeSpan.FromSeconds(20))
+        {
+            return;
+        }
+
+        var reachable = peers.Select(peer => peer.ControllerId).Append(_state.ControllerId);
+        var winner = ControllerMasterElection.SelectWinner(priority, reachable);
+        if (winner is null ||
+            !string.Equals(winner.ControllerId, _state.ControllerId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _state.SetMaster(
+            true,
+            "automatic failover selected this device ID as the highest-priority reachable controller");
+        _noMasterSinceUtc = null;
+        RaisePeersChanged();
     }
 
     private void RemoveStalePeersLocked()
@@ -1217,6 +1303,44 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 expectedPairingKey: stored.PairingKey);
             if (presence?.IsMaster == true)
                 return;
+        }
+    }
+
+    private async Task ProbePriorityCandidatesAsync(CancellationToken cancellationToken)
+    {
+        var knownIds = Snapshot().Select(peer => peer.ControllerId)
+            .Append(_state.ControllerId)
+            .ToHashSet(StringComparer.Ordinal);
+        var candidates = _state.MasterPrioritySnapshot()
+            .Where(candidate => !knownIds.Contains(candidate.ControllerId))
+            .ToArray();
+        await Parallel.ForEachAsync(
+            candidates,
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = 8
+            },
+            async (candidate, token) => await ProbePriorityCandidateAsync(candidate, token));
+    }
+
+    private async ValueTask ProbePriorityCandidateAsync(
+        MasterPriorityEntry candidate,
+        CancellationToken cancellationToken)
+    {
+        var targets = new List<string>();
+        if (TryNormalizeControllerAddress(candidate.LastKnownAddress, out var savedAddress))
+            targets.Add(savedAddress);
+        if (TryBuildComputerNameAddress(candidate.MachineName, out var computerNameAddress))
+            targets.Add(computerNameAddress);
+        foreach (var target in targets.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var presence = await AnnounceAsync(
+                target,
+                cancellationToken,
+                expectedControllerId: candidate.ControllerId);
+            if (presence is not null)
+                break;
         }
     }
 

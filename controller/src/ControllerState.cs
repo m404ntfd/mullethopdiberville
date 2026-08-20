@@ -141,6 +141,23 @@ internal sealed class ControllerReplicaSnapshot
     public string Revision { get; set; } = string.Empty;
     public DateTime GeneratedUtc { get; set; }
     public List<ManagedKiosk> Kiosks { get; set; } = [];
+    public AdvertisementSyncPackage Advertisements { get; set; } = new();
+    public BusinessHoursSyncPackage BusinessHours { get; set; } = new();
+    public List<MasterPriorityEntry> MasterPriority { get; set; } = [];
+}
+
+internal sealed class MasterPriorityEntry
+{
+    public string ControllerId { get; set; } = string.Empty;
+    public string MachineName { get; set; } = string.Empty;
+    public string LastKnownAddress { get; set; } = string.Empty;
+
+    public MasterPriorityEntry Clone() => new()
+    {
+        ControllerId = ControllerId,
+        MachineName = MachineName,
+        LastKnownAddress = LastKnownAddress
+    };
 }
 
 internal sealed class StoredControllerConnections
@@ -200,6 +217,7 @@ internal sealed class ControllerData
     public bool IsMaster { get; set; }
     public DateTime? MasterSinceUtc { get; set; }
     public StoredMasterControllerConnection? MasterController { get; set; }
+    public List<MasterPriorityEntry> MasterPriority { get; set; } = [];
     public List<ManagedKiosk> Kiosks { get; set; } = [];
     public List<ControllerAdvertisement> Advertisements { get; set; } = [];
     public string AdvertisementRevision { get; set; } = string.Empty;
@@ -263,6 +281,15 @@ internal sealed class ControllerState
             _data.MasterController = null;
             changed = true;
         }
+        if (_data.IsMaster && _data.MasterPriority.Count == 0)
+        {
+            _data.MasterPriority.Add(new MasterPriorityEntry
+            {
+                ControllerId = _data.ControllerId,
+                MachineName = Environment.MachineName
+            });
+            changed = true;
+        }
         if (changed || (_data.IsMaster && !File.Exists(_masterConnectionsPath)))
             SaveLocked();
     }
@@ -299,6 +326,62 @@ internal sealed class ControllerState
     public StoredMasterControllerConnection? MasterControllerSnapshot()
     {
         lock (_gate) return _data.MasterController?.Clone();
+    }
+
+    public IReadOnlyList<MasterPriorityEntry> MasterPrioritySnapshot()
+    {
+        lock (_gate) return _data.MasterPriority.Select(entry => entry.Clone()).ToList();
+    }
+
+    public void SaveMasterPriority(IEnumerable<MasterPriorityEntry> entries)
+    {
+        lock (_gate)
+        {
+            if (!_data.IsMaster)
+                throw new InvalidOperationException(
+                    "Master priority can be changed only on the active master Systems Controller.");
+            var normalized = NormalizeMasterPriority(entries);
+            if (normalized.Count == 0)
+                throw new InvalidOperationException("Add at least one eligible master controller.");
+            _data.MasterPriority = normalized;
+            SaveLocked();
+            ControllerLog.Write(
+                $"Saved master failover priority for {_data.MasterPriority.Count} controller(s).");
+        }
+    }
+
+    public void RememberControllerPresence(
+        string controllerId,
+        string machineName,
+        string controllerAddress)
+    {
+        lock (_gate)
+        {
+            var entry = _data.MasterPriority.FirstOrDefault(candidate =>
+                string.Equals(candidate.ControllerId, controllerId, StringComparison.Ordinal));
+            if (entry is null)
+                return;
+            var cleanName = Clean(machineName, entry.MachineName, 200);
+            var cleanAddress = Clean(controllerAddress, entry.LastKnownAddress, 300);
+            if (string.Equals(entry.MachineName, cleanName, StringComparison.Ordinal) &&
+                string.Equals(entry.LastKnownAddress, cleanAddress, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            entry.MachineName = cleanName;
+            entry.LastKnownAddress = cleanAddress;
+            SaveLocked();
+        }
+    }
+
+    public int MasterPriorityRank(string controllerId)
+    {
+        lock (_gate)
+        {
+            var index = _data.MasterPriority.FindIndex(entry =>
+                string.Equals(entry.ControllerId, controllerId, StringComparison.Ordinal));
+            return index < 0 ? int.MaxValue : index;
+        }
     }
 
     public bool RepairDuplicateControllerIdentity(
@@ -386,7 +469,18 @@ internal sealed class ControllerState
             _data.IsMaster = isMaster;
             _data.MasterSinceUtc = isMaster ? DateTime.UtcNow : null;
             if (isMaster)
+            {
                 _data.MasterController = null;
+                if (!_data.MasterPriority.Any(entry =>
+                        string.Equals(entry.ControllerId, _data.ControllerId, StringComparison.Ordinal)))
+                {
+                    _data.MasterPriority.Insert(0, new MasterPriorityEntry
+                    {
+                        ControllerId = _data.ControllerId,
+                        MachineName = Environment.MachineName
+                    });
+                }
+            }
             SaveLocked();
             ControllerLog.Write(
                 $"Controller master role changed to {(isMaster ? "MASTER" : "NOT MASTER")}: {reason}");
@@ -459,6 +553,7 @@ internal sealed class ControllerState
                 ScheduledDarkEnabled = _data.BusinessHours.ScheduledDarkEnabled,
                 ScheduledDarkDays = _data.BusinessHours.ScheduledDarkDays
                     .Select(day => (int)day).ToArray(),
+                ScheduledDarkTimes = _data.BusinessHours.ScheduledDarkTimes.ToArray(),
                 ScheduledDarkTime = _data.BusinessHours.ScheduledDarkTime,
                 Days = _data.BusinessHours.Days.Select(day => new BusinessHoursSyncItem
                 {
@@ -487,7 +582,27 @@ internal sealed class ControllerState
                 .Select(kiosk => kiosk.Clone())
                 .OrderBy(kiosk => kiosk.StationId, StringComparer.Ordinal)
                 .ToList();
-            var serialized = JsonSerializer.Serialize(kiosks, JsonOptions) + "\n" + _data.PairingKey;
+            AdvertisementSyncPackage advertisements;
+            try
+            {
+                advertisements = CreateAdvertisementSyncPackage();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                ControllerLog.Write(
+                    "Skipped advertisement content in a controller replica: " + ex.Message);
+                advertisements = new AdvertisementSyncPackage();
+            }
+            var businessHours = CreateBusinessHoursSyncPackage();
+            var priority = _data.MasterPriority.Select(entry => entry.Clone()).ToList();
+            var serialized = JsonSerializer.Serialize(new
+            {
+                kiosks,
+                pairingKey = _data.PairingKey,
+                advertisementRevision = advertisements.Revision,
+                businessHoursRevision = _data.BusinessHoursRevision,
+                priority
+            }, JsonOptions);
             return new ControllerReplicaSnapshot
             {
                 MasterControllerId = _data.ControllerId,
@@ -495,7 +610,10 @@ internal sealed class ControllerState
                 PairingKey = _data.PairingKey,
                 Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(serialized))),
                 GeneratedUtc = DateTime.UtcNow,
-                Kiosks = kiosks
+                Kiosks = kiosks,
+                Advertisements = advertisements,
+                BusinessHours = businessHours,
+                MasterPriority = priority
             };
         }
     }
@@ -601,6 +719,23 @@ internal sealed class ControllerState
 
             _data.Kiosks = kiosks;
             _data.PairingKey = replica.PairingKey.Trim();
+            _data.MasterPriority = NormalizeMasterPriority(replica.MasterPriority ?? []);
+            if (!string.IsNullOrWhiteSpace(replica.Advertisements?.Revision) &&
+                !string.Equals(
+                    replica.Advertisements.Revision,
+                    _data.AdvertisementRevision,
+                    StringComparison.Ordinal))
+            {
+                ApplyCloudAdvertisements(replica.Advertisements, replica.GeneratedUtc);
+            }
+            if (!string.IsNullOrWhiteSpace(replica.BusinessHours?.Revision) &&
+                !string.Equals(
+                    replica.BusinessHours.Revision,
+                    _data.BusinessHoursRevision,
+                    StringComparison.Ordinal))
+            {
+                ApplyCloudBusinessHours(replica.BusinessHours, replica.GeneratedUtc);
+            }
             _lastMasterReplicaRevision = replica.Revision;
             SaveLocked();
             ControllerLog.Write(
@@ -1020,6 +1155,11 @@ internal sealed class ControllerState
                     .Where(day => day is >= 0 and <= 6)
                     .Select(day => (DayOfWeek)day).Distinct().ToArray()
                     : _data.BusinessHours.ScheduledDarkDays.ToArray(),
+                ScheduledDarkTimes = package.IncludesAppearanceSettings
+                    ? package.ScheduledDarkTimes?.Length == 7
+                        ? package.ScheduledDarkTimes.ToArray()
+                        : Enumerable.Repeat(package.ScheduledDarkTime, 7).ToArray()
+                    : _data.BusinessHours.ScheduledDarkTimes.ToArray(),
                 ScheduledDarkTime = package.IncludesAppearanceSettings
                     ? package.ScheduledDarkTime
                     : _data.BusinessHours.ScheduledDarkTime,
@@ -1055,6 +1195,7 @@ internal sealed class ControllerState
                        ?? new ControllerData();
             data.ControllerId ??= string.Empty;
             data.MasterController = NormalizeStoredMasterController(data.MasterController);
+            data.MasterPriority = NormalizeMasterPriority(data.MasterPriority ?? []);
             data.Kiosks ??= [];
             data.Advertisements ??= [];
             data.AdvertisementRevision ??= string.Empty;
@@ -1151,6 +1292,22 @@ internal sealed class ControllerState
         stored.PeerAccessKey = stored.PeerAccessKey.Trim();
         return stored;
     }
+
+    private static List<MasterPriorityEntry> NormalizeMasterPriority(
+        IEnumerable<MasterPriorityEntry> entries) =>
+        entries
+            .Where(entry => entry is not null &&
+                            Guid.TryParseExact(entry.ControllerId, "N", out _))
+            .Select(entry => new MasterPriorityEntry
+            {
+                ControllerId = entry.ControllerId.Trim(),
+                MachineName = Clean(entry.MachineName, "Systems Controller", 200),
+                LastKnownAddress = Clean(entry.LastKnownAddress, string.Empty, 300)
+            })
+            .GroupBy(entry => entry.ControllerId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .Take(32)
+            .ToList();
 
     private static string DescribeQueuedCommand(string type, bool? closed) => type switch
     {

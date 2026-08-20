@@ -221,14 +221,28 @@ internal sealed partial class KioskForm
             if (string.IsNullOrWhiteSpace(package.Revision))
                 throw new InvalidDataException("The kiosk manager has not published a Business Hours profile yet.");
             if (package.Days.Count != 7 || package.Days.Select(day => day.Day).Distinct().Count() != 7 ||
-                package.Days.Any(day => day.Day is < 0 or > 6 ||
-                    (day.IsOpen && (day.CloseTime <= day.OpenTime ||
-                     (package.IncludesClosureSettings &&
-                      (day.LastJumpTimeSold <= day.OpenTime ||
-                       day.LastJumpTimeSold > day.CloseTime))))) ||
+                package.Days.Any(day =>
+                {
+                    if (day.Day is < 0 or > 6) return true;
+                    if (!day.IsOpen) return false;
+                    var schedule = new KioskBusinessDayHours
+                    {
+                        Day = (DayOfWeek)day.Day,
+                        IsOpen = true,
+                        OpenTime = day.OpenTime,
+                        LastJumpTimeSold = package.IncludesClosureSettings
+                            ? day.LastJumpTimeSold
+                            : day.CloseTime,
+                        CloseTime = day.CloseTime
+                    };
+                    return !schedule.HasValidTimes() || !schedule.HasValidLastJumpTime();
+                }) ||
                 (package.IncludesAppearanceSettings &&
                     (package.ThemeMode is < 0 or > 2 ||
-                     (package.ScheduledDarkDays ?? []).Any(day => day is < 0 or > 6))))
+                     (package.ScheduledDarkDays ?? []).Any(day => day is < 0 or > 6) ||
+                     (package.ScheduledDarkTimes?.Length is > 0 and not 7) ||
+                     (package.ScheduledDarkTimes ?? []).Any(time =>
+                         time < TimeSpan.Zero || time >= TimeSpan.FromDays(1)))))
                 throw new InvalidDataException("The manager Business Hours profile is invalid.");
 
             var oldEnabled = _settings.BusinessHoursEnabled;
@@ -239,6 +253,7 @@ internal sealed partial class KioskForm
             var oldThemeMode = _settings.ThemeMode;
             var oldScheduledDarkEnabled = _settings.ScheduledDarkEnabled;
             var oldScheduledDarkDays = _settings.ScheduledDarkDays;
+            var oldScheduledDarkTimes = _settings.ScheduledDarkTimes;
             var oldScheduledDarkTime = _settings.ScheduledDarkTime;
             var oldRevision = _settings.BusinessHoursSyncRevision;
             var oldLastSync = _settings.BusinessHoursLastSyncUtc;
@@ -258,6 +273,9 @@ internal sealed partial class KioskForm
                     _settings.ScheduledDarkEnabled = package.ScheduledDarkEnabled;
                     _settings.ScheduledDarkDays = (package.ScheduledDarkDays ?? [])
                         .Select(day => (DayOfWeek)day).Distinct().ToArray();
+                    _settings.ScheduledDarkTimes = package.ScheduledDarkTimes?.Length == 7
+                        ? package.ScheduledDarkTimes.ToArray()
+                        : Enumerable.Repeat(package.ScheduledDarkTime, 7).ToArray();
                     _settings.ScheduledDarkTime = package.ScheduledDarkTime;
                 }
                 _settings.BusinessHours = package.Days.Select(day => new KioskBusinessDayHours
@@ -286,6 +304,7 @@ internal sealed partial class KioskForm
                 _settings.ThemeMode = oldThemeMode;
                 _settings.ScheduledDarkEnabled = oldScheduledDarkEnabled;
                 _settings.ScheduledDarkDays = oldScheduledDarkDays;
+                _settings.ScheduledDarkTimes = oldScheduledDarkTimes;
                 _settings.ScheduledDarkTime = oldScheduledDarkTime;
                 _settings.BusinessHoursSyncRevision = oldRevision;
                 _settings.BusinessHoursLastSyncUtc = oldLastSync;
@@ -799,6 +818,7 @@ internal sealed class BusinessHoursSyncPackage
     public int ThemeMode { get; set; }
     public bool ScheduledDarkEnabled { get; set; }
     public int[] ScheduledDarkDays { get; set; } = [];
+    public TimeSpan[] ScheduledDarkTimes { get; set; } = [];
     public TimeSpan ScheduledDarkTime { get; set; }
     public List<BusinessHoursSyncItem> Days { get; set; } = [];
 }

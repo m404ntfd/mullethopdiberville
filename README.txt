@@ -25,23 +25,28 @@ SOURCE FOLDER LAYOUT
 * pos-controller\install\ contains its installer and uninstaller.
 * pos-controller\README.md contains Mullet Hop POS, Firefox, status, and linking instructions.
 * assets\ and scripts\ contain kiosk branding and screensaver build files.
-* MulletHopKioskSuite.sln opens all three Windows applications together in Visual
+* installer\src\ contains the single all-programs installer application.
+* MulletHopKioskSuite.sln opens all four Windows applications together in Visual
   Studio.
 
-The three applications remain separate installers, settings, and update channels,
-but they are built and released
-together so their local-network commands remain compatible.
+The three operating applications retain separate settings and update channels.
+They are built and released together, and the all-programs installer lets staff
+choose any combination from one Windows application.
 
 
 QUICK INSTALL
 -------------
 
 1. Open https://github.com/m404ntfd/mullethopdiberville/releases/latest.
-2. Download MulletHop.WaiverKiosk-Setup.exe.
-3. Exit an older copy of the kiosk with Ctrl + Alt + M.
-4. Run the downloaded Setup file. This first Velopack installation is required
+2. Download MulletHop-All-Programs-Installer.exe to choose the Waiver Kiosk,
+   Systems Controller, Mullet Hop POS, or any combination. The individual setup
+   packages remain available when only one standalone installer is needed.
+3. For a kiosk-only standalone installation, download
+   MulletHop.WaiverKiosk-Setup.exe.
+4. Exit an older copy of the kiosk with Ctrl + Alt + M.
+5. Run the downloaded installer. This first Velopack installation is required
    once; later versions install automatically.
-5. The kiosk opens after installation. Existing staff passwords, settings, and
+6. The kiosk opens after installation. Existing staff passwords, settings, and
    advertisement files are retained. A fresh computer asks you to create a
    4-8 digit numerical staff password.
 
@@ -96,8 +101,14 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.8, Systems Controller version 1.14.3, and Mullet Hop POS
-version 1.7.2 are the matching package releases. Systems Controller 1.14.3 uses
+Waiver Kiosk version 2.11.9, Systems Controller version 1.15.0, and Mullet Hop POS
+version 1.7.2 are the matching package releases. Kiosk 2.11.9 treats a 12:00 AM
+closing as next-day midnight, plays the closure video at Last Jump Time Sold,
+blacks out one minute after closing, supports a separate Dark-mode switch time
+for every day, and defaults new installations to Light. Systems Controller 1.15.0
+adds an ordered Device-ID master list, confirmed automatic failover, and complete
+replication of kiosk connections, advertisements, Business Hours, and appearance
+settings to every controller. Systems Controller 1.14.3 uses
 a responsive windowed layout with protected button sizes, a larger restore size,
 and non-overlapping header and summary sections. Mullet Hop POS 1.7.2 requests
 LilyPad's POS/location choices after username input settles and no longer reapplies
@@ -168,6 +179,15 @@ another reachable master exists, the change is refused. When two controllers
 that were temporarily isolated see each other again, they automatically resolve
 the duplicate role so only one remains master. The green lens is lit on the
 master; the red lens is lit on every non-master controller.
+
+Select Master Priority beside the status lights on the active master to add
+detected controllers or manually enter a controller Device ID, then move them
+into the required order. Device IDs, not IP addresses, decide the election. Each
+controller keeps the last address and computer name only to find that same
+Device ID after DHCP changes. When the master stops responding for the protected
+offline interval, the highest-priority reachable candidate promotes itself. A
+controller refreshes the full master replica on startup so the failover copy has
+current kiosk connections, ads, business hours, and appearance settings.
 
 Controller version 1.1.0 or newer must be installed once with its Setup-based
 package to establish automatic updates. When a controller update is downloaded,

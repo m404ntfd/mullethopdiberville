@@ -6,6 +6,7 @@ namespace MulletHopKioskController;
 
 internal enum SoftwareDownloadKind
 {
+    AllPrograms,
     WaiverKiosk,
     MulletHopPos
 }
@@ -81,9 +82,12 @@ internal static class SoftwareDownloadService
 
         if (bestAsset is null || bestScore < 0)
         {
-            var product = kind == SoftwareDownloadKind.WaiverKiosk
-                ? "Waiver Kiosk installer"
-                : "Mullet Hop POS package";
+            var product = kind switch
+            {
+                SoftwareDownloadKind.AllPrograms => "Mullet Hop All Programs installer",
+                SoftwareDownloadKind.WaiverKiosk => "Waiver Kiosk installer",
+                _ => "Mullet Hop POS package"
+            };
             throw new InvalidOperationException(
                 $"The latest release does not contain a {product}.");
         }
@@ -150,6 +154,16 @@ internal static class SoftwareDownloadService
     {
         if (string.IsNullOrWhiteSpace(name))
             return -1;
+
+        if (kind == SoftwareDownloadKind.AllPrograms)
+        {
+            return string.Equals(
+                name,
+                "MulletHop-All-Programs-Installer.exe",
+                StringComparison.OrdinalIgnoreCase)
+                ? 500
+                : -1;
+        }
 
         if (kind == SoftwareDownloadKind.MulletHopPos)
         {
@@ -218,6 +232,7 @@ internal static class SoftwareDownloadService
 
 internal sealed class SoftwareDownloadsDialog : Form
 {
+    private readonly Button _allProgramsButton = new();
     private readonly Button _kioskButton = new();
     private readonly Button _posButton = new();
     private readonly Button _releasePageButton = new();
@@ -234,7 +249,7 @@ internal sealed class SoftwareDownloadsDialog : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(730, 430);
+        ClientSize = new Size(730, 520);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(244, 248, 251);
 
@@ -242,12 +257,13 @@ internal sealed class SoftwareDownloadsDialog : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 8,
             Padding = new Padding(18),
             Margin = Padding.Empty
         };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
@@ -274,17 +290,23 @@ internal sealed class SoftwareDownloadsDialog : Form
         layout.Controls.Add(heading, 0, 0);
         layout.Controls.Add(introduction, 0, 1);
         layout.Controls.Add(BuildDownloadRow(
+            "All Mullet Hop Programs",
+            "Downloads one installer that lets you select the Kiosk, Systems Controller, POS, or any combination.",
+            _allProgramsButton,
+            "Download All-Programs Installer",
+            Color.FromArgb(105, 210, 236)), 0, 2);
+        layout.Controls.Add(BuildDownloadRow(
             "Waiver Kiosk",
             "Downloads the current Windows Setup installer for a waiver kiosk computer.",
             _kioskButton,
             "Download Kiosk Installer",
-            Color.FromArgb(118, 196, 66)), 0, 2);
+            Color.FromArgb(118, 196, 66)), 0, 3);
         layout.Controls.Add(BuildDownloadRow(
             "Mullet Hop POS",
             "Downloads the complete POS package, including its installer and instructions.",
             _posButton,
             "Download POS Package",
-            Color.FromArgb(245, 130, 32)), 0, 3);
+            Color.FromArgb(245, 130, 32)), 0, 4);
 
         _statusLabel.Dock = DockStyle.Fill;
         _statusLabel.Text = "Ready to download.";
@@ -296,8 +318,8 @@ internal sealed class SoftwareDownloadsDialog : Form
         _progressBar.Minimum = 0;
         _progressBar.Maximum = 100;
         _progressBar.Value = 0;
-        layout.Controls.Add(_statusLabel, 0, 4);
-        layout.Controls.Add(_progressBar, 0, 5);
+        layout.Controls.Add(_statusLabel, 0, 5);
+        layout.Controls.Add(_progressBar, 0, 6);
 
         var footer = new FlowLayoutPanel
         {
@@ -311,10 +333,11 @@ internal sealed class SoftwareDownloadsDialog : Form
         ConfigureFooterButton(_releasePageButton, "Open Latest Release Page", Color.FromArgb(8, 119, 189), Color.White);
         footer.Controls.Add(_closeButton);
         footer.Controls.Add(_releasePageButton);
-        layout.Controls.Add(footer, 0, 6);
+        layout.Controls.Add(footer, 0, 7);
 
         Controls.Add(layout);
         CancelButton = _closeButton;
+        _allProgramsButton.Click += async (_, _) => await DownloadAsync(SoftwareDownloadKind.AllPrograms);
         _kioskButton.Click += async (_, _) => await DownloadAsync(SoftwareDownloadKind.WaiverKiosk);
         _posButton.Click += async (_, _) => await DownloadAsync(SoftwareDownloadKind.MulletHopPos);
         _releasePageButton.Click += (_, _) => OpenLatestReleasePage();
@@ -424,9 +447,12 @@ internal sealed class SoftwareDownloadsDialog : Form
             var asset = await SoftwareDownloadService.FindLatestAssetAsync(kind, cancellation.Token);
             using var saveDialog = new SaveFileDialog
             {
-                Title = kind == SoftwareDownloadKind.WaiverKiosk
-                    ? "Save Waiver Kiosk installer"
-                    : "Save Mullet Hop POS package",
+                Title = kind switch
+                {
+                    SoftwareDownloadKind.AllPrograms => "Save Mullet Hop All Programs installer",
+                    SoftwareDownloadKind.WaiverKiosk => "Save Waiver Kiosk installer",
+                    _ => "Save Mullet Hop POS package"
+                },
                 FileName = asset.Name,
                 Filter = asset.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
                     ? "ZIP package (*.zip)|*.zip|All files (*.*)|*.*"
@@ -519,6 +545,7 @@ internal sealed class SoftwareDownloadsDialog : Form
 
     private void SetBusy(bool busy)
     {
+        _allProgramsButton.Enabled = !busy;
         _kioskButton.Enabled = !busy;
         _posButton.Enabled = !busy;
         _releasePageButton.Enabled = !busy;

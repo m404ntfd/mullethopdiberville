@@ -48,7 +48,10 @@ internal static class KioskTheme
             {
                 var date = now.Date.AddDays(-offset);
                 if (!settings.ScheduledDarkDays.Contains(date.DayOfWeek)) continue;
-                var start = date + settings.ScheduledDarkTime;
+                var time = settings.ScheduledDarkTimes.Length == 7
+                    ? settings.ScheduledDarkTimes[(int)date.DayOfWeek]
+                    : settings.ScheduledDarkTime;
+                var start = date + time;
                 if (start > now) continue;
 
                 var release = FindFollowingBusinessOpening(settings, start);

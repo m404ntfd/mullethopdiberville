@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>MulletHopAllProgramsInstaller</AssemblyName>
+    <RootNamespace>MulletHopInstaller</RootNamespace>
+    <AssemblyTitle>Mullet Hop All Programs Installer</AssemblyTitle>
+    <ApplicationIcon>..\..\assets\MulletHopFish.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Authors>Mullet Hop</Authors>
+    <Product>Mullet Hop All Programs Installer</Product>
+    <Description>Installs the Mullet Hop Waiver Kiosk, Systems Controller, and POS applications.</Description>
+  </PropertyGroup>
+</Project>
