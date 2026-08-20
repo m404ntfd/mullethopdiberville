@@ -69,7 +69,7 @@ internal static class PosUpdater
         {
             return new PosUpdateResult(
                 PosUpdateStatus.NotConfigured,
-                "This POS Controller build was not created by the GitHub release workflow.");
+                "This Kiosk Status Viewer build was not created by the GitHub release workflow.");
         }
 
         try
@@ -82,17 +82,17 @@ internal static class PosUpdater
                 _stagedUpdate = null;
                 return new PosUpdateResult(
                     PosUpdateStatus.UpToDate,
-                    $"POS Controller version {CurrentVersion} is up to date.");
+                    $"Kiosk Status Viewer version {CurrentVersion} is up to date.");
             }
 
             await manager.DownloadUpdatesAsync(update);
             _stagedManager = manager;
             _stagedUpdate = update;
             PosLog.Write(
-                $"POS Controller update {update.TargetFullRelease.Version} is downloaded and ready to install.");
+                $"Kiosk Status Viewer update {update.TargetFullRelease.Version} is downloaded and ready to install.");
             return new PosUpdateResult(
                 PosUpdateStatus.ReadyToInstall,
-                $"POS Controller version {update.TargetFullRelease.Version} has been downloaded. " +
+                $"Kiosk Status Viewer version {update.TargetFullRelease.Version} has been downloaded. " +
                 $"This computer currently has version {CurrentVersion}.");
         }
         catch (Exception ex) when (
@@ -100,15 +100,15 @@ internal static class PosUpdater
         {
             return new PosUpdateResult(
                 PosUpdateStatus.NotInstalled,
-                "POS Controller updates begin after installing the application with its Setup file.");
+                "Kiosk Status Viewer updates begin after installing the application with its Setup file.");
         }
         catch (Exception ex)
         {
-            PosLog.Write("POS Controller update check/download error: " +
+            PosLog.Write("Kiosk Status Viewer update check/download error: " +
                 ex.GetType().Name + " - " + ex.Message);
             return new PosUpdateResult(
                 PosUpdateStatus.Failed,
-                "The POS Controller update check failed. Verify the internet connection and try again.");
+                "The Kiosk Status Viewer update check failed. Verify the internet connection and try again.");
         }
     }
 
@@ -118,24 +118,24 @@ internal static class PosUpdater
         {
             return new PosUpdateResult(
                 PosUpdateStatus.UpToDate,
-                "No downloaded POS Controller update is waiting to be installed.");
+                "No downloaded Kiosk Status Viewer update is waiting to be installed.");
         }
 
         try
         {
-            PosLog.Write("The downloaded POS Controller update is being applied.");
+            PosLog.Write("The downloaded Kiosk Status Viewer update is being applied.");
             _stagedManager.ApplyUpdatesAndRestart(_stagedUpdate);
             return new PosUpdateResult(
                 PosUpdateStatus.Applying,
-                "The POS Controller update is installing. The application will restart automatically.");
+                "The Kiosk Status Viewer update is installing. The application will restart automatically.");
         }
         catch (Exception ex)
         {
-            PosLog.Write("POS Controller update error: " +
+            PosLog.Write("Kiosk Status Viewer update error: " +
                 ex.GetType().Name + " - " + ex.Message);
             return new PosUpdateResult(
                 PosUpdateStatus.Failed,
-                "The POS Controller update failed. Verify the internet connection and try again.");
+                "The Kiosk Status Viewer update failed. Verify the internet connection and try again.");
         }
     }
 

@@ -76,7 +76,7 @@ internal sealed partial class KioskForm
                     Form.ActiveForm ?? this,
                     $"The Kiosk Controller on {payload.ControllerName} is requesting permission to add this waiver kiosk.\n\n" +
                     $"Controller address: {payload.ControllerAddress}\n\n" +
-                    "If allowed, the controller and linked POS Controller can view this kiosk's status and send Open, Close, and Reset commands." +
+                    "If allowed, the controller and linked Kiosk Status Viewer can view this kiosk's status and send Open, Close, and Reset commands." +
                     replacing +
                     "\n\nOnly allow this request if you recognize the controller computer.",
                     "Allow Kiosk Controller?",
