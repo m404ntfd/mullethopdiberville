@@ -21,6 +21,10 @@ internal sealed class PosControllerForm : Form
     private readonly ContextMenuStrip _trayMenu = new();
     private readonly Panel _sidebar = new();
     private readonly Panel _browserPanel = new();
+    private readonly Panel _browserHostPanel = new();
+    private readonly Panel _browserErrorPanel = new();
+    private readonly Label _browserErrorLabel = new();
+    private readonly Button _browserRestartButton = new();
     private readonly Label _brandTitle = new();
     private readonly PictureBox _brandLogo = new();
     private readonly TableLayoutPanel _brandLayout = new();
@@ -55,8 +59,9 @@ internal sealed class PosControllerForm : Form
         SetSidebarExpanded(expanded: true);
         ConfigureTrayIcon();
 
-        _firefoxHost = new FirefoxHost(_browserPanel);
+        _firefoxHost = new FirefoxHost(_browserHostPanel);
         _firefoxHost.StatusChanged += (_, status) => SetBrowserStatus(status);
+        _firefoxHost.CrashDetected += (_, message) => ShowFirefoxCrash(message);
         _refreshTimer.Tick += async (_, _) => await RefreshStatusesAsync();
         Shown += async (_, _) =>
         {
@@ -84,6 +89,9 @@ internal sealed class PosControllerForm : Form
         _browserPanel.BackColor = Color.FromArgb(239, 244, 248);
         _browserPanel.Padding = Padding.Empty;
 
+        _browserHostPanel.Dock = DockStyle.Fill;
+        _browserHostPanel.BackColor = Color.FromArgb(239, 244, 248);
+
         _browserStatus.Dock = DockStyle.Fill;
         _browserStatus.Text = "Starting Firefox and loading LilyPad POS…";
         _browserStatus.TextAlign = ContentAlignment.MiddleCenter;
@@ -91,7 +99,31 @@ internal sealed class PosControllerForm : Form
         _browserStatus.ForeColor = Color.FromArgb(83, 97, 109);
         _browserStatus.BackColor = Color.FromArgb(239, 244, 248);
         _browserStatus.Padding = new Padding(40);
-        _browserPanel.Controls.Add(_browserStatus);
+        _browserHostPanel.Controls.Add(_browserStatus);
+
+        _browserErrorPanel.Dock = DockStyle.Top;
+        _browserErrorPanel.Height = 82;
+        _browserErrorPanel.Visible = false;
+        _browserErrorPanel.BackColor = Color.FromArgb(187, 34, 46);
+        _browserErrorPanel.Padding = new Padding(18, 12, 18, 12);
+        _browserErrorLabel.Dock = DockStyle.Fill;
+        _browserErrorLabel.ForeColor = Color.White;
+        _browserErrorLabel.Font = new Font("Segoe UI", 12, FontStyle.Bold);
+        _browserErrorLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _browserErrorLabel.Padding = new Padding(8, 0, 12, 0);
+        _browserRestartButton.Text = "RELOAD LILYPAD";
+        _browserRestartButton.Dock = DockStyle.Right;
+        _browserRestartButton.Width = 190;
+        _browserRestartButton.BackColor = Color.White;
+        _browserRestartButton.ForeColor = Color.FromArgb(133, 19, 31);
+        _browserRestartButton.FlatStyle = FlatStyle.Flat;
+        _browserRestartButton.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        _browserRestartButton.Click += (_, _) => RestartFirefox();
+        _browserErrorPanel.Controls.Add(_browserErrorLabel);
+        _browserErrorPanel.Controls.Add(_browserRestartButton);
+
+        _browserPanel.Controls.Add(_browserHostPanel);
+        _browserPanel.Controls.Add(_browserErrorPanel);
         return _browserPanel;
     }
 
@@ -205,7 +237,7 @@ internal sealed class PosControllerForm : Form
 
         ConfigureSidebarButton(_reloadBrowserButton, "RELOAD LILYPAD",
             Color.FromArgb(8, 119, 189), Color.White);
-        _reloadBrowserButton.Click += (_, _) => _firefoxHost?.ReloadHomePage();
+        _reloadBrowserButton.Click += (_, _) => RestartFirefox();
         panel.Controls.Add(_reloadBrowserButton, 0, 1);
         panel.SetColumnSpan(_reloadBrowserButton, 2);
 
@@ -627,6 +659,33 @@ internal sealed class PosControllerForm : Form
             : Color.FromArgb(255, 170, 176);
     }
 
+    private void RestartFirefox()
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(RestartFirefox));
+            return;
+        }
+
+        _browserErrorPanel.Visible = false;
+        SetBrowserStatus("Restarting Firefox and loading LilyPad POS…");
+        _firefoxHost?.Restart();
+    }
+
+    private void ShowFirefoxCrash(string message)
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(() => ShowFirefoxCrash(message)));
+            return;
+        }
+
+        _browserErrorLabel.Text = message;
+        _browserErrorPanel.Visible = true;
+        _browserErrorPanel.BringToFront();
+        _browserStatus.Visible = false;
+    }
+
     private void SetBrowserStatus(string text)
     {
         if (InvokeRequired)
@@ -635,7 +694,10 @@ internal sealed class PosControllerForm : Form
             return;
         }
         _browserStatus.Text = text;
-        _browserStatus.Visible = !text.Contains("is running", StringComparison.OrdinalIgnoreCase);
+        var running = text.Contains("is running", StringComparison.OrdinalIgnoreCase);
+        if (running)
+            _browserErrorPanel.Visible = false;
+        _browserStatus.Visible = !running && !_browserErrorPanel.Visible;
         if (_browserStatus.Visible)
             _browserStatus.BringToFront();
     }
@@ -707,7 +769,7 @@ internal sealed class KioskClosureDialog : Form
         };
         var explanation = new Label
         {
-            Text = "Staff Closure shows red. Business Closure starts the black business-hours screen and shows blue.",
+            Text = "Staff Closure shows red. Business Closure starts the Business Closed video and shows blue.",
             Dock = DockStyle.Top,
             Height = 52,
             Padding = new Padding(24, 0, 24, 8),

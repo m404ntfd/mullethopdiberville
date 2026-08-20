@@ -25,6 +25,7 @@ internal sealed class ControllerForm : Form
     private readonly Button _controllerUpdateButton = new();
     private readonly Button _manageAdsButton = new();
     private readonly Button _businessHoursButton = new();
+    private readonly Button _softwareDownloadsButton = new();
     private readonly Button _remoteAccessButton = new();
     private readonly Button _restartControllerButton = new();
     private readonly Button _closeControllerButton = new();
@@ -86,7 +87,11 @@ internal sealed class ControllerForm : Form
         _lastResolvedDarkMode = ControllerTheme.IsDark;
         ControllerTheme.Apply(this);
 
-        _refreshTimer.Tick += (_, _) => RefreshKioskList();
+        _refreshTimer.Tick += (_, _) =>
+        {
+            RefreshKioskList();
+            UpdateMasterStatus();
+        };
         Shown += async (_, _) =>
         {
             StartControllerServices();
@@ -345,6 +350,11 @@ internal sealed class ControllerForm : Form
                 "Discover Waiver Kiosks", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+        if (!_state.IsMaster)
+        {
+            ShowMasterOnlyMessage("Discover Waiver Kiosks");
+            return;
+        }
         if (!_server.IsRunning)
         {
             MessageBox.Show(this,
@@ -365,6 +375,11 @@ internal sealed class ControllerForm : Form
             MessageBox.Show(this,
                 "Manual kiosk setup is available only from the on-site controller computer on the same local network as the waiver kiosk.",
                 "Add Kiosk Manually", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (!_state.IsMaster)
+        {
+            ShowMasterOnlyMessage("Add Kiosk Manually");
             return;
         }
         if (!_server.IsRunning)
@@ -470,17 +485,17 @@ internal sealed class ControllerForm : Form
         ConfigureTableActionButton(_closeButton, "Close Selected", Color.FromArgb(245, 130, 32));
         ConfigureTableActionButton(_checkUpdateButton, "Check Kiosk Update", Color.FromArgb(105, 210, 236));
         ConfigureTableActionButton(_installUpdateButton, "Install Kiosk Update", Color.FromArgb(117, 68, 154), Color.White);
-        _openButton.Click += (_, _) => QueueSelected(CommandTypes.SetClosed, false);
-        _closeButton.Click += (_, _) => QueueSelected(CommandTypes.SetClosed, true);
-        _checkUpdateButton.Click += (_, _) => QueueSelected(CommandTypes.CheckUpdate);
-        _installUpdateButton.Click += (_, _) => InstallSelectedUpdate();
+        _openButton.Click += async (_, _) => await QueueSelectedAsync(CommandTypes.SetClosed, false);
+        _closeButton.Click += async (_, _) => await QueueSelectedAsync(CommandTypes.SetClosed, true);
+        _checkUpdateButton.Click += async (_, _) => await QueueSelectedAsync(CommandTypes.CheckUpdate);
+        _installUpdateButton.Click += async (_, _) => await InstallSelectedUpdateAsync();
 
         var openAll = new Button();
         ConfigureTableActionButton(openAll, "Open All", Color.FromArgb(210, 239, 190));
-        openAll.Click += (_, _) => QueueForAll(CommandTypes.SetClosed, false);
+        openAll.Click += async (_, _) => await QueueForAllAsync(CommandTypes.SetClosed, false);
         var closeAll = new Button();
         ConfigureTableActionButton(closeAll, "Close All", Color.FromArgb(255, 217, 188));
-        closeAll.Click += (_, _) => CloseAllKiosks();
+        closeAll.Click += async (_, _) => await CloseAllKiosksAsync();
         kioskButtons.Controls.Add(_openButton, 0, 0);
         kioskButtons.Controls.Add(_closeButton, 1, 0);
         kioskButtons.Controls.Add(_checkUpdateButton, 2, 0);
@@ -595,18 +610,19 @@ internal sealed class ControllerForm : Form
         var controllerButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            ColumnCount = 4,
             RowCount = 2,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
-        for (var index = 0; index < 3; index++)
-            controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+        for (var index = 0; index < 4; index++)
+            controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
         controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         ConfigureTableActionButton(_controllerUpdateButton, "Check Updates", Color.FromArgb(8, 119, 189), Color.White);
         ConfigureTableActionButton(_manageAdsButton, "Manage Ads", Color.FromArgb(117, 68, 154), Color.White);
         ConfigureTableActionButton(_businessHoursButton, "Business Hours", Color.FromArgb(118, 196, 66));
+        ConfigureTableActionButton(_softwareDownloadsButton, "Download Apps", Color.FromArgb(8, 119, 189), Color.White);
         ConfigureTableActionButton(_remoteAccessButton, "Remote Access", Color.FromArgb(105, 210, 236));
         ConfigureTableActionButton(_restartControllerButton, "Restart Controller", Color.FromArgb(245, 130, 32));
         ConfigureTableActionButton(_closeControllerButton, "Exit Program", Color.FromArgb(180, 35, 24), Color.White);
@@ -615,6 +631,7 @@ internal sealed class ControllerForm : Form
                      _controllerUpdateButton,
                      _manageAdsButton,
                      _businessHoursButton,
+                     _softwareDownloadsButton,
                      _remoteAccessButton,
                      _restartControllerButton,
                      _closeControllerButton
@@ -627,15 +644,30 @@ internal sealed class ControllerForm : Form
         _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync(showUpToDateMessage: true);
         _manageAdsButton.Click += (_, _) =>
         {
+            if (!_state.IsMaster && !_remoteSettings.IsRemoteMachine)
+            {
+                ShowMasterOnlyMessage("Manage Advertisements");
+                return;
+            }
             using var advertisements = new ControllerAdvertisementManagerDialog(_state);
             advertisements.ShowDialog(this);
             RefreshKioskList();
         };
         _businessHoursButton.Click += (_, _) =>
         {
+            if (!_state.IsMaster && !_remoteSettings.IsRemoteMachine)
+            {
+                ShowMasterOnlyMessage("Business Hours");
+                return;
+            }
             using var businessHours = new ControllerBusinessHoursDialog(_state, SelectedStationId());
             businessHours.ShowDialog(this);
             RefreshKioskList();
+        };
+        _softwareDownloadsButton.Click += (_, _) =>
+        {
+            using var downloads = new SoftwareDownloadsDialog();
+            downloads.ShowDialog(this);
         };
         _remoteAccessButton.Click += (_, _) => OpenRemoteAccessSettings();
         _restartControllerButton.Click += (_, _) => RestartController();
@@ -643,6 +675,7 @@ internal sealed class ControllerForm : Form
         controllerButtons.Controls.Add(_controllerUpdateButton, 0, 0);
         controllerButtons.Controls.Add(_manageAdsButton, 1, 0);
         controllerButtons.Controls.Add(_businessHoursButton, 2, 0);
+        controllerButtons.Controls.Add(_softwareDownloadsButton, 3, 0);
         controllerButtons.Controls.Add(_remoteAccessButton, 0, 1);
         controllerButtons.Controls.Add(_restartControllerButton, 1, 1);
         controllerButtons.Controls.Add(_closeControllerButton, 2, 1);
@@ -682,11 +715,11 @@ internal sealed class ControllerForm : Form
         _kioskList.Columns.Add("Last Seen", 105);
         _kioskList.Columns.Add("IP Address", 120);
         _kioskList.SelectedIndexChanged += (_, _) => UpdateActionButtons();
-        _kioskList.DoubleClick += (_, _) =>
+        _kioskList.DoubleClick += async (_, _) =>
         {
             var kiosk = SelectedKiosk();
             if (kiosk is not null)
-                QueueSelected(CommandTypes.SetClosed, !kiosk.StationClosed);
+                await QueueSelectedAsync(CommandTypes.SetClosed, !kiosk.StationClosed);
         };
     }
 
@@ -756,6 +789,22 @@ internal sealed class ControllerForm : Form
             "Remote access settings were saved. Restart the controller now to apply them?",
             "Remote Access", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
         if (answer == DialogResult.Yes) RestartControllerApplication();
+    }
+
+    private void ShowMasterOnlyMessage(string action)
+    {
+        var master = _server.Peers.Snapshot().FirstOrDefault(peer => peer.IsMaster);
+        MessageBox.Show(
+            this,
+            master is null
+                ? $"{action} must be performed on the master Kiosk Controller. " +
+                  "No master controller is currently detected."
+                : $"{action} must be performed on the master Kiosk Controller: " +
+                  master.MachineName + ".\n\nThis controller automatically mirrors that " +
+                  "master's saved kiosk connections.",
+            "Use the Master Controller",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     private static Image? LoadHeaderLogo()
@@ -872,6 +921,8 @@ internal sealed class ControllerForm : Form
     {
         if (_masterStatus.IsDisposed)
             return;
+        if (!string.Equals(_pairingKey.Text, _state.PairingKey, StringComparison.Ordinal))
+            _pairingKey.Text = _state.PairingKey;
         var isMaster = _state.IsMaster;
         _masterGreen.Active = isMaster;
         _masterRed.Active = !isMaster;
@@ -886,9 +937,14 @@ internal sealed class ControllerForm : Form
         }
 
         var otherMaster = _server.Peers.Snapshot().FirstOrDefault(peer => peer.IsMaster);
+        var posMachines = _state.ActivePosMachineNames()
+            .Concat(_server.Peers.Snapshot().SelectMany(peer => peer.ActivePosMachines))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        var posStatus = $"POS: {posMachines}/3";
         if (isMaster)
         {
-            _masterStatus.Text = "This controller is MASTER";
+            _masterStatus.Text = $"MASTER: {Environment.MachineName} (this PC)  •  {posStatus}";
             _masterStatus.ForeColor = ControllerTheme.SuccessText;
             _masterToggleButton.Text = "Remove Master";
             _masterToggleButton.BackColor = Color.FromArgb(255, 217, 188);
@@ -896,8 +952,8 @@ internal sealed class ControllerForm : Form
         else
         {
             _masterStatus.Text = otherMaster is null
-                ? "NOT MASTER — no master detected"
-                : $"NOT MASTER — master: {otherMaster.MachineName}";
+                ? $"MASTER: not detected  •  {posStatus}"
+                : $"MASTER: {otherMaster.MachineName}  •  {posStatus}";
             _masterStatus.ForeColor = otherMaster is null
                 ? ControllerTheme.ErrorText
                 : ControllerTheme.MutedText;
@@ -986,18 +1042,20 @@ internal sealed class ControllerForm : Form
         }
     }
 
-    private void QueueSelected(string type, bool? closed = null)
+    private async Task QueueSelectedAsync(string type, bool? closed = null)
     {
         var kiosk = SelectedKiosk();
         if (kiosk is null)
             return;
 
-        _state.QueueCommand(kiosk.StationId, type, closed);
-        _selectionStatus.Text = $"Command queued for {kiosk.StationName}.";
+        var result = await _server.QueueCommandAsync(kiosk.StationId, type, closed);
+        _selectionStatus.Text = result.Accepted
+            ? $"Command queued for {kiosk.StationName}."
+            : result.Message;
         RefreshKioskList();
     }
 
-    private void InstallSelectedUpdate()
+    private async Task InstallSelectedUpdateAsync()
     {
         var kiosk = SelectedKiosk();
         if (kiosk is null)
@@ -1006,23 +1064,29 @@ internal sealed class ControllerForm : Form
             $"Check GitHub and install an available update on {kiosk.StationName}?\n\nThe kiosk may restart automatically.",
             "Install Kiosk Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
         if (answer == DialogResult.Yes)
-            QueueSelected(CommandTypes.InstallUpdate);
+            await QueueSelectedAsync(CommandTypes.InstallUpdate);
     }
 
-    private void QueueForAll(string type, bool? closed = null)
+    private async Task QueueForAllAsync(string type, bool? closed = null)
     {
-        var count = _state.QueueCommandForAll(type, closed);
+        var count = 0;
+        foreach (var kiosk in _state.Snapshot())
+        {
+            var result = await _server.QueueCommandAsync(kiosk.StationId, type, closed);
+            if (result.Accepted)
+                count++;
+        }
         _selectionStatus.Text = $"Command queued for {count} kiosk(s).";
         RefreshKioskList();
     }
 
-    private void CloseAllKiosks()
+    private async Task CloseAllKiosksAsync()
     {
         var answer = MessageBox.Show(this,
             "Turn on the closed screen for every known kiosk?",
             "Close All Kiosks", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
         if (answer == DialogResult.Yes)
-            QueueForAll(CommandTypes.SetClosed, true);
+            await QueueForAllAsync(CommandTypes.SetClosed, true);
     }
 
     private async Task CheckControllerUpdateAsync(bool showUpToDateMessage)

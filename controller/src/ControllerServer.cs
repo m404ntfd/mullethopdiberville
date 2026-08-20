@@ -12,6 +12,7 @@ internal sealed class ControllerServer : IDisposable
     public const string BasePath = "/mullethop/";
     private const string TimestampHeader = "X-MulletHop-Timestamp";
     private const string SignatureHeader = "X-MulletHop-Signature";
+    private const string PosMachineHeader = "X-MulletHop-POS-Machine";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ControllerState _state;
     private readonly HttpListener _listener = new();
@@ -38,6 +39,27 @@ internal sealed class ControllerServer : IDisposable
         _listenTask = Task.Run(ListenAsync);
         Peers.Start();
         ControllerLog.Write($"Controller service listening on TCP {Port}.");
+    }
+
+    public async Task<ControllerPeerCommandResult> QueueCommandAsync(
+        string stationId,
+        string type,
+        bool? closed = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_state.IsMaster)
+        {
+            var accepted = _state.QueueCommand(stationId, type, closed);
+            return new ControllerPeerCommandResult(
+                accepted,
+                accepted ? "Command queued for the waiver kiosk." : "Kiosk not found.");
+        }
+
+        return await Peers.QueueCommandOnMasterAsync(
+            stationId,
+            type,
+            closed,
+            cancellationToken);
     }
 
     private async Task ListenAsync()
@@ -152,6 +174,96 @@ internal sealed class ControllerServer : IDisposable
                 return;
             }
 
+            if (string.Equals(
+                    path,
+                    BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.ReplicaPath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    path,
+                    BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.CommandPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var remoteAddress = context.Request.RemoteEndPoint?.Address;
+                if (remoteAddress is null || !IsPrivateOrLocal(remoteAddress))
+                {
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.Forbidden,
+                        "Controller synchronization is limited to the local network.");
+                    return;
+                }
+                if (!_state.IsMaster)
+                {
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.Conflict,
+                        "This computer is not the master controller.");
+                    return;
+                }
+                if (!IsAuthorized(context.Request, body, _state.PeerAccessKey))
+                {
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.Unauthorized,
+                        "Invalid controller synchronization key.");
+                    return;
+                }
+
+                if (string.Equals(
+                        path,
+                        BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.ReplicaPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var replicaRequest = JsonSerializer.Deserialize<ControllerPeerRequest>(body, JsonOptions);
+                    if (replicaRequest is null ||
+                        !Guid.TryParseExact(replicaRequest.ControllerId, "N", out _) ||
+                        !Peers.IsKnownController(replicaRequest.ControllerId))
+                    {
+                        await WritePlainResponseAsync(
+                            context,
+                            HttpStatusCode.Forbidden,
+                            "The requesting controller has not been discovered.");
+                        return;
+                    }
+
+                    await WriteSignedResponseAsync(
+                        context,
+                        _state.CreateReplicaSnapshot(),
+                        _state.PeerAccessKey);
+                    return;
+                }
+
+                var peerCommand = JsonSerializer.Deserialize<ControllerPeerCommandRequest>(body, JsonOptions);
+                if (peerCommand is null ||
+                    !Guid.TryParseExact(peerCommand.ControllerId, "N", out _) ||
+                    !Peers.IsKnownController(peerCommand.ControllerId) ||
+                    !Guid.TryParseExact(peerCommand.StationId, "N", out _) ||
+                    !IsValidPosCommand(peerCommand.Type, peerCommand.Closed))
+                {
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.BadRequest,
+                        "Invalid controller command relay request.");
+                    return;
+                }
+
+                var peerAccepted = _state.QueueCommand(
+                    peerCommand.StationId,
+                    peerCommand.Type,
+                    peerCommand.Closed);
+                await WriteSignedResponseAsync(
+                    context,
+                    new ControllerPeerCommandResponse
+                    {
+                        Accepted = peerAccepted,
+                        Message = peerAccepted
+                            ? "Command queued on the master controller."
+                            : "Kiosk not found on the master controller."
+                    },
+                    _state.PeerAccessKey);
+                return;
+            }
+
             if (!IsAuthorized(context.Request, body))
             {
                 ControllerLog.Write("Rejected a controller request with an invalid signature from " +
@@ -162,6 +274,14 @@ internal sealed class ControllerServer : IDisposable
 
             if (string.Equals(path, BasePath.TrimEnd('/') + "/api/health", StringComparison.OrdinalIgnoreCase))
             {
+                if (!_state.IsMaster)
+                {
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.Conflict,
+                        "This computer is not the master controller.");
+                    return;
+                }
                 await WriteSignedResponseAsync(context, new
                 {
                     ok = true,
@@ -172,6 +292,7 @@ internal sealed class ControllerServer : IDisposable
 
             if (string.Equals(path, BasePath.TrimEnd('/') + "/api/pos/status", StringComparison.OrdinalIgnoreCase))
             {
+                RecordPosMachine(context.Request);
                 await WriteSignedResponseAsync(context, new
                 {
                     serverTimeUtc = DateTime.UtcNow,
@@ -182,41 +303,47 @@ internal sealed class ControllerServer : IDisposable
 
             if (string.Equals(path, BasePath.TrimEnd('/') + "/api/pos/command", StringComparison.OrdinalIgnoreCase))
             {
+                RecordPosMachine(context.Request);
                 var commandRequest = JsonSerializer.Deserialize<PosCommandRequest>(body, JsonOptions);
                 if (commandRequest is null ||
                     !Guid.TryParseExact(commandRequest.StationId, "N", out _) ||
-                    (commandRequest.Type != CommandTypes.SetClosed &&
-                     commandRequest.Type != CommandTypes.SetBusinessClosed &&
-                     commandRequest.Type != CommandTypes.ResetStart &&
-                     commandRequest.Type != CommandTypes.AcknowledgeAssistance) ||
-                    ((commandRequest.Type == CommandTypes.SetClosed ||
-                      commandRequest.Type == CommandTypes.SetBusinessClosed) &&
-                     !commandRequest.Closed.HasValue))
+                    !IsValidPosCommand(commandRequest.Type, commandRequest.Closed))
                 {
                     await WritePlainResponseAsync(context, HttpStatusCode.BadRequest, "Invalid Mullet Hop POS command.");
                     return;
                 }
 
-                var accepted = _state.QueueCommand(
+                var commandResult = await QueueCommandAsync(
                     commandRequest.StationId,
                     commandRequest.Type,
                     commandRequest.Closed);
-                if (!accepted)
+                if (!commandResult.Accepted)
                 {
-                    await WritePlainResponseAsync(context, HttpStatusCode.NotFound, "Kiosk not found.");
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.NotFound,
+                        commandResult.Message);
                     return;
                 }
 
                 await WriteSignedResponseAsync(context, new
                 {
                     accepted = true,
-                    message = "Command queued for the waiver kiosk."
+                    message = commandResult.Message
                 });
                 return;
             }
 
             if (string.Equals(path, BasePath.TrimEnd('/') + "/api/ads/sync", StringComparison.OrdinalIgnoreCase))
             {
+                if (!_state.IsMaster)
+                {
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.Conflict,
+                        "Kiosks synchronize with the master controller.");
+                    return;
+                }
                 var syncRequest = JsonSerializer.Deserialize<AdvertisementSyncRequest>(body, JsonOptions);
                 if (syncRequest is null || !Guid.TryParseExact(syncRequest.StationId, "N", out _))
                 {
@@ -234,6 +361,14 @@ internal sealed class ControllerServer : IDisposable
 
             if (string.Equals(path, BasePath.TrimEnd('/') + "/api/business-hours/sync", StringComparison.OrdinalIgnoreCase))
             {
+                if (!_state.IsMaster)
+                {
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.Conflict,
+                        "Kiosks synchronize with the master controller.");
+                    return;
+                }
                 var syncRequest = JsonSerializer.Deserialize<BusinessHoursSyncRequest>(body, JsonOptions);
                 if (syncRequest is null || !Guid.TryParseExact(syncRequest.StationId, "N", out _))
                 {
@@ -252,6 +387,15 @@ internal sealed class ControllerServer : IDisposable
             if (!string.Equals(path, BasePath.TrimEnd('/') + "/api/checkin", StringComparison.OrdinalIgnoreCase))
             {
                 await WritePlainResponseAsync(context, HttpStatusCode.NotFound, "Not found.");
+                return;
+            }
+
+            if (!_state.IsMaster)
+            {
+                await WritePlainResponseAsync(
+                    context,
+                    HttpStatusCode.Conflict,
+                    "Kiosks check in with the master controller.");
                 return;
             }
 
@@ -284,7 +428,7 @@ internal sealed class ControllerServer : IDisposable
         }
     }
 
-    private bool IsAuthorized(HttpListenerRequest request, string body)
+    private bool IsAuthorized(HttpListenerRequest request, string body, string? accessKey = null)
     {
         var timestamp = request.Headers[TimestampHeader] ?? string.Empty;
         var signature = request.Headers[SignatureHeader] ?? string.Empty;
@@ -292,21 +436,39 @@ internal sealed class ControllerServer : IDisposable
             Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - unixTime) > 300)
             return false;
 
-        var expected = ControllerSecurity.Sign(_state.PairingKey, timestamp, body);
+        var expected = ControllerSecurity.Sign(accessKey ?? _state.PairingKey, timestamp, body);
         return ControllerSecurity.FixedTimeEquals(expected, signature);
     }
 
-    private async Task WriteSignedResponseAsync(HttpListenerContext context, object payload)
+    private async Task WriteSignedResponseAsync(
+        HttpListenerContext context,
+        object payload,
+        string? accessKey = null)
     {
         var body = JsonSerializer.Serialize(payload, JsonOptions);
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         context.Response.Headers[TimestampHeader] = timestamp;
         context.Response.Headers[SignatureHeader] =
-            ControllerSecurity.Sign(_state.PairingKey, timestamp, body);
+            ControllerSecurity.Sign(accessKey ?? _state.PairingKey, timestamp, body);
         context.Response.StatusCode = (int)HttpStatusCode.OK;
         context.Response.ContentType = "application/json; charset=utf-8";
         await WriteBodyAsync(context, body);
     }
+
+    private void RecordPosMachine(HttpListenerRequest request)
+    {
+        _state.RecordPosMachine(
+            request.Headers[PosMachineHeader],
+            request.RemoteEndPoint?.Address.ToString());
+    }
+
+    private static bool IsValidPosCommand(string type, bool? closed) =>
+        (type == CommandTypes.SetClosed ||
+         type == CommandTypes.SetBusinessClosed ||
+         type == CommandTypes.ResetStart ||
+         type == CommandTypes.AcknowledgeAssistance) &&
+        ((type != CommandTypes.SetClosed && type != CommandTypes.SetBusinessClosed) ||
+         closed.HasValue);
 
     private static async Task WriteJsonResponseAsync(HttpListenerContext context, object payload)
     {

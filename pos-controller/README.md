@@ -27,7 +27,7 @@ waiver kiosks and keeps their controls available without covering the POS page.
   the kiosk.
 * **Close** asks whether this is a **Staff Closure** or **Business Closure**.
   Staff Closure displays the normal closed screen and reports red. Business
-  Closure starts the business-hours blackout screen and reports blue.
+  Closure starts the Business Closed video and reports blue.
 * **Open** removes the staff-controlled closed screen and starts a fresh waiver.
   It also ends a manually selected Business Closure; the configured business
   schedule still applies.
@@ -41,6 +41,12 @@ window. A normal close command also sends the application to the tray. Only the
 passcode-protected **Exit Application** command closes Firefox and stops the
 application. Press **Ctrl + Alt + M** while Mullet Hop POS is active to open the protected
 Staff Menu.
+
+Firefox is embedded with its normal browser controls instead of kiosk mode. If
+Firefox exits or a tab-crash title is detected, a red banner appears above the
+browser and tells staff to use **Reload LilyPad**. Reload LilyPad terminates the
+embedded Firefox session, clears every saved tab, and opens one fresh window at
+the LilyPad home page. The banner also includes its own reload button.
 
 ## Installation
 
@@ -62,7 +68,9 @@ Staff Menu.
 Mullet Hop POS talks to the on-site Kiosk Controller over TCP 47832 using the existing
 signed local-network connection. It does not open a listening port and does not
 require a firewall exception on the POS computer. New paired devices are saved
-in the next open position without renumbering existing assignments.
+in the next open position without renumbering existing assignments. Three POS
+workstations can run at the same time; each workstation sees and controls the same
+four kiosk assignments through the master controller.
 
 ## Firefox profile and saved data
 
@@ -70,7 +78,12 @@ The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
 restarts without changing the user's normal Firefox profile.
 
-Version 1.4.1 is the first release named **Mullet Hop POS**. It adds the blue
+Version 1.5.0 keeps Firefox's menu and browser controls visible, detects a crashed
+Firefox tab or process, and provides a Reload LilyPad action that terminates the
+dedicated Firefox session, clears all of its tabs, and opens one fresh LilyPad
+home page. It also identifies the POS workstation to the controller so three
+front-desk machines can be shown as active. Version 1.4.1 is the first release
+named **Mullet Hop POS**. It adds the blue
 business-hours-closed status, prompts for Staff or Business Closure, and keeps
 acknowledged assistance calls flashing until they are cleared. It preserves the
 former POS Controller's internal package ID, `pos` update channel, saved-data

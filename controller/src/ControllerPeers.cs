@@ -16,6 +16,8 @@ internal sealed class ControllerPeerPresence
     public bool IsMaster { get; set; }
     public DateTime? MasterSinceUtc { get; set; }
     public string ControllerAddress { get; set; } = string.Empty;
+    public string PeerAccessKey { get; set; } = string.Empty;
+    public List<string> ActivePosMachines { get; set; } = [];
 }
 
 internal sealed class DiscoveredControllerPeer
@@ -26,6 +28,8 @@ internal sealed class DiscoveredControllerPeer
     public bool IsMaster { get; set; }
     public DateTime? MasterSinceUtc { get; set; }
     public string ControllerAddress { get; set; } = string.Empty;
+    public string PeerAccessKey { get; set; } = string.Empty;
+    public List<string> ActivePosMachines { get; set; } = [];
     public DateTime LastSeenUtc { get; set; }
 
     public DiscoveredControllerPeer Clone() => new()
@@ -36,13 +40,39 @@ internal sealed class DiscoveredControllerPeer
         IsMaster = IsMaster,
         MasterSinceUtc = MasterSinceUtc,
         ControllerAddress = ControllerAddress,
+        PeerAccessKey = PeerAccessKey,
+        ActivePosMachines = [.. ActivePosMachines],
         LastSeenUtc = LastSeenUtc
     };
 }
 
+internal class ControllerPeerRequest
+{
+    public string ControllerId { get; set; } = string.Empty;
+}
+
+internal sealed class ControllerPeerCommandRequest : ControllerPeerRequest
+{
+    public string StationId { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public bool? Closed { get; set; }
+}
+
+internal sealed class ControllerPeerCommandResponse
+{
+    public bool Accepted { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+internal sealed record ControllerPeerCommandResult(bool Accepted, string Message);
+
 internal sealed class ControllerPeerCoordinator : IDisposable
 {
     public const string PresencePath = "api/controller/presence";
+    public const string ReplicaPath = "api/controller/replica";
+    public const string CommandPath = "api/controller/command";
+    private const string TimestampHeader = "X-MulletHop-Timestamp";
+    private const string SignatureHeader = "X-MulletHop-Signature";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly object _gate = new();
     private readonly ControllerState _state;
@@ -50,6 +80,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
     private readonly Dictionary<string, DiscoveredControllerPeer> _peers = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _scanGate = new(1, 1);
+    private readonly SemaphoreSlim _replicaGate = new(1, 1);
     private Task? _worker;
     private bool _disposed;
 
@@ -84,6 +115,70 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 .OrderByDescending(peer => peer.IsMaster)
                 .ThenBy(peer => peer.MachineName, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
+        }
+    }
+
+    public bool IsKnownController(string controllerId)
+    {
+        lock (_gate)
+        {
+            RemoveStalePeersLocked();
+            return _peers.ContainsKey(controllerId);
+        }
+    }
+
+    public async Task<ControllerPeerCommandResult> QueueCommandOnMasterAsync(
+        string stationId,
+        string type,
+        bool? closed,
+        CancellationToken cancellationToken = default)
+    {
+        var master = Snapshot().FirstOrDefault(peer =>
+            peer.IsMaster &&
+            !string.IsNullOrWhiteSpace(peer.ControllerAddress) &&
+            !string.IsNullOrWhiteSpace(peer.PeerAccessKey));
+        if (master is null)
+        {
+            return new ControllerPeerCommandResult(
+                false,
+                "No active master controller is available.");
+        }
+
+        try
+        {
+            var body = JsonSerializer.Serialize(new ControllerPeerCommandRequest
+            {
+                ControllerId = _state.ControllerId,
+                StationId = stationId,
+                Type = type,
+                Closed = closed
+            }, JsonOptions);
+            var endpoint = new Uri(new Uri(master.ControllerAddress), CommandPath);
+            using var request = CreateSignedRequest(endpoint, master.PeerAccessKey, body);
+            using var response = await _client.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ControllerPeerCommandResult(
+                    false,
+                    string.IsNullOrWhiteSpace(responseBody)
+                        ? $"The master controller returned HTTP {(int)response.StatusCode}."
+                        : responseBody.Trim());
+            }
+
+            VerifySignedResponse(response, master.PeerAccessKey, responseBody);
+            var result = JsonSerializer.Deserialize<ControllerPeerCommandResponse>(responseBody, JsonOptions);
+            return result is null
+                ? new ControllerPeerCommandResult(false, "The master controller returned an empty response.")
+                : new ControllerPeerCommandResult(result.Accepted, result.Message);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or
+                                   JsonException or InvalidDataException or IOException)
+        {
+            ControllerLog.Write("Master command relay error: " + ex.Message);
+            return new ControllerPeerCommandResult(
+                false,
+                "The command could not be sent to the master controller.");
         }
     }
 
@@ -205,6 +300,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             if (!ControllerResponseMatchesEndpoint(normalized, presence.ControllerAddress))
                 return;
             UpdatePeer(presence);
+            if (presence.IsMaster && !_state.IsMaster)
+                await SynchronizeFromMasterAsync(presence, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -225,7 +322,9 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         Version = ControllerUpdater.CurrentVersion,
         IsMaster = _state.IsMaster,
         MasterSinceUtc = _state.MasterSinceUtc,
-        ControllerAddress = address
+        ControllerAddress = address,
+        PeerAccessKey = _state.IsMaster ? _state.PeerAccessKey : string.Empty,
+        ActivePosMachines = _state.ActivePosMachineNames().ToList()
     };
 
     private void UpdatePeer(ControllerPeerPresence presence)
@@ -247,6 +346,10 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 !string.Equals(peer.Version, presence.Version, StringComparison.Ordinal) ||
                 peer.IsMaster != presence.IsMaster ||
                 peer.MasterSinceUtc != presence.MasterSinceUtc ||
+                !string.Equals(peer.PeerAccessKey, presence.PeerAccessKey, StringComparison.Ordinal) ||
+                !peer.ActivePosMachines.SequenceEqual(
+                    presence.ActivePosMachines,
+                    StringComparer.OrdinalIgnoreCase) ||
                 !string.Equals(
                     peer.ControllerAddress,
                     presence.ControllerAddress,
@@ -259,6 +362,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             peer.IsMaster = presence.IsMaster;
             peer.MasterSinceUtc = presence.MasterSinceUtc;
             peer.ControllerAddress = presence.ControllerAddress;
+            peer.PeerAccessKey = presence.PeerAccessKey;
+            peer.ActivePosMachines = [.. presence.ActivePosMachines];
             peer.LastSeenUtc = DateTime.UtcNow;
         }
 
@@ -308,6 +413,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             presence.MachineName.Length > 200 ||
             presence.Version?.Length > 100 ||
             presence.ControllerAddress?.Length > 300 ||
+            presence.PeerAccessKey?.Length > 200 ||
             (presence.IsMaster != presence.MasterSinceUtc.HasValue))
         {
             throw new InvalidDataException("The controller presence announcement is invalid.");
@@ -316,6 +422,13 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         presence.Version = string.IsNullOrWhiteSpace(presence.Version)
             ? "Unknown"
             : presence.Version.Trim();
+        presence.PeerAccessKey = presence.PeerAccessKey?.Trim() ?? string.Empty;
+        presence.ActivePosMachines = (presence.ActivePosMachines ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim().Length <= 80 ? name.Trim() : name.Trim()[..80])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
         if (!string.IsNullOrWhiteSpace(presence.ControllerAddress))
         {
             if (!TryNormalizeControllerAddress(
@@ -324,6 +437,96 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 throw new InvalidDataException("The controller presence address is invalid.");
             }
             presence.ControllerAddress = normalizedAddress;
+        }
+    }
+
+    private async Task SynchronizeFromMasterAsync(
+        ControllerPeerPresence master,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(master.PeerAccessKey) ||
+            !await _replicaGate.WaitAsync(0, cancellationToken))
+        {
+            return;
+        }
+
+        try
+        {
+            var body = JsonSerializer.Serialize(new ControllerPeerRequest
+            {
+                ControllerId = _state.ControllerId
+            }, JsonOptions);
+            var endpoint = new Uri(new Uri(master.ControllerAddress), ReplicaPath);
+            using var request = CreateSignedRequest(endpoint, master.PeerAccessKey, body);
+            using var response = await _client.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                return;
+
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            VerifySignedResponse(response, master.PeerAccessKey, responseBody);
+            var replica = JsonSerializer.Deserialize<ControllerReplicaSnapshot>(responseBody, JsonOptions);
+            if (replica is null ||
+                !string.Equals(
+                    replica.MasterControllerId,
+                    master.ControllerId,
+                    StringComparison.Ordinal) ||
+                replica.Kiosks.Count > 100)
+            {
+                throw new InvalidDataException("The master controller replica is invalid.");
+            }
+
+            if (_state.ApplyMasterReplica(replica))
+                RaisePeersChanged();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Normal shutdown.
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or
+                                   JsonException or InvalidDataException or IOException)
+        {
+            ControllerLog.Write("Master controller synchronization error: " + ex.Message);
+        }
+        finally
+        {
+            _replicaGate.Release();
+        }
+    }
+
+    private static HttpRequestMessage CreateSignedRequest(Uri uri, string accessKey, string body)
+    {
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        var request = new HttpRequestMessage(HttpMethod.Post, uri)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json")
+        };
+        request.Headers.TryAddWithoutValidation(TimestampHeader, timestamp);
+        request.Headers.TryAddWithoutValidation(
+            SignatureHeader,
+            ControllerSecurity.Sign(accessKey, timestamp, body));
+        return request;
+    }
+
+    private static void VerifySignedResponse(
+        HttpResponseMessage response,
+        string accessKey,
+        string body)
+    {
+        if (!response.Headers.TryGetValues(TimestampHeader, out var timestamps) ||
+            !response.Headers.TryGetValues(SignatureHeader, out var signatures))
+        {
+            throw new InvalidDataException("The master controller response was not signed.");
+        }
+
+        var timestamp = timestamps.FirstOrDefault() ?? string.Empty;
+        var signature = signatures.FirstOrDefault() ?? string.Empty;
+        if (!long.TryParse(timestamp, out var unixTime) ||
+            Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - unixTime) > 300 ||
+            !ControllerSecurity.FixedTimeEquals(
+                ControllerSecurity.Sign(accessKey, timestamp, body),
+                signature))
+        {
+            throw new InvalidDataException("The master controller response signature was invalid.");
         }
     }
 

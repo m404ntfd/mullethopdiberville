@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace MulletHopKioskController;
@@ -132,9 +133,27 @@ internal sealed class PosCommandRequest
     public bool? Closed { get; set; }
 }
 
+internal sealed class ControllerReplicaSnapshot
+{
+    public string MasterControllerId { get; set; } = string.Empty;
+    public string MasterMachineName { get; set; } = string.Empty;
+    public string PairingKey { get; set; } = string.Empty;
+    public string Revision { get; set; } = string.Empty;
+    public DateTime GeneratedUtc { get; set; }
+    public List<ManagedKiosk> Kiosks { get; set; } = [];
+}
+
+internal sealed class PosMachinePresence
+{
+    public string MachineName { get; set; } = string.Empty;
+    public string IpAddress { get; set; } = string.Empty;
+    public DateTime LastSeenUtc { get; set; }
+}
+
 internal sealed class ControllerData
 {
     public string PairingKey { get; set; } = string.Empty;
+    public string PeerAccessKey { get; set; } = string.Empty;
     public string ControllerId { get; set; } = string.Empty;
     public bool IsMaster { get; set; }
     public DateTime? MasterSinceUtc { get; set; }
@@ -155,7 +174,10 @@ internal sealed class ControllerState
     };
     private readonly object _gate = new();
     private readonly string _dataPath = Path.Combine(ControllerLog.DataDirectory, "controller.json");
+    private readonly Dictionary<string, PosMachinePresence> _posMachines =
+        new(StringComparer.OrdinalIgnoreCase);
     private ControllerData _data;
+    private string _lastMasterReplicaRevision = string.Empty;
 
     public ControllerState()
     {
@@ -164,6 +186,11 @@ internal sealed class ControllerState
         if (string.IsNullOrWhiteSpace(_data.PairingKey))
         {
             _data.PairingKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+            changed = true;
+        }
+        if (string.IsNullOrWhiteSpace(_data.PeerAccessKey))
+        {
+            _data.PeerAccessKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             changed = true;
         }
         if (!Guid.TryParseExact(_data.ControllerId, "N", out _))
@@ -197,6 +224,11 @@ internal sealed class ControllerState
     public string ControllerId
     {
         get { lock (_gate) return _data.ControllerId; }
+    }
+
+    public string PeerAccessKey
+    {
+        get { lock (_gate) return _data.PeerAccessKey; }
     }
 
     public bool IsMaster
@@ -279,6 +311,9 @@ internal sealed class ControllerState
                 Revision = _data.BusinessHoursRevision,
                 GeneratedUtc = DateTime.UtcNow,
                 Enabled = _data.BusinessHours.Enabled,
+                IncludesClosureSettings = true,
+                ShowClosedVideo = _data.BusinessHours.ShowClosedVideo,
+                BlackoutAtClosingTime = _data.BusinessHours.BlackoutAtClosingTime,
                 ClosedMessageMinutes = _data.BusinessHours.ClosedMessageMinutes,
                 PreOpeningScreensaverMinutes = _data.BusinessHours.PreOpeningScreensaverMinutes,
                 IncludesAppearanceSettings = true,
@@ -290,7 +325,9 @@ internal sealed class ControllerState
                 Days = _data.BusinessHours.Days.Select(day => new BusinessHoursSyncItem
                 {
                     Day = (int)day.Day, IsOpen = day.IsOpen,
-                    OpenTime = day.OpenTime, CloseTime = day.CloseTime
+                    OpenTime = day.OpenTime,
+                    LastJumpTimeSold = day.LastJumpTimeSold,
+                    CloseTime = day.CloseTime
                 }).ToList()
             };
         }
@@ -302,6 +339,97 @@ internal sealed class ControllerState
             return _data.Kiosks.Select(kiosk => kiosk.Clone())
                 .OrderBy(kiosk => kiosk.StationName, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
+    }
+
+    public ControllerReplicaSnapshot CreateReplicaSnapshot()
+    {
+        lock (_gate)
+        {
+            var kiosks = _data.Kiosks
+                .Select(kiosk => kiosk.Clone())
+                .OrderBy(kiosk => kiosk.StationId, StringComparer.Ordinal)
+                .ToList();
+            var serialized = JsonSerializer.Serialize(kiosks, JsonOptions) + "\n" + _data.PairingKey;
+            return new ControllerReplicaSnapshot
+            {
+                MasterControllerId = _data.ControllerId,
+                MasterMachineName = Environment.MachineName,
+                PairingKey = _data.PairingKey,
+                Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(serialized))),
+                GeneratedUtc = DateTime.UtcNow,
+                Kiosks = kiosks
+            };
+        }
+    }
+
+    public bool ApplyMasterReplica(ControllerReplicaSnapshot replica)
+    {
+        lock (_gate)
+        {
+            if (_data.IsMaster ||
+                string.IsNullOrWhiteSpace(replica.Revision) ||
+                string.IsNullOrWhiteSpace(replica.PairingKey) ||
+                replica.PairingKey.Length is < 16 or > 1_000 ||
+                string.Equals(
+                    _lastMasterReplicaRevision,
+                    replica.Revision,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var kiosks = (replica.Kiosks ?? [])
+                .Where(kiosk => kiosk is not null &&
+                                Guid.TryParseExact(kiosk.StationId, "N", out _))
+                .GroupBy(kiosk => kiosk.StationId, StringComparer.Ordinal)
+                .Select(group => group.Last().Clone())
+                .Take(100)
+                .ToList();
+            foreach (var kiosk in kiosks)
+                kiosk.PendingCommand = null;
+
+            _data.Kiosks = kiosks;
+            _data.PairingKey = replica.PairingKey.Trim();
+            _lastMasterReplicaRevision = replica.Revision;
+            SaveLocked();
+            ControllerLog.Write(
+                $"Loaded {kiosks.Count} saved kiosk connection(s) from master controller " +
+                $"{replica.MasterMachineName}.");
+            return true;
+        }
+    }
+
+    public void RecordPosMachine(string? machineName, string? ipAddress)
+    {
+        lock (_gate)
+        {
+            RemoveStalePosMachinesLocked();
+            var cleanedIp = Clean(ipAddress, "Unknown address", 80);
+            var cleanedName = Clean(
+                machineName,
+                cleanedIp == "Unknown address" ? "Mullet Hop POS" : $"POS at {cleanedIp}",
+                80);
+            var key = cleanedName + "|" + cleanedIp;
+            _posMachines[key] = new PosMachinePresence
+            {
+                MachineName = cleanedName,
+                IpAddress = cleanedIp,
+                LastSeenUtc = DateTime.UtcNow
+            };
+        }
+    }
+
+    public IReadOnlyList<string> ActivePosMachineNames()
+    {
+        lock (_gate)
+        {
+            RemoveStalePosMachinesLocked();
+            return _posMachines.Values
+                .Select(machine => machine.MachineName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
     }
 
     public IReadOnlyList<PosKioskStatus> PosStatusSnapshot()
@@ -602,6 +730,12 @@ internal sealed class ControllerState
             var profile = new ControllerBusinessHours
             {
                 Enabled = package.Enabled,
+                ShowClosedVideo = package.IncludesClosureSettings
+                    ? package.ShowClosedVideo
+                    : _data.BusinessHours.ShowClosedVideo,
+                BlackoutAtClosingTime = package.IncludesClosureSettings
+                    ? package.BlackoutAtClosingTime
+                    : _data.BusinessHours.BlackoutAtClosingTime,
                 ClosedMessageMinutes = package.ClosedMessageMinutes,
                 PreOpeningScreensaverMinutes = package.PreOpeningScreensaverMinutes,
                 ThemeMode = package.IncludesAppearanceSettings && package.ThemeMode is >= 0 and <= 2
@@ -621,7 +755,12 @@ internal sealed class ControllerState
                 Days = package.Days.Select(item => new ControllerBusinessDayHours
                 {
                     Day = item.Day is >= 0 and <= 6 ? (DayOfWeek)item.Day : DayOfWeek.Monday,
-                    IsOpen = item.IsOpen, OpenTime = item.OpenTime, CloseTime = item.CloseTime
+                    IsOpen = item.IsOpen,
+                    OpenTime = item.OpenTime,
+                    LastJumpTimeSold = package.IncludesClosureSettings
+                        ? item.LastJumpTimeSold
+                        : item.CloseTime,
+                    CloseTime = item.CloseTime
                 }).ToList()
             };
             profile.Normalize();
@@ -673,6 +812,18 @@ internal sealed class ControllerState
         catch (Exception ex)
         {
             ControllerLog.Write("Controller data save error: " + ex.Message);
+        }
+    }
+
+    private void RemoveStalePosMachinesLocked()
+    {
+        var cutoff = DateTime.UtcNow.AddSeconds(-20);
+        foreach (var key in _posMachines
+                     .Where(pair => pair.Value.LastSeenUtc < cutoff)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            _posMachines.Remove(key);
         }
     }
 

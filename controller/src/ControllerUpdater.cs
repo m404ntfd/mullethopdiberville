@@ -20,6 +20,7 @@ internal sealed record ControllerUpdateResult(
 
 internal static class ControllerUpdater
 {
+    private const string DefaultRepositoryUrl = "https://github.com/m404ntfd/mullethopdiberville";
     private const string RepositoryMetadataKey = "UpdateRepositoryUrl";
     private const string UpdateChannel = "controller";
     private static UpdateManager? _stagedManager;
@@ -27,6 +28,9 @@ internal static class ControllerUpdater
 
     public static bool HasStagedUpdate =>
         _stagedManager is not null && _stagedUpdate is not null;
+
+    public static string ReleaseRepositoryUrl =>
+        string.IsNullOrWhiteSpace(RepositoryUrl) ? DefaultRepositoryUrl : RepositoryUrl;
 
     public static string CurrentVersion
     {

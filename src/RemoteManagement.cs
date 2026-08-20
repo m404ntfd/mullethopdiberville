@@ -222,14 +222,18 @@ internal sealed partial class KioskForm
                 throw new InvalidDataException("The kiosk manager has not published a Business Hours profile yet.");
             if (package.Days.Count != 7 || package.Days.Select(day => day.Day).Distinct().Count() != 7 ||
                 package.Days.Any(day => day.Day is < 0 or > 6 ||
-                    (day.IsOpen && day.CloseTime <= day.OpenTime)) ||
+                    (day.IsOpen && (day.CloseTime <= day.OpenTime ||
+                     (package.IncludesClosureSettings &&
+                      (day.LastJumpTimeSold <= day.OpenTime ||
+                       day.LastJumpTimeSold > day.CloseTime))))) ||
                 (package.IncludesAppearanceSettings &&
                     (package.ThemeMode is < 0 or > 2 ||
                      (package.ScheduledDarkDays ?? []).Any(day => day is < 0 or > 6))))
                 throw new InvalidDataException("The manager Business Hours profile is invalid.");
 
             var oldEnabled = _settings.BusinessHoursEnabled;
-            var oldClosed = _settings.BusinessClosedMessageMinutes;
+            var oldShowClosedVideo = _settings.ShowClosedVideo;
+            var oldBlackoutAtClosingTime = _settings.BlackoutAtClosingTime;
             var oldPreOpening = _settings.PreOpeningScreensaverMinutes;
             var oldDays = _settings.BusinessHours;
             var oldThemeMode = _settings.ThemeMode;
@@ -242,7 +246,11 @@ internal sealed partial class KioskForm
             try
             {
                 _settings.BusinessHoursEnabled = package.Enabled;
-                _settings.BusinessClosedMessageMinutes = Math.Clamp(package.ClosedMessageMinutes, 1, 240);
+                if (package.IncludesClosureSettings)
+                {
+                    _settings.ShowClosedVideo = package.ShowClosedVideo;
+                    _settings.BlackoutAtClosingTime = package.BlackoutAtClosingTime;
+                }
                 _settings.PreOpeningScreensaverMinutes = Math.Clamp(package.PreOpeningScreensaverMinutes, 0, 240);
                 if (package.IncludesAppearanceSettings)
                 {
@@ -255,7 +263,11 @@ internal sealed partial class KioskForm
                 _settings.BusinessHours = package.Days.Select(day => new KioskBusinessDayHours
                 {
                     Day = (DayOfWeek)day.Day, IsOpen = day.IsOpen,
-                    OpenTime = day.OpenTime, CloseTime = day.CloseTime
+                    OpenTime = day.OpenTime,
+                    LastJumpTimeSold = package.IncludesClosureSettings
+                        ? day.LastJumpTimeSold
+                        : day.CloseTime,
+                    CloseTime = day.CloseTime
                 }).OrderBy(day => Array.IndexOf(KioskBusinessDayHours.OrderedDays, day.Day)).ToList();
                 _settings.BusinessHoursSyncRevision = package.Revision;
                 _settings.BusinessHoursLastSyncUtc = DateTime.UtcNow;
@@ -267,7 +279,8 @@ internal sealed partial class KioskForm
             catch
             {
                 _settings.BusinessHoursEnabled = oldEnabled;
-                _settings.BusinessClosedMessageMinutes = oldClosed;
+                _settings.ShowClosedVideo = oldShowClosedVideo;
+                _settings.BlackoutAtClosingTime = oldBlackoutAtClosingTime;
                 _settings.PreOpeningScreensaverMinutes = oldPreOpening;
                 _settings.BusinessHours = oldDays;
                 _settings.ThemeMode = oldThemeMode;
@@ -527,8 +540,8 @@ internal sealed partial class KioskForm
                         command.Id,
                         true,
                         command.Closed.Value
-                            ? "The business-closure blackout is on."
-                            : "The business-closure blackout is off.");
+                            ? "The Business Closed video is on."
+                            : "The Business Closed video is off.");
                     break;
 
                 case RemoteCommandTypes.ResetStart:
@@ -677,13 +690,16 @@ internal sealed partial class KioskForm
             _settings.Save();
 
             if (closed)
-                ShowBlackoutPage(manual: true);
+                ShowBusinessClosedPage(
+                    BusinessHoursCalculator.FindNextOpening(_settings, DateTime.Now),
+                    playVideo: true,
+                    manual: true);
             else
                 await ResetForNextGuestAsync(source + " ended business closure", showStatus: false);
 
             KioskLog.Write(closed
-                ? source + " started the business-closure blackout."
-                : source + " ended the business-closure blackout.");
+                ? source + " started the Business Closed video."
+                : source + " ended the Business Closed video.");
         }
         catch
         {
@@ -773,6 +789,10 @@ internal sealed class BusinessHoursSyncPackage
     public string Revision { get; set; } = string.Empty;
     public DateTime GeneratedUtc { get; set; }
     public bool Enabled { get; set; }
+    public bool IncludesClosureSettings { get; set; }
+    public bool ShowClosedVideo { get; set; }
+    public bool BlackoutAtClosingTime { get; set; }
+    // Kept for wire compatibility with older controllers.
     public int ClosedMessageMinutes { get; set; }
     public int PreOpeningScreensaverMinutes { get; set; }
     public bool IncludesAppearanceSettings { get; set; }
@@ -788,6 +808,7 @@ internal sealed class BusinessHoursSyncItem
     public int Day { get; set; }
     public bool IsOpen { get; set; }
     public TimeSpan OpenTime { get; set; }
+    public TimeSpan LastJumpTimeSold { get; set; }
     public TimeSpan CloseTime { get; set; }
 }
 
