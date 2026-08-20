@@ -4,6 +4,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using MulletHop.LocalNetworking;
 
 namespace MulletHopKioskController;
 
@@ -374,7 +375,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             {
                 return new ControllerMasterConnectionResult(
                     false,
-                    "No Systems Controller answered at that private-network IP address." +
+                    "No Systems Controller answered at that local-network IP address." +
                     (string.IsNullOrWhiteSpace(diagnostic)
                         ? " Confirm that the master is running and that TCP 47832 is allowed on its Private-network firewall."
                         : "\n\n" + diagnostic));
@@ -397,7 +398,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         {
             return new ControllerMasterConnectionResult(
                 false,
-                "Enter the master computer's private IPv4 address or its full pairing key.");
+                "Enter the master computer's local IPv4 address or its full pairing key.");
         }
 
         var fingerprint = ControllerSecurity.Fingerprint(connectionValue);
@@ -432,7 +433,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             return new ControllerMasterConnectionResult(
                 false,
                 "No master controller using that pairing key was found on the local network. " +
-                "If the master is on another subnet, enter its private IP address instead.");
+                "If discovery is unavailable, enter the master's local IPv4 address instead.");
         }
 
         var syncResult = await SynchronizeFromMasterAsync(
@@ -460,7 +461,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             return new ControllerMasterConnectionResult(
                 false,
                 $"The saved master controller {stored.MachineName} could not be reached. " +
-                "Confirm that it is running and connected to the private network.");
+                "Confirm that it is running and connected to the local network.");
         }
 
         var result = await SynchronizeFromMasterAsync(
@@ -1249,7 +1250,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         {
             if (parsedAddress.IsIPv4MappedToIPv6)
                 parsedAddress = parsedAddress.MapToIPv4();
-            if (!IsPrivateAddress(parsedAddress))
+            if (!LocalNetworkAddress.IsPrivateOrDirectlyConnectedIpv4(parsedAddress))
                 return false;
             address = BuildControllerAddress(parsedAddress);
             return true;
@@ -1258,7 +1259,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         if (!TryNormalizeControllerAddress(value, out var normalized) ||
             !Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
             !IPAddress.TryParse(uri.Host, out parsedAddress) ||
-            !IsPrivateAddress(parsedAddress))
+            !LocalNetworkAddress.IsPrivateOrDirectlyConnectedIpv4(parsedAddress))
         {
             return false;
         }
@@ -1299,7 +1300,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 {
                     var address = unicast.Address;
                     if (address.AddressFamily != AddressFamily.InterNetwork ||
-                        !IsPrivateAddress(address))
+                        !LocalNetworkAddress.IsUsableAdapterIpv4(address))
                     {
                         continue;
                     }
@@ -1330,15 +1331,6 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             ControllerLog.Write("Could not enumerate local networks for controller discovery: " + ex.Message);
         }
         return addresses;
-    }
-
-    private static bool IsPrivateAddress(IPAddress address)
-    {
-        var bytes = address.GetAddressBytes();
-        return bytes[0] == 10 || bytes[0] == 127 ||
-               (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
-               (bytes[0] == 192 && bytes[1] == 168) ||
-               (bytes[0] == 169 && bytes[1] == 254);
     }
 
     private static string BuildControllerAddress(IPAddress address)
