@@ -9,7 +9,7 @@
     <RootNamespace>MulletHopWaiverKiosk</RootNamespace>
     <AssemblyTitle>Mullet Hop Waiver Kiosk</AssemblyTitle>
     <ApplicationIcon>..\assets\MulletHopFish.ico</ApplicationIcon>
-    <Version>2.10.4</Version>
+    <Version>2.10.5</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop Waiver Kiosk</Product>
     <Description>Full-screen Mullet Hop waiver kiosk with scheduled advertising and automatic updates.</Description>
@@ -36,6 +36,10 @@
              CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\assets\MulletHopScreensaver.mp4"
              Link="MulletHopScreensaver.mp4"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\assets\MulletHopBusinessClosed.mp4"
+             Link="MulletHopBusinessClosed.mp4"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

@@ -85,8 +85,10 @@ controller, restart the controller, or close it. Red and green lenses show the
 saved master role, and local controllers discover each other when they launch.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.10.4, Kiosk Controller version 1.11.1, and Mullet Hop POS
-version 1.4.1 are the matching package releases. Waiver Kiosk version 2.10.1 places
+Waiver Kiosk version 2.10.5, Kiosk Controller version 1.11.1, and Mullet Hop POS
+version 1.4.1 are the matching package releases. Waiver Kiosk version 2.10.5 adds
+the looping sold-out video with a live next-opening time from Business Hours.
+Waiver Kiosk version 2.10.1 places
 guest assistance in a compact highlighted card
 with the other right-side waiver controls and moves that card stack near the top
 so it does not cover waiver information. Version 2.10.0 adds the guest-assistance
@@ -244,8 +246,10 @@ Appearance, Waiver Station, Business Hours, and Ads & Staff Tools pages.
 * Enable automatic business hours and set opening and closing times independently
   for every day of the week. Automatic business hours are off until staff enable
   them, so updating an existing kiosk does not unexpectedly close it.
-* Select how long the Business Closed message remains visible before the display
-  becomes fully black. The default is 5 minutes.
+* Select how long the looping Business Closed video remains visible before the
+  display becomes fully black. The default is 5 minutes. Its live overlay says
+  that no jump times remain today and shows the next opening day and time from
+  the saved Business Hours schedule.
 * Select how many minutes before the next scheduled opening the normal video
   screensaver begins. The default is 30 minutes; selecting 0 disables the
   pre-opening screensaver.
@@ -374,10 +378,13 @@ WHAT THE KIOSK DOES
   focused so staff can type immediately. Staff Settings also controls the
   screensaver delay, and Return to Kiosk reloads a clean waiver starting page.
 * Supports an optional weekly business-hours schedule. At closing time, the kiosk
-  clears the guest session and shows a branded Business Closed page for the saved
-  period (5 minutes by default), then disables browser input on a completely black
-  display. Only the staff shortcut and password can open Staff Settings while the
-  display is black.
+  clears the guest session and shows a branded, looping Business Closed video for
+  the saved period (5 minutes by default). Live text above the video says that no
+  jump times remain today and calculates the next opening day and time from the
+  kiosk's saved Business Hours. A local edit or controller sync refreshes that
+  opening time while the screen is displayed. The kiosk then disables browser
+  input on a completely black display. Only the staff shortcut and password can
+  open Staff Settings while the display is black.
 * Automatically changes the black display to the packaged video screensaver at
   the staff-selected lead time before the next opening. From that point the video
   behaves like the normal screensaver: the first touch or keypress clears the

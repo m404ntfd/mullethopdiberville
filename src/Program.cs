@@ -307,6 +307,7 @@ internal sealed partial class KioskForm : Form
     private const string AdvertisementVirtualHost = "mullethop-ads.local";
     private const string ScreensaverVirtualHost = "mullethop-kiosk.local";
     private const string ScreensaverFileName = "MulletHopScreensaver.mp4";
+    private const string BusinessClosedVideoFileName = "MulletHopBusinessClosed.mp4";
     private const string KioskBackgroundFileName = "MulletHopKioskBackground.jpg";
     private const string LogoUrl =
         "https://www.coastalmississippi.com/imager/files_idss_com/C537/images/listings/Mullet-Hop-eea044b35056a36_e45adf5f6bc0c5c2a30a39868f44eab6.png";
@@ -348,6 +349,7 @@ internal sealed partial class KioskForm : Form
     private string? _waiverPageScriptId;
     private DateTime? _businessClosedPeriodStartedUtc;
     private string? _businessClosedPeriodKey;
+    private long? _businessClosedDisplayedOpeningTicks;
     private long? _dismissedPreOpeningTicks;
     private DateTime? _preOpeningScreensaverOpeningTime;
     private bool _lastDarkTheme;
@@ -1248,6 +1250,15 @@ internal sealed partial class KioskForm : Form
             }
 
             var startedNewClosedPeriod = EnsureBusinessClosedPeriod(status, now);
+            var displayedOpeningChanged = _showingBusinessClosedPage &&
+                _businessClosedDisplayedOpeningTicks != status.NextOpening?.Ticks;
+            if (displayedOpeningChanged)
+            {
+                ShowBusinessClosedPage(status.NextOpening);
+                KioskLog.Write("The Business Closed reopening time was refreshed after a schedule change.");
+                return;
+            }
+
             if (startedNewClosedPeriod && !_showingBusinessClosedPage && !_showingBlackout)
             {
                 await ResetForNextGuestAsync(
@@ -1298,6 +1309,7 @@ internal sealed partial class KioskForm : Form
     {
         _businessClosedPeriodKey = null;
         _businessClosedPeriodStartedUtc = null;
+        _businessClosedDisplayedOpeningTicks = null;
     }
 
     private void SetBrowserInputEnabled(bool enabled)
@@ -1318,6 +1330,7 @@ internal sealed partial class KioskForm : Form
         _showingScreensaver = false;
         _preOpeningScreensaverActive = false;
         _preOpeningScreensaverOpeningTime = null;
+        _businessClosedDisplayedOpeningTicks = nextOpening?.Ticks;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
@@ -1410,6 +1423,7 @@ internal sealed partial class KioskForm : Form
         _showingScreensaver = false;
         _preOpeningScreensaverActive = false;
         _preOpeningScreensaverOpeningTime = null;
+        _businessClosedDisplayedOpeningTicks = null;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
@@ -1433,6 +1447,7 @@ internal sealed partial class KioskForm : Form
         _showingScreensaver = false;
         _preOpeningScreensaverActive = false;
         _preOpeningScreensaverOpeningTime = null;
+        _businessClosedDisplayedOpeningTicks = null;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
@@ -1583,16 +1598,23 @@ internal sealed partial class KioskForm : Form
         int? previewSeconds = null)
     {
         var backgroundUrl = $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}";
+        var videoUrl = $"https://{ScreensaverVirtualHost}/{BusinessClosedVideoFileName}";
         var logoDataUrl = GetApplicationLogoDataUrl();
-        var logoMarkup = string.IsNullOrWhiteSpace(logoDataUrl)
-            ? "<div class=\"logo-fallback\">MULLET HOP</div>"
-            : $"<img class=\"fish-logo\" src=\"{logoDataUrl}\" alt=\"Mullet Hop fish logo\">";
+        var logoMarkup = (string.IsNullOrWhiteSpace(logoDataUrl)
+                ? string.Empty
+                : $"<img class=\"fish-logo\" src=\"{logoDataUrl}\" alt=\"\">") +
+            "<div class=\"brand-copy\"><strong>MULLET HOP</strong>" +
+            "<span>TRAMPOLINE PARK</span></div>";
         var openingMarkup = nextOpening.HasValue
-            ? "<p class=\"opening\">We reopen <strong>" +
-                System.Net.WebUtility.HtmlEncode(
-                    nextOpening.Value.ToString("dddd, MMMM d 'at' h:mm tt")) +
-                ".</strong></p>"
-            : "<p class=\"opening\">Please check with the front desk for our next opening time.</p>";
+            ? "<section class=\"opening\" aria-label=\"Next opening time\">" +
+                "<span class=\"opening-label\">WE WILL REOPEN</span>" +
+                "<strong class=\"opening-day\">" +
+                System.Net.WebUtility.HtmlEncode(nextOpening.Value.ToString("dddd, MMMM d")) +
+                "</strong><strong class=\"opening-time\">AT " +
+                System.Net.WebUtility.HtmlEncode(nextOpening.Value.ToString("h:mm tt")) +
+                "</strong></section>"
+            : "<section class=\"opening\"><span class=\"opening-label\">NEXT OPENING</span>" +
+                "<strong class=\"opening-day opening-unavailable\">Please check with the front desk.</strong></section>";
         var previewMarkup = previewSeconds.HasValue
             ? "<div class=\"business-preview-banner\" role=\"status\" aria-live=\"polite\">" +
                 "THIS IS A PREVIEW &mdash; Returning to Staff Settings in " +
@@ -1632,6 +1654,7 @@ internal sealed partial class KioskForm : Form
                 :root {
                   --lime: #76c442;
                   --aqua: #00a4d6;
+                  --blue: #0877bd;
                   --purple: #75449a;
                   --orange: #f58220;
                   --ink: #101820;
@@ -1642,18 +1665,34 @@ internal sealed partial class KioskForm : Form
                   display: grid;
                   place-items: center;
                   padding: 28px;
-                  color: var(--ink);
+                  color: #fff;
                   font-family: 'Open Sans', 'Segoe UI', Arial, sans-serif;
-                  background-color: #eefaff;
-                  background-image:
-                    linear-gradient(rgba(247,252,255,.18), rgba(247,252,255,.18)),
-                    url('{{backgroundUrl}}');
+                  background-color: #031e42;
+                  background-image: url('{{backgroundUrl}}');
                   background-position: center;
                   background-size: cover;
                 }
+                .video-background {
+                  position: fixed;
+                  z-index: 0;
+                  inset: 0;
+                  width: 100%;
+                  height: 100%;
+                  object-fit: cover;
+                  background: #031e42;
+                }
+                .video-shade {
+                  position: fixed;
+                  z-index: 1;
+                  inset: 0;
+                  background:
+                    radial-gradient(circle at 50% 45%, rgba(3,30,66,.18), rgba(3,30,66,.60)),
+                    linear-gradient(180deg, rgba(3,30,66,.20), rgba(3,30,66,.42));
+                  pointer-events: none;
+                }
                 .business-preview-banner {
                   position: fixed;
-                  z-index: 20;
+                  z-index: 30;
                   top: 0;
                   left: 0;
                   right: 0;
@@ -1679,117 +1718,151 @@ internal sealed partial class KioskForm : Form
                 }
                 body.business-preview-mode { padding-top: 96px; }
                 .card {
-                  width: min(980px, 94vw);
+                  position: relative;
+                  z-index: 10;
+                  width: min(1080px, 94vw);
                   max-height: 94vh;
                   overflow: hidden;
-                  border: 4px solid var(--ink);
-                  border-radius: 30px;
-                  background: #fff;
-                  box-shadow: 0 22px 55px rgba(16,24,32,.24);
+                  border: 4px solid rgba(255,255,255,.92);
+                  border-radius: 34px;
+                  background: rgba(3,30,66,.88);
+                  box-shadow: 0 28px 70px rgba(0,0,0,.46);
+                  backdrop-filter: blur(7px);
                   text-align: center;
                 }
                 .stripe {
                   height: 17px;
                   background: linear-gradient(90deg, var(--lime) 0 25%, var(--aqua) 25% 50%, var(--purple) 50% 75%, var(--orange) 75% 100%);
                 }
-                .content { padding: clamp(24px, 4.5vh, 48px) clamp(28px, 6vw, 74px) 42px; }
-                .brand { min-height: 118px; display: grid; place-items: center; margin-bottom: 6px; }
-                .fish-logo { width: 132px; height: 132px; object-fit: contain; }
-                .logo-fallback {
-                  color: #0877bd;
-                  font-size: clamp(34px, 5vw, 60px);
+                .content { padding: clamp(20px, 3.5vh, 38px) clamp(28px, 6vw, 76px) clamp(28px, 4.5vh, 48px); }
+                .brand {
+                  min-height: 110px;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  gap: 18px;
+                  margin-bottom: 4px;
+                }
+                .fish-logo { width: 108px; height: 108px; object-fit: contain; }
+                .brand-copy { display: grid; justify-items: start; }
+                .brand-copy strong {
+                  color: #fff;
+                  font-size: clamp(32px, 4.3vw, 58px);
+                  line-height: .95;
+                  font-weight: 900;
+                  letter-spacing: -2px;
+                  -webkit-text-stroke: 2px var(--blue);
+                  text-shadow: 0 4px 0 rgba(0,0,0,.28);
+                }
+                .brand-copy span {
+                  margin-top: 8px;
+                  padding: 5px 13px;
+                  background: var(--ink);
+                  color: #fff;
+                  font-size: clamp(12px, 1.25vw, 17px);
+                  line-height: 1;
                   font-weight: 800;
-                  -webkit-text-stroke: 2px var(--ink);
+                  letter-spacing: 3px;
                 }
                 .badge {
                   display: inline-grid;
                   place-items: center;
-                  min-width: 140px;
-                  height: 62px;
-                  margin: 4px auto 18px;
+                  min-width: 190px;
+                  height: 54px;
+                  margin: 4px auto 15px;
                   padding: 0 26px;
-                  border: 4px solid var(--ink);
+                  border: 3px solid #fff;
                   border-radius: 999px;
                   background: var(--orange);
-                  box-shadow: 0 8px 0 rgba(16,24,32,.12);
-                  font-size: 22px;
+                  box-shadow: 0 8px 0 rgba(0,0,0,.18);
+                  color: var(--ink);
+                  font-size: 19px;
                   font-weight: 800;
-                  letter-spacing: 1px;
+                  letter-spacing: 1.8px;
                 }
                 h1 {
-                  margin: 0 auto 24px;
-                  color: var(--purple);
-                  font-size: clamp(42px, 6vw, 76px);
-                  line-height: 1.02;
+                  max-width: 920px;
+                  margin: 0 auto 21px;
+                  color: #fff;
+                  font-size: clamp(38px, 5.15vw, 68px);
+                  line-height: 1.04;
                   font-weight: 800;
-                  letter-spacing: -2px;
+                  letter-spacing: -1.5px;
+                  text-shadow: 0 4px 16px rgba(0,0,0,.35);
                 }
                 .message {
-                  margin: 0 auto 20px;
-                  padding: 23px 30px;
-                  border: 3px solid var(--aqua);
-                  border-radius: 18px;
-                  background: #eefaff;
-                  font-size: clamp(21px, 2.4vw, 31px);
-                  line-height: 1.35;
-                  font-weight: 700;
+                  margin: 0 auto 18px;
+                  color: #d8fff7;
+                  font-size: clamp(20px, 2.1vw, 28px);
+                  line-height: 1.3;
+                  font-weight: 600;
                 }
                 .opening {
                   margin: 0 auto;
-                  padding: 22px 28px;
+                  padding: 18px 28px 21px;
                   border: 3px solid var(--lime);
-                  border-radius: 18px;
-                  background: #f7fff2;
-                  font-size: clamp(20px, 2.25vw, 29px);
-                  line-height: 1.3;
+                  border-radius: 22px;
+                  background: rgba(16,24,32,.76);
+                  box-shadow: inset 0 0 32px rgba(124,218,36,.08);
                 }
-                .opening strong { color: #397819; }
-                body.dark-theme {
-                  color: #edf3f7;
-                  background-color: #111820;
-                  background-image:
-                    linear-gradient(rgba(10,16,23,.78), rgba(10,16,23,.78)),
-                    url('{{backgroundUrl}}');
+                .opening-label {
+                  display: block;
+                  margin-bottom: 5px;
+                  color: var(--lime);
+                  font-size: clamp(16px, 1.6vw, 22px);
+                  line-height: 1.1;
+                  font-weight: 800;
+                  letter-spacing: 2.5px;
                 }
-                body.dark-theme .card {
-                  background: #1b242e;
-                  border-color: #d6e1e8;
-                  box-shadow: 0 22px 55px rgba(0,0,0,.5);
+                .opening-day,
+                .opening-time {
+                  display: block;
+                  color: #fff;
+                  line-height: 1.08;
+                  font-weight: 800;
                 }
-                body.dark-theme h1 { color: #d3a4ee; }
-                body.dark-theme .message {
-                  color: #edf3f7;
-                  background: #273643;
+                .opening-day { font-size: clamp(28px, 3.6vw, 46px); }
+                .opening-time {
+                  margin-top: 3px;
+                  color: #ffb36c;
+                  font-size: clamp(29px, 3.9vw, 50px);
                 }
-                body.dark-theme .opening {
-                  color: #edf3f7;
-                  background: #26372d;
-                }
-                body.dark-theme .opening strong { color: #9ddd83; }
+                .opening-unavailable { font-size: clamp(23px, 3vw, 36px); }
                 @media (max-height: 720px) {
-                  .content { padding-top: 20px; padding-bottom: 24px; }
-                  .brand { min-height: 78px; }
-                  .fish-logo { width: 86px; height: 86px; }
-                  .badge { height: 48px; margin-bottom: 12px; font-size: 18px; }
-                  h1 { margin-bottom: 15px; }
-                  .message, .opening { padding-top: 15px; padding-bottom: 15px; }
-                  .message { margin-bottom: 14px; }
+                  .content { padding-top: 14px; padding-bottom: 20px; }
+                  .brand { min-height: 74px; }
+                  .fish-logo { width: 72px; height: 72px; }
+                  .brand-copy strong { font-size: 34px; }
+                  .brand-copy span { margin-top: 4px; font-size: 11px; }
+                  .badge { height: 42px; margin-bottom: 10px; font-size: 16px; }
+                  h1 { margin-bottom: 10px; }
+                  .message { margin-bottom: 10px; }
+                  .opening { padding-top: 12px; padding-bottom: 14px; }
                 }
               </style>
             </head>
             <body class="{{previewBodyClass}}">
+              <video class="video-background" autoplay loop muted playsinline preload="auto"
+                     poster="{{backgroundUrl}}" aria-hidden="true"
+                     onerror="this.style.display='none'">
+                <source src="{{videoUrl}}" type="video/mp4">
+              </video>
+              <div class="video-shade" aria-hidden="true"></div>
               {{previewMarkup}}
               <main class="card" aria-labelledby="business-closed-heading">
                 <div class="stripe"></div>
                 <div class="content">
                   <div class="brand">{{logoMarkup}}</div>
-                  <div class="badge" aria-hidden="true">CLOSED</div>
-                  <h1 id="business-closed-heading">BUSINESS CLOSED</h1>
-                  <p class="message">Mullet Hop is currently closed. Please return during our normal business hours.</p>
+                  <div class="badge" aria-hidden="true">SOLD OUT TODAY</div>
+                  <h1 id="business-closed-heading">NO MORE JUMP TIMES ARE AVAILABLE TODAY</h1>
+                  <p class="message">Thanks for hopping with us! We look forward to seeing you on our next business day.</p>
                   {{openingMarkup}}
                 </div>
               </main>
               {{previewScript}}
+              <script>
+                document.querySelector('.video-background')?.play().catch(() => {});
+              </script>
             </body>
             </html>
             """;

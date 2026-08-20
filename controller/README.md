@@ -210,8 +210,9 @@ MANAGE HOURS AND KIOSK APPEARANCE
 ---------------------------------
 
 Select Business Hours in the Controller Program section. The Business Hours tab
-sets each day's opening and closing time, the Business Closed screen duration,
-and the pre-opening screensaver time. The Kiosk Appearance tab selects Auto,
+sets each day's opening and closing time, the Business Closed video duration,
+and the pre-opening screensaver time. The Business Closed video displays the next
+opening day and time from this synced schedule. The Kiosk Appearance tab selects Auto,
 Light, or Dark for the kiosks and can schedule selected days and a time to switch
 Light kiosks to Dark.
 

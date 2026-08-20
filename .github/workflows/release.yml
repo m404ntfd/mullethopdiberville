@@ -99,6 +99,18 @@ jobs:
 
           Write-Host "Screensaver video included: $($screensaver.Length) bytes."
 
+          $businessClosedPath = "publish/MulletHopBusinessClosed.mp4"
+          if (-not (Test-Path -LiteralPath $businessClosedPath -PathType Leaf)) {
+            throw "The published kiosk is missing $businessClosedPath."
+          }
+
+          $businessClosed = Get-Item -LiteralPath $businessClosedPath
+          if ($businessClosed.Length -lt 1MB) {
+            throw "The published Business Closed video is unexpectedly small."
+          }
+
+          Write-Host "Business Closed video included: $($businessClosed.Length) bytes."
+
           $backgroundPath = "publish/MulletHopKioskBackground.jpg"
           if (-not (Test-Path -LiteralPath $backgroundPath -PathType Leaf)) {
             throw "The published kiosk is missing $backgroundPath."
