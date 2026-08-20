@@ -20,6 +20,10 @@ internal sealed class FirefoxHost : IDisposable
     private const long WsSystemMenu = 0x00080000L;
     private const long WsChild = 0x40000000L;
     private const long WsVisible = 0x10000000L;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
     private const uint SwpFrameChanged = 0x0020;
     private const uint SwpShowWindow = 0x0040;
 
@@ -29,6 +33,7 @@ internal sealed class FirefoxHost : IDisposable
     private Process? _windowProcess;
     private LilyPadCompatibilityBridge? _compatibilityBridge;
     private IntPtr _firefoxWindow;
+    private Size _lastEmbeddedSize = Size.Empty;
     private DateTime _startedUtc;
     private DateTime _attachedUtc;
     private int _attachAttempts;
@@ -179,7 +184,6 @@ internal sealed class FirefoxHost : IDisposable
                     "Firefox stopped responding. Select Refresh Lilypad to close it and reopen the LilyPad POS home page.");
                 return;
             }
-            ResizeEmbeddedWindow();
             DetectTabCrash();
             return;
         }
@@ -262,6 +266,15 @@ internal sealed class FirefoxHost : IDisposable
         style |= WsChild | WsVisible;
         SetWindowStyle(window, style);
         SetParent(window, _host.Handle);
+        _ = SetWindowPos(
+            window,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+        _lastEmbeddedSize = Size.Empty;
         _attachedUtc = DateTime.UtcNow;
         ResizeEmbeddedWindow();
         FocusEmbeddedWindow();
@@ -280,14 +293,21 @@ internal sealed class FirefoxHost : IDisposable
         if (_firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow) || !_host.IsHandleCreated)
             return;
 
-        SetWindowPos(
+        var size = new Size(
+            Math.Max(1, _host.ClientSize.Width),
+            Math.Max(1, _host.ClientSize.Height));
+        if (size == _lastEmbeddedSize)
+            return;
+
+        _ = SetWindowPos(
             _firefoxWindow,
             IntPtr.Zero,
             0,
             0,
-            Math.Max(1, _host.ClientSize.Width),
-            Math.Max(1, _host.ClientSize.Height),
-            SwpFrameChanged | SwpShowWindow);
+            size.Width,
+            size.Height,
+            SwpNoZOrder | SwpNoActivate | SwpShowWindow);
+        _lastEmbeddedSize = size;
     }
 
     private void FirefoxExited(object? sender, EventArgs e)
@@ -401,7 +421,6 @@ internal sealed class FirefoxHost : IDisposable
                            AttachThreadInput(currentThread, browserThread, true);
             try
             {
-                _host.Focus();
                 _ = SetForegroundWindow(form.Handle);
                 _ = SetFocus(_firefoxWindow);
             }

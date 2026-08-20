@@ -28,36 +28,78 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
             }
             root.dataset.mulletHopLocationCompatibility = "1";
 
-            let requestInFlight = false;
-            const requestLocations = event => {
-              const target = event.target;
-              if (!(target instanceof Element) || target.id !== "Password") {
-                return;
-              }
-
+            let requestTimer = 0;
+            let requestSequence = 0;
+            let lastRequestedUsername = "";
+            const requestLocations = () => {
               const username = document.getElementById("Username");
               if (!(username instanceof HTMLInputElement) || !username.value.trim()) {
                 return;
               }
 
+              const usernameValue = username.value.trim();
               const station = document.getElementById("StationName");
-              if (station instanceof HTMLSelectElement && station.options.length > 1) {
-                return;
-              }
-              if (requestInFlight || typeof window.ajaxFunction !== "function") {
+              if (usernameValue === lastRequestedUsername &&
+                  station instanceof HTMLSelectElement &&
+                  station.options.length > 1) {
                 return;
               }
 
-              requestInFlight = true;
-              try {
-                window.ajaxFunction();
-              } finally {
-                window.setTimeout(() => { requestInFlight = false; }, 1500);
+              const ajaxDisplay = document.getElementById("ajaxDiv");
+              if (!(ajaxDisplay instanceof HTMLElement)) {
+                return;
+              }
+
+              lastRequestedUsername = usernameValue;
+              const sequence = ++requestSequence;
+              const endpoint = new URL("CheckUsernameLoginScript.php", location.href);
+              endpoint.searchParams.set("UN", usernameValue);
+              fetch(endpoint, {
+                cache: "no-store",
+                credentials: "same-origin"
+              })
+                .then(response => {
+                  if (!response.ok) {
+                    throw new Error(`LilyPad returned HTTP ${response.status}.`);
+                  }
+                  return response.text();
+                })
+                .then(html => {
+                  if (sequence === requestSequence &&
+                      username.value.trim() === usernameValue) {
+                    ajaxDisplay.innerHTML = html;
+                  }
+                })
+                .catch(() => {
+                  if (sequence === requestSequence &&
+                      typeof window.ajaxFunction === "function") {
+                    window.ajaxFunction();
+                  }
+                });
+            };
+
+            const scheduleLocations = () => {
+              window.clearTimeout(requestTimer);
+              requestTimer = window.setTimeout(requestLocations, 350);
+            };
+            const handleUsernameInput = event => {
+              const target = event.target;
+              if (target instanceof Element && target.id === "Username") {
+                scheduleLocations();
+              }
+            };
+            const handlePasswordFocus = event => {
+              const target = event.target;
+              if (target instanceof Element && target.id === "Password") {
+                window.clearTimeout(requestTimer);
+                requestLocations();
               }
             };
 
-            document.addEventListener("pointerdown", requestLocations, true);
-            document.addEventListener("focusin", requestLocations, true);
+            document.addEventListener("input", handleUsernameInput, true);
+            document.addEventListener("change", handleUsernameInput, true);
+            document.addEventListener("pointerdown", handlePasswordFocus, true);
+            document.addEventListener("focusin", handlePasswordFocus, true);
           };
 
           if (document.readyState === "loading") {
