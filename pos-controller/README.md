@@ -1,75 +1,77 @@
-# Mullet Hop POS Controller
+# Mullet Hop Kiosk Status Viewer
 
-The POS Controller is a separate Windows application for front-desk computers.
-It shows four numbered waiver-station controls based on the supplied layout:
+The Kiosk Status Viewer is the full-screen front-desk application for Mullet Hop.
+It uses Mozilla Firefox installed on the computer to load:
 
-* A bright green light means the linked kiosk is online and open to guests.
-* A bright red light means the kiosk is offline, closed, outside business hours,
-  unable to reach the waiver website, or reporting another error.
-* All three indicator lenses remain visible in a dark state when a dashboard
-  slot is not linked.
-* A flashing yellow light means the guest has requested staff assistance.
-* **Close Station** displays the waiver station closed screen.
-* **Put In Service** removes the staff-controlled closed screen and returns the
-  station to a fresh waiver.
-* **Reset to Start** clears the current waiver and returns to its starting page.
-* **Respond: On the Way** acknowledges an assistance call. The yellow POS light
-  stops flashing and the kiosk tells the guest that a staff member is coming.
-  The kiosk continues flashing until the call is cleared on that kiosk.
+`https://mullet.lilypadpos.app/public/Login.php`
 
-The dashboard buttons and **Check for Updates** do not require a passcode. The
-Staff Menu button does. Press **Ctrl + Alt + M** while the POS Controller is
-active to open the same passcode-protected Staff Menu.
+LilyPad POS fills the main area. A permanent right sidebar shows the four assigned
+waiver kiosks and keeps their controls available without covering the POS page.
+
+## Sidebar behavior
+
+* Select **Collapse Controls** at the top to reduce the sidebar to K1–K4, one
+  status dot per kiosk, and a compact assistance acknowledgement button.
+* Select the arrow again to expand kiosk names, status messages, and the Close,
+  Open, and Reset controls.
+* A green dot means the kiosk is online and open to guests.
+* A red dot means the kiosk is closed, offline, outside business hours, unable to
+  reach the waiver website, or reporting another error.
+* A gray dot means that dashboard position is not assigned.
+* When a guest requests assistance, the kiosk's dot flashes between its current
+  status color and yellow. Select **ACK** or **Acknowledge** to tell the guest
+  that assistance is on the way; the dot then returns to its current status color.
+* **Close** displays the waiver-station closed screen.
+* **Open** removes the staff-controlled closed screen and starts a fresh waiver.
+* **Reset** returns the kiosk to the beginning of the waiver.
+
+The bottom of the sidebar contains Reload LilyPad, Staff Menu, Check for Updates,
+Minimize, and Exit Application. **Minimize** sends the viewer and its Firefox
+window to the Windows notification area. Double-click the orange-fish tray icon,
+or right-click it and select **Show Kiosk Status Viewer**, to restore the full-screen
+window. A normal close command also sends the viewer to the tray. Only the
+passcode-protected **Exit Application** command closes Firefox and stops the
+viewer. Press **Ctrl + Alt + M** while the viewer is active to open the protected
+Staff Menu.
 
 ## Installation
 
-1. Keep the on-site Mullet Hop Kiosk Controller running on the same private
-   network as the waiver kiosks and POS computers.
-2. Extract the complete Mullet-Hop-POS-Controller ZIP package.
-3. Run `Install-POS-Controller.cmd`.
-4. Create a 4–8 digit Settings passcode on the first launch.
-5. Select **Staff Menu** (or press **Ctrl + Alt + M**) and enter that passcode.
-6. Copy the controller address and pairing key from the main Kiosk Controller.
-7. Select **Connect & Remember**. The verified controller address and pairing
-   key are saved immediately. Paired devices are automatically added to the next
-   open Kiosk 1–4 position. In **Known Machines & Dashboard Assignments**, select
-   the machine for each numbered position. Choosing a machine that is already in
-   another position automatically moves or swaps it.
-8. Select **Save Kiosk Assignments** inside the assignment section to confirm
-   and save the Kiosk 1–4 positions immediately. **Save Settings** also saves all
-   connection, assignment, and passcode changes.
+1. Install Mozilla Firefox on the front-desk computer.
+2. Keep the on-site Mullet Hop Kiosk Controller running on the same private
+   network as the waiver kiosks and front-desk computer.
+3. Extract the complete `Mullet-Hop-Kiosk-Status-Viewer` ZIP package.
+4. Run `Install-Kiosk-Status-Viewer.cmd`.
+5. Create a 4–8 digit Staff Menu passcode on the first launch.
+6. Open **Staff Menu**, then copy the controller address and pairing key from the
+   main Kiosk Controller.
+7. Select **Connect & Remember**. The verified controller address and pairing key
+   are saved immediately.
+8. Under **Known Machines & Dashboard Assignments**, choose the machine for each
+   Kiosk 1–4 position. Choosing a machine already assigned elsewhere moves or
+   swaps it automatically.
+9. Select **Save Kiosk Assignments** or **Save Settings**.
 
-The POS Controller talks to the on-site Kiosk Controller over TCP 47832 using
-the existing signed local-network connection. It does not open a listening port
-and does not require a firewall exception on the POS computer. Commands normally
-reach online kiosks within five seconds. The newest command waits when a kiosk is
-temporarily offline.
+The viewer talks to the on-site Kiosk Controller over TCP 47832 using the existing
+signed local-network connection. It does not open a listening port and does not
+require a firewall exception on the viewer computer. New paired devices are saved
+in the next open position without renumbering existing assignments.
 
-While the dashboard is running, it continues pulling the paired-device list.
-New devices are automatically saved in the next open position without changing
-the numbers of kiosks that were already assigned. When all four positions are
-filled, additional devices remain available in Settings for manual reassignment.
-The last known kiosk name and machine name are also remembered, so an assigned
-position remains identifiable while either the kiosk or controller is offline.
+## Firefox profile and saved data
 
-## Updates and saved data
+The application starts Firefox with a dedicated profile stored with the existing
+viewer data. This keeps the LilyPad login and Firefox site data available between
+restarts without changing the user's normal Firefox profile.
 
-The POS Controller is packaged separately under the `pos` Velopack channel and
-checks for updates when it starts. Select **Check for Updates** at the bottom-right
-of the dashboard to check manually. When an update is found, it is downloaded and
-the program asks whether to install it. If installation is postponed, the button
-changes to **Install Update** until the downloaded update is installed. Its
-passcode and kiosk assignments are stored separately from both the Waiver Kiosk
-and Kiosk Controller settings.
+Version 1.4.0 is the first release named **Kiosk Status Viewer**. It preserves the
+former POS Controller's internal package ID, `pos` update channel, saved-data
+folder, controller key, passcode, remembered kiosks, and Kiosk 1–4 assignments so
+existing installations upgrade in place. It also renames the existing Start Menu
+shortcut automatically.
 
-POS Controller version 1.2.0 adds a flashing yellow guest-assistance light and a
-per-kiosk response button. Version 1.1.1 immediately remembers every verified
-controller connection and preserves the identity and Kiosk 1–4 position of each
-linked waiver station. Use the visible **Staff Menu** button in the upper-right
-corner to change the controller address, pairing key, assignments, or Staff Menu
-passcode.
+The Kiosk Status Viewer checks the public `mullethopdiberville` GitHub release
+feed when it starts. Select **Check for Updates** in the sidebar to check manually.
+When an update is downloaded, the viewer can install it and restart automatically.
 
-POS Controller version 1.3.0 adds **Ctrl + Alt + M** Staff Menu access and a
-clear known-machines assignment menu. Moving a machine to another Kiosk 1–4
-position now swaps the affected positions automatically and saves without
-changing the controller connection or pairing key.
+Version 1.3.0 added Ctrl + Alt + M Staff Menu access and automatic move/swap
+assignment behavior. Version 1.2.0 added guest-assistance alerts and response
+controls. Version 1.1.1 added persistent controller connections and assignments.

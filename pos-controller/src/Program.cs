@@ -5,6 +5,8 @@ namespace MulletHopPosController;
 internal static class Program
 {
     private const string MutexName = "MulletHopPosController.SingleInstance";
+    private const string LegacyShortcutName = "Mullet Hop POS Controller.lnk";
+    private const string CurrentShortcutName = "Mullet Hop Kiosk Status Viewer.lnk";
 
     [STAThread]
     private static void Main(string[] args)
@@ -26,13 +28,14 @@ internal static class Program
         if (!ownsMutex)
         {
             MessageBox.Show(
-                "The Mullet Hop POS Controller is already running.",
-                "Mullet Hop POS Controller",
+                "The Mullet Hop Kiosk Status Viewer is already running.",
+                "Mullet Hop Kiosk Status Viewer",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
             return;
         }
 
+        MigrateStartMenuShortcut();
         PosUpdater.ApplyAvailableUpdateOnStartup();
 
         try
@@ -45,10 +48,34 @@ internal static class Program
         {
             PosLog.Write("Fatal startup error: " + ex);
             MessageBox.Show(
-                "The POS Controller could not start.\n\n" + ex.Message,
-                "Mullet Hop POS Controller",
+                "The Kiosk Status Viewer could not start.\n\n" + ex.Message,
+                "Mullet Hop Kiosk Status Viewer",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+    }
+
+    private static void MigrateStartMenuShortcut()
+    {
+        try
+        {
+            var startMenuFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Microsoft", "Windows", "Start Menu", "Programs", "Mullet Hop");
+            var legacyPath = Path.Combine(startMenuFolder, LegacyShortcutName);
+            if (!File.Exists(legacyPath))
+                return;
+
+            var currentPath = Path.Combine(startMenuFolder, CurrentShortcutName);
+            if (File.Exists(currentPath))
+                File.Delete(legacyPath);
+            else
+                File.Move(legacyPath, currentPath);
+            PosLog.Write("The Start menu shortcut was renamed to Kiosk Status Viewer.");
+        }
+        catch (Exception ex)
+        {
+            PosLog.Write("Start menu shortcut rename error: " + ex.Message);
         }
     }
 }
@@ -77,7 +104,7 @@ internal static class PosLog
         }
         catch
         {
-            // Logging must never stop front-desk controls.
+            // Logging must never stop front-desk status and controls.
         }
     }
 }

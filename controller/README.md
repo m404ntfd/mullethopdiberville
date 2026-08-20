@@ -16,7 +16,7 @@ computers discover each other, and one can be designated as the master. It provi
   until that kiosk reconnects.
 * Optional secure Cloudflare synchronization for a controller installed away
   from the kiosk network.
-* A signed status/control connection for the separate front-desk POS Controller.
+* A signed status/control connection for the separate front-desk Kiosk Status Viewer.
 * Local-network kiosk discovery with a required approval prompt on the kiosk.
 * Code-free manual pairing by kiosk IPv4 address, plus a self-contained setup-code fallback.
 * A persistent red/green master-controller indicator with single-master checks.
@@ -95,7 +95,7 @@ network discovery.
 Repeat those steps for each kiosk. The discovery exchange encrypts the pairing
 key, and the kiosk saves the approved connection before authenticated remote
 check-ins begin. The controller saves the kiosk in its managed-device history. A
-linked POS Controller then adds it to the next open Kiosk 1–4 position and saves
+linked Kiosk Status Viewer then adds it to the next open Kiosk 1–4 position and saves
 that assignment automatically.
 
 The controller address and pairing key are exchanged automatically only after
@@ -157,7 +157,7 @@ Select one kiosk in the list, then choose:
 Double-clicking a kiosk row also toggles that kiosk between open and closed.
 
 When a guest selects Call for Assistance at a kiosk, that kiosk's Assistance
-column flashes yellow with HELP. The POS Controller can acknowledge the call;
+column flashes yellow with HELP. The Kiosk Status Viewer can acknowledge the call;
 the controller row then displays On the way. The call remains active and keeps
 flashing on the kiosk itself until it is cleared at the kiosk.
 
@@ -234,7 +234,7 @@ the Controller Program buttons and adds code-free manual pairing by kiosk IPv4
 address. Waiver Kiosk version 2.10.0 uses
 the existing outbound discovery and encrypted approval exchange for the IP
 workflow. The long self-contained setup code remains available as a fallback.
-Controller version 1.7.0 adds the separate POS Controller connection. Waiver
+Controller version 1.7.0 adds the separate Kiosk Status Viewer connection. Waiver
 Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus the
 reset-to-start command.
 

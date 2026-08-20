@@ -22,36 +22,41 @@ internal sealed class PinEntryDialog : Form
     private readonly TextBox _pin = new();
     public string Pin => _pin.Text;
 
-    public PinEntryDialog()
+    public PinEntryDialog(
+        string title = "Kiosk Status Viewer Staff Menu",
+        string? instruction = null,
+        string actionText = "Open Staff Menu")
     {
-        Text = "POS Controller Staff Menu";
+        Text = title;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(420, 205);
+        ClientSize = new Size(420, 235);
         Font = new Font("Segoe UI", 10);
 
         var heading = new Label
         {
-            Text = "Enter the Staff Menu passcode",
+            Text = instruction is null
+                ? "Enter the Staff Menu passcode"
+                : title,
             Font = new Font("Segoe UI", 14, FontStyle.Bold),
             Bounds = new Rectangle(25, 22, 370, 34),
             TextAlign = ContentAlignment.MiddleCenter
         };
         var note = new Label
         {
-            Text = "A 4–8 digit passcode is required to open the Staff Menu.",
-            Bounds = new Rectangle(25, 60, 370, 28),
+            Text = instruction ?? "A 4–8 digit passcode is required to open the Staff Menu.",
+            Bounds = new Rectangle(25, 60, 370, 50),
             TextAlign = ContentAlignment.MiddleCenter
         };
-        _pin.Bounds = new Rectangle(100, 98, 220, 32);
+        _pin.Bounds = new Rectangle(100, 118, 220, 32);
         _pin.TextAlign = HorizontalAlignment.Center;
         NumericPinInput.Configure(_pin);
         var open = new Button
         {
-            Text = "Open Staff Menu",
-            Bounds = new Rectangle(105, 150, 135, 38),
+            Text = actionText,
+            Bounds = new Rectangle(95, 178, 155, 38),
             BackColor = Color.FromArgb(117, 68, 154),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat
@@ -59,7 +64,7 @@ internal sealed class PinEntryDialog : Form
         var cancel = new Button
         {
             Text = "Cancel",
-            Bounds = new Rectangle(250, 150, 85, 38),
+            Bounds = new Rectangle(260, 178, 85, 38),
             DialogResult = DialogResult.Cancel
         };
         open.Click += (_, _) =>
@@ -87,7 +92,7 @@ internal sealed class PinSetupDialog : Form
 
     public PinSetupDialog()
     {
-        Text = "Create POS Settings Passcode";
+        Text = "Create Kiosk Status Viewer Passcode";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
@@ -97,7 +102,7 @@ internal sealed class PinSetupDialog : Form
 
         Controls.Add(new Label
         {
-            Text = "Protect the POS Controller settings",
+            Text = "Protect the Kiosk Status Viewer settings",
             Font = new Font("Segoe UI", 14, FontStyle.Bold),
             Bounds = new Rectangle(25, 20, 420, 36),
             TextAlign = ContentAlignment.MiddleCenter
