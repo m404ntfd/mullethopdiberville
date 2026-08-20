@@ -48,6 +48,14 @@ Only if the recovery also fails does a red banner ask staff to use **Refresh
 Lilypad**. Refresh Lilypad forcibly terminates the Firefox process tree, clears
 every saved tab and session, and opens one fresh LilyPad home page.
 
+The dedicated Firefox session always starts from a clean tab/session state and loads
+the LilyPad login page with JavaScript and fresh HTTP responses enabled. On LilyPad,
+moving from the username field into the password field fires the page's native
+username-change request; LilyPad then supplies the location and station choices for
+that employee. The POS host restores cross-process Firefox focus after activation so
+that this username → password → location-selection sequence continues to work after
+the POS window has been minimized or covered.
+
 ## Installation
 
 1. Install Mozilla Firefox on the front-desk computer.
@@ -78,7 +86,11 @@ The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
 restarts without changing the user's normal Firefox profile.
 
-Version 1.5.1 minimizes to the Windows taskbar, renames the controls to Settings
+Version 1.7.0 always opens one clean LilyPad login session, avoids stale cached
+login responses, and strengthens cross-process Firefox focus after the POS window
+is activated. This preserves LilyPad's native username-change request when staff
+move into the password field, allowing LilyPad to display the employee's location
+and station choices. Version 1.5.1 minimizes to the Windows taskbar, renames the controls to Settings
 and Refresh Lilypad, restores Firefox input focus, and performs one automatic
 full-session recovery before reporting a Firefox failure. Version 1.5.0 keeps
 Firefox's menu and browser controls visible, detects a crashed

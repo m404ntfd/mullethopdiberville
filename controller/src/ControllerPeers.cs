@@ -594,7 +594,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         CancellationToken cancellationToken,
         Action<string>? reportFailure = null,
         string? expectedControllerId = null,
-        string? expectedPairingKey = null)
+        string? expectedPairingKey = null,
+        bool allowDuplicateIdentityRepair = true)
     {
         try
         {
@@ -625,6 +626,24 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             ValidatePresence(presence);
             if (string.Equals(presence.ControllerId, _state.ControllerId, StringComparison.Ordinal))
             {
+                if (allowDuplicateIdentityRepair &&
+                    !IsLocalControllerAddress(normalized) &&
+                    _state.RepairDuplicateControllerIdentity(
+                        presence.ControllerId,
+                        presence.MachineName,
+                        out var replacementId))
+                {
+                    ControllerLog.Write(
+                        $"Retrying {presence.MachineName} after automatically repairing " +
+                        $"the duplicated controller ID ({replacementId}).");
+                    return await AnnounceAsync(
+                        address,
+                        cancellationToken,
+                        reportFailure,
+                        expectedControllerId,
+                        expectedPairingKey,
+                        allowDuplicateIdentityRepair: false);
+                }
                 reportFailure?.Invoke("That address belongs to this controller, not the master PC.");
                 return null;
             }
@@ -1096,6 +1115,37 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                IPAddress.TryParse(responseUri.Host, out var responseIp)
             ? requestedIp.Equals(responseIp)
             : string.Equals(requestUri.Host, responseUri.Host, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLocalControllerAddress(string address)
+    {
+        if (!Uri.TryCreate(address, UriKind.Absolute, out var uri))
+            return false;
+        if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(uri.Host, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (!IPAddress.TryParse(uri.Host, out var target))
+            return false;
+        if (target.IsIPv4MappedToIPv6)
+            target = target.MapToIPv4();
+        if (IPAddress.IsLoopback(target))
+            return true;
+
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces()
+                .SelectMany(network => network.GetIPProperties().UnicastAddresses)
+                .Select(unicast => unicast.Address.IsIPv4MappedToIPv6
+                    ? unicast.Address.MapToIPv4()
+                    : unicast.Address)
+                .Any(local => local.Equals(target));
+        }
+        catch (NetworkInformationException)
+        {
+            return false;
+        }
     }
 
     private async Task<DiscoveredControllerPeer?> ResolveMasterAsync(

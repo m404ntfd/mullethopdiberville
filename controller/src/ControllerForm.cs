@@ -356,6 +356,8 @@ internal sealed class ControllerForm : Form
         discover.Click += (_, _) => OpenKioskDiscovery();
         var manualAdd = MakeTableButton("Add Kiosk Manually", Color.FromArgb(105, 210, 236));
         manualAdd.Click += (_, _) => OpenManualKioskSetup();
+        var troubleshoot = MakeTableButton("Connection Troubleshooter", Color.FromArgb(255, 217, 188));
+        troubleshoot.Click += (_, _) => OpenConnectionTroubleshooter();
 
         layout.Controls.Add(addressLabel, 0, 0);
         layout.Controls.Add(_addresses, 1, 0);
@@ -367,10 +369,20 @@ internal sealed class ControllerForm : Form
         layout.Controls.Add(copyKey, 3, 1);
         layout.Controls.Add(note, 0, 2);
         layout.SetColumnSpan(note, 4);
+        layout.Controls.Add(troubleshoot, 0, 3);
+        layout.SetColumnSpan(troubleshoot, 2);
         layout.Controls.Add(manualAdd, 2, 3);
         layout.Controls.Add(discover, 3, 3);
         group.Controls.Add(layout);
         return group;
+    }
+
+    private void OpenConnectionTroubleshooter()
+    {
+        using var dialog = new ControllerConnectionTroubleshooterDialog(_state, _server);
+        dialog.ShowDialog(this);
+        RefreshKioskList();
+        UpdateMasterStatus();
     }
 
     private void OpenKioskDiscovery()

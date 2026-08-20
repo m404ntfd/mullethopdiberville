@@ -34,6 +34,7 @@ internal sealed class FirefoxHost : IDisposable
     private bool _automaticRecoveryUsed;
     private bool _recoveryQueued;
     private bool _restarting;
+    private bool _initialSessionPrepared;
     private bool _disposed;
 
     public event EventHandler<string>? StatusChanged;
@@ -60,6 +61,11 @@ internal sealed class FirefoxHost : IDisposable
 
         try
         {
+            if (!_initialSessionPrepared)
+            {
+                ClearFirefoxSessionState();
+                _initialSessionPrepared = true;
+            }
             var profilePath = PrepareFirefoxProfile();
             var startInfo = new ProcessStartInfo(firefoxPath)
             {
@@ -239,6 +245,14 @@ internal sealed class FirefoxHost : IDisposable
         _attachedUtc = DateTime.UtcNow;
         ResizeEmbeddedWindow();
         FocusEmbeddedWindow();
+        try
+        {
+            _host.BeginInvoke(new Action(FocusEmbeddedWindow));
+        }
+        catch (InvalidOperationException)
+        {
+            // The POS window is closing while Firefox finishes attaching.
+        }
     }
 
     private void ResizeEmbeddedWindow()
@@ -347,7 +361,16 @@ internal sealed class FirefoxHost : IDisposable
             return;
 
         var form = _host.FindForm();
-        if (form is null || !form.ContainsFocus)
+        if (form is null || form.WindowState == FormWindowState.Minimized)
+            return;
+
+        var foreground = GetForegroundWindow();
+        var foregroundRoot = foreground == IntPtr.Zero
+            ? IntPtr.Zero
+            : GetAncestor(foreground, GaRoot);
+        if (Form.ActiveForm != form &&
+            foreground != form.Handle &&
+            foregroundRoot != form.Handle)
             return;
 
         try
@@ -385,6 +408,11 @@ internal sealed class FirefoxHost : IDisposable
             user_pref("browser.startup.page", 1);
             user_pref("browser.tabs.warnOnClose", false);
             user_pref("browser.sessionstore.resume_from_crash", false);
+            user_pref("browser.sessionstore.max_resumed_crashes", 0);
+            user_pref("javascript.enabled", true);
+            user_pref("browser.cache.disk.enable", false);
+            user_pref("browser.cache.offline.enable", false);
+            user_pref("network.http.use-cache", false);
             user_pref("datareporting.policy.dataSubmissionEnabled", false);
             user_pref("datareporting.healthreport.uploadEnabled", false);
             user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
@@ -575,6 +603,14 @@ internal sealed class FirefoxHost : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr window);
+
+    private const uint GaRoot = 2;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
     [DllImport("user32.dll")]
     private static extern IntPtr SetFocus(IntPtr window);
