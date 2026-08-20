@@ -267,13 +267,23 @@ NETWORK NOTES
 
 * Controller port: TCP 47832.
 * Windows network profile on the controller should be Private.
+* Select **Connection Troubleshooter** to test discovery, the saved or entered
+  master, TCP 47832, the Windows network profile, firewall rule, URL reservation,
+  and the local controller service. **Diagnose & Repair** requests administrator
+  approval before changing Windows, then retries the master connection. Run it on
+  the master PC too when the client can reach neither the master service nor its
+  firewall port.
 * Kiosks make outbound connections to the controller; no inbound firewall rule
   is required on kiosk computers.
 * If the controller PC's IP address changes, enabled kiosks discover the new
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.13.0 renames the application while preserving its
+Systems Controller version 1.14.0 adds the built-in Connection Troubleshooter,
+repairs the local Windows Private-network/firewall/URL-listener configuration,
+retries saved, detected, IP-address, or pairing-key master connections, and
+automatically replaces a duplicated non-master identity left by a copied PC
+installation. Systems Controller version 1.13.0 renames the application while preserving its
 package identity and saved data, fixes master connections when controller clocks
 differ, shows peer controllers and active POS versions, and securely relays
 selected/all controller and POS update requests through the master. Version 1.12.3 improves tray restoration, adds a tray Exit

@@ -301,6 +301,34 @@ internal sealed class ControllerState
         lock (_gate) return _data.MasterController?.Clone();
     }
 
+    public bool RepairDuplicateControllerIdentity(
+        string duplicatedControllerId,
+        string remoteMachineName,
+        out string newControllerId)
+    {
+        newControllerId = string.Empty;
+        lock (_gate)
+        {
+            if (_data.IsMaster ||
+                !string.Equals(
+                    _data.ControllerId,
+                    duplicatedControllerId,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            newControllerId = Guid.NewGuid().ToString("N");
+            _data.ControllerId = newControllerId;
+            SaveLocked();
+            ControllerLog.Write(
+                $"Replaced a duplicated controller identity shared with " +
+                $"{Clean(remoteMachineName, "another PC", 200)}. New controller ID: " +
+                newControllerId + ".");
+            return true;
+        }
+    }
+
     public void RememberMasterController(
         string controllerId,
         string machineName,
