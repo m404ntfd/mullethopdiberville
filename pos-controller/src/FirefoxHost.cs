@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -26,6 +27,7 @@ internal sealed class FirefoxHost : IDisposable
     private readonly System.Windows.Forms.Timer _windowTimer = new() { Interval = 500 };
     private Process? _process;
     private Process? _windowProcess;
+    private LilyPadCompatibilityBridge? _compatibilityBridge;
     private IntPtr _firefoxWindow;
     private DateTime _startedUtc;
     private DateTime _attachedUtc;
@@ -76,6 +78,17 @@ internal sealed class FirefoxHost : IDisposable
             startInfo.ArgumentList.Add("--new-instance");
             startInfo.ArgumentList.Add("--profile");
             startInfo.ArgumentList.Add(profilePath);
+            int? compatibilityPort = null;
+            try
+            {
+                compatibilityPort = LilyPadCompatibilityBridge.AllocateLoopbackPort();
+                startInfo.ArgumentList.Add("--remote-debugging-port");
+                startInfo.ArgumentList.Add(compatibilityPort.Value.ToString());
+            }
+            catch (Exception ex) when (ex is SocketException or InvalidOperationException)
+            {
+                PosLog.Write("Could not reserve the local LilyPad compatibility port: " + ex.Message);
+            }
             startInfo.ArgumentList.Add("--new-window");
             startInfo.ArgumentList.Add(HomePage);
 
@@ -85,11 +98,18 @@ internal sealed class FirefoxHost : IDisposable
             _firefoxWindow = IntPtr.Zero;
             _process = Process.Start(startInfo)
                        ?? throw new InvalidOperationException("Firefox did not start.");
+            if (compatibilityPort.HasValue)
+            {
+                _compatibilityBridge = new LilyPadCompatibilityBridge(compatibilityPort.Value);
+                _compatibilityBridge.Start();
+            }
             _windowTimer.Start();
             SetStatus("Starting Firefox and loading LilyPad POS…");
         }
         catch (Exception ex)
         {
+            _compatibilityBridge?.Dispose();
+            _compatibilityBridge = null;
             PosLog.Write("Firefox startup error: " + ex);
             HandleFailure(
                 "Firefox could not start. Select Refresh Lilypad to try again.\n\n" + ex.Message);
@@ -557,6 +577,8 @@ internal sealed class FirefoxHost : IDisposable
 
     private void StopFirefoxProcesses()
     {
+        _compatibilityBridge?.Dispose();
+        _compatibilityBridge = null;
         var processes = new[] { _windowProcess, _process }
             .Where(process => process is not null)
             .Cast<Process>()

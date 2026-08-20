@@ -284,8 +284,11 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.14.1 enables controller and kiosk discovery on the
-Windows adapter's directly connected IPv4 subnet, including the `128.0.0.0/25`
+Systems Controller version 1.14.2 also accepts incoming discovery, synchronization,
+and command requests from every usable address on the Windows adapter's directly
+connected subnet. This fixes the HTTP 403 response that version 1.14.1 could return
+after successfully scanning a non-RFC 1918 network. Version 1.14.1 enabled controller
+and kiosk scans on the directly connected IPv4 subnet, including the `128.0.0.0/25`
 network, while continuing to reject unrelated public addresses. Version 1.14.0 adds the built-in Connection Troubleshooter,
 repairs the local Windows Private-network/firewall/URL-listener configuration,
 retries saved, detected, IP-address, or pairing-key master connections, and
