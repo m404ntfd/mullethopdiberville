@@ -45,6 +45,7 @@ internal sealed class ControllerForm : Form
     private CloudSyncService? _cloudSync;
     private bool _lastResolvedDarkMode;
     private bool _masterChangeInProgress;
+    private bool _masterConnectionInProgress;
     private bool _allowApplicationExit;
     private bool _trayNoticeShown;
     private bool _assistanceFlashOn;
@@ -806,6 +807,14 @@ internal sealed class ControllerForm : Form
             return;
         }
 
+        if (!_state.IsMaster &&
+            !_server.Peers.Snapshot().Any(peer => peer.IsMaster))
+        {
+            await ConnectToMasterAsync();
+            return;
+        }
+
+        _masterConnectionInProgress = true;
         _pullConnectionsButton.Enabled = false;
         _pullConnectionsButton.Text = "Pulling...";
         try
@@ -839,8 +848,42 @@ internal sealed class ControllerForm : Form
         }
         finally
         {
-            _pullConnectionsButton.Text = "Pull Connections";
-            _pullConnectionsButton.Enabled = true;
+            _masterConnectionInProgress = false;
+            UpdateMasterStatus();
+        }
+    }
+
+    private async Task ConnectToMasterAsync()
+    {
+        using var dialog = new MasterConnectionDialog(_state.MasterControllerSnapshot());
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        _masterConnectionInProgress = true;
+        _pullConnectionsButton.Enabled = false;
+        _pullConnectionsButton.Text = "Connecting...";
+        try
+        {
+            var result = dialog.UseSavedConnection
+                ? await _server.Peers.ConnectToStoredMasterAsync()
+                : await _server.Peers.ConnectToMasterAsync(dialog.ConnectionValue);
+            RefreshKioskList();
+            UpdateMasterStatus();
+            MessageBox.Show(this, result.Message, "Connect to Master Controller",
+                MessageBoxButtons.OK,
+                result.Success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        catch (Exception ex)
+        {
+            ControllerLog.Write("Master controller connection error: " + ex.Message);
+            MessageBox.Show(this,
+                "The master controller could not be connected. Check the controller log for details.",
+                "Connect to Master Controller", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _masterConnectionInProgress = false;
+            UpdateMasterStatus();
         }
     }
 
@@ -990,6 +1033,7 @@ internal sealed class ControllerForm : Form
         }
 
         var otherMaster = _server.Peers.Snapshot().FirstOrDefault(peer => peer.IsMaster);
+        var savedMaster = _state.MasterControllerSnapshot();
         var posMachines = _state.ActivePosMachineNames()
             .Concat(_server.Peers.Snapshot().SelectMany(peer => peer.ActivePosMachines))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1005,7 +1049,9 @@ internal sealed class ControllerForm : Form
         else
         {
             _masterStatus.Text = otherMaster is null
-                ? $"MASTER: not detected  •  {posStatus}"
+                ? savedMaster is null
+                    ? $"MASTER: not detected  •  {posStatus}"
+                    : $"MASTER: {savedMaster.MachineName} saved — reconnecting  •  {posStatus}"
                 : $"MASTER: {otherMaster.MachineName}  •  {posStatus}";
             _masterStatus.ForeColor = otherMaster is null
                 ? ControllerTheme.ErrorText
@@ -1015,6 +1061,13 @@ internal sealed class ControllerForm : Form
         }
         _masterToggleButton.ForeColor = Color.FromArgb(16, 24, 32);
         _masterToggleButton.Enabled = !_masterChangeInProgress;
+        if (!_masterConnectionInProgress)
+        {
+            _pullConnectionsButton.Text = !isMaster && otherMaster is null
+                ? "Connect to Master"
+                : "Pull Connections";
+            _pullConnectionsButton.Enabled = !_remoteSettings.IsRemoteMachine;
+        }
     }
 
     private async Task ToggleMasterAsync()

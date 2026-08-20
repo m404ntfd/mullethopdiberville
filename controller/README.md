@@ -134,6 +134,21 @@ it is not. Local controller applications scan the private network when they
 launch, recheck known controllers every few seconds, and show the detected
 master computer by name.
 
+When no live master is detected, **Pull Connections** changes to **Connect to
+Master**. Enter the master PC's private IPv4 address or its full pairing key.
+After the signed connection succeeds, this controller saves the master's stable
+controller ID, computer name, verified address, and connection credentials in
+its local `controller.json` file. The connection window also offers **Use Saved
+Master** on later attempts.
+
+The saved computer identity is independent of its last IP address. The
+controller retries the last address and Windows computer name, then scans the
+current private subnet for the same controller ID. If DHCP assigns the master a
+different address, the saved record is updated automatically after the signed
+connection is verified. Assistance acknowledgements, reset/open/close commands,
+and kiosk update commands use this recovery path before reporting that the
+master is unavailable.
+
 Selecting **Make This Master** requires confirmation and performs a fresh
 network scan. The change is refused while another reachable controller is
 already master. If two previously isolated controllers later meet while both
@@ -191,9 +206,10 @@ service during normal use.
 The master controller keeps a dedicated recovery catalog at
 `%LOCALAPPDATA%\MulletHopKioskController\master-connections.json` whenever its
 saved kiosk connections change. Select **Pull Connections** on the master to
-reload that local catalog. On a non-master controller, the same button finds the
-active master on the local network, pulls its saved kiosk connections, and saves
-the mirrored list on the current PC.
+reload that local catalog. On a non-master controller with a detected master,
+the same button pulls its saved kiosk connections and saves the mirrored list on
+the current PC. When no master is detected, it opens the manual/saved master
+connection window described above.
 
 
 MANAGE AND SYNC ADVERTISEMENTS
@@ -247,8 +263,10 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.12.1 adds a dedicated master connection recovery
-catalog and the manual Pull Connections control. Version 1.12.0 shows the active master PC and network-wide POS
+Kiosk Controller version 1.12.2 adds manual master connection by private IPv4
+address or pairing key, remembers the master by stable controller identity, and
+reconnects after DHCP address changes. Version 1.12.1 adds a dedicated master
+connection recovery catalog and the manual Pull Connections control. Version 1.12.0 shows the active master PC and network-wide POS
 count beside the master lights. Non-master controller installations automatically
 mirror the master's saved kiosk connections and relay kiosk and POS commands to
 it. Three POS workstations can simultaneously use the same four kiosk assignments.

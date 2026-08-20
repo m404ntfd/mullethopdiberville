@@ -17,6 +17,7 @@ internal sealed class ControllerPeerPresence
     public DateTime? MasterSinceUtc { get; set; }
     public string ControllerAddress { get; set; } = string.Empty;
     public string PeerAccessKey { get; set; } = string.Empty;
+    public string PairingKeyFingerprint { get; set; } = string.Empty;
     public List<string> ActivePosMachines { get; set; } = [];
 }
 
@@ -29,6 +30,7 @@ internal sealed class DiscoveredControllerPeer
     public DateTime? MasterSinceUtc { get; set; }
     public string ControllerAddress { get; set; } = string.Empty;
     public string PeerAccessKey { get; set; } = string.Empty;
+    public string PairingKeyFingerprint { get; set; } = string.Empty;
     public List<string> ActivePosMachines { get; set; } = [];
     public DateTime LastSeenUtc { get; set; }
 
@@ -41,6 +43,7 @@ internal sealed class DiscoveredControllerPeer
         MasterSinceUtc = MasterSinceUtc,
         ControllerAddress = ControllerAddress,
         PeerAccessKey = PeerAccessKey,
+        PairingKeyFingerprint = PairingKeyFingerprint,
         ActivePosMachines = [.. ActivePosMachines],
         LastSeenUtc = LastSeenUtc
     };
@@ -67,6 +70,8 @@ internal sealed class ControllerPeerCommandResponse
 internal sealed record ControllerPeerCommandResult(bool Accepted, string Message);
 
 internal sealed record ControllerConnectionPullResult(bool Success, string Message, int ConnectionCount);
+
+internal sealed record ControllerMasterConnectionResult(bool Success, string Message);
 
 internal sealed class ControllerPeerCoordinator : IDisposable
 {
@@ -129,59 +134,90 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         }
     }
 
+    private void RemovePeer(string controllerId)
+    {
+        bool removed;
+        lock (_gate)
+            removed = _peers.Remove(controllerId);
+        if (removed)
+            RaisePeersChanged();
+    }
+
     public async Task<ControllerPeerCommandResult> QueueCommandOnMasterAsync(
         string stationId,
         string type,
         bool? closed,
         CancellationToken cancellationToken = default)
     {
-        var master = Snapshot().FirstOrDefault(peer =>
-            peer.IsMaster &&
-            !string.IsNullOrWhiteSpace(peer.ControllerAddress) &&
-            !string.IsNullOrWhiteSpace(peer.PeerAccessKey));
-        if (master is null)
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            return new ControllerPeerCommandResult(
-                false,
-                "No active master controller is available.");
-        }
-
-        try
-        {
-            var body = JsonSerializer.Serialize(new ControllerPeerCommandRequest
-            {
-                ControllerId = _state.ControllerId,
-                StationId = stationId,
-                Type = type,
-                Closed = closed
-            }, JsonOptions);
-            var endpoint = new Uri(new Uri(master.ControllerAddress), CommandPath);
-            using var request = CreateSignedRequest(endpoint, master.PeerAccessKey, body);
-            using var response = await _client.SendAsync(request, cancellationToken);
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
+            var master = await ResolveMasterAsync(cancellationToken);
+            if (master is null)
             {
                 return new ControllerPeerCommandResult(
                     false,
-                    string.IsNullOrWhiteSpace(responseBody)
-                        ? $"The master controller returned HTTP {(int)response.StatusCode}."
-                        : responseBody.Trim());
+                    "No active or saved master controller is available.");
             }
 
-            VerifySignedResponse(response, master.PeerAccessKey, responseBody);
-            var result = JsonSerializer.Deserialize<ControllerPeerCommandResponse>(responseBody, JsonOptions);
-            return result is null
-                ? new ControllerPeerCommandResult(false, "The master controller returned an empty response.")
-                : new ControllerPeerCommandResult(result.Accepted, result.Message);
+            try
+            {
+                return await SendMasterCommandAsync(
+                    master,
+                    stationId,
+                    type,
+                    closed,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return new ControllerPeerCommandResult(false, "The controller command was canceled.");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or
+                                       JsonException or InvalidDataException or IOException)
+            {
+                ControllerLog.Write("Master command relay error: " + ex.Message);
+                RemovePeer(master.ControllerId);
+                if (attempt == 0)
+                    continue;
+            }
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or
-                                   JsonException or InvalidDataException or IOException)
+
+        return new ControllerPeerCommandResult(
+            false,
+            "The command could not be sent to the saved master controller.");
+    }
+
+    private async Task<ControllerPeerCommandResult> SendMasterCommandAsync(
+        DiscoveredControllerPeer master,
+        string stationId,
+        string type,
+        bool? closed,
+        CancellationToken cancellationToken)
+    {
+        var body = JsonSerializer.Serialize(new ControllerPeerCommandRequest
         {
-            ControllerLog.Write("Master command relay error: " + ex.Message);
-            return new ControllerPeerCommandResult(
-                false,
-                "The command could not be sent to the master controller.");
+            ControllerId = _state.ControllerId,
+            StationId = stationId,
+            Type = type,
+            Closed = closed
+        }, JsonOptions);
+        var endpoint = new Uri(new Uri(master.ControllerAddress), CommandPath);
+        using var request = CreateSignedRequest(endpoint, master.PeerAccessKey, body);
+        using var response = await _client.SendAsync(request, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidDataException(
+                string.IsNullOrWhiteSpace(responseBody)
+                    ? $"The master controller returned HTTP {(int)response.StatusCode}."
+                    : responseBody.Trim());
         }
+
+        VerifySignedResponse(response, master.PeerAccessKey, responseBody);
+        var result = JsonSerializer.Deserialize<ControllerPeerCommandResponse>(responseBody, JsonOptions);
+        return result is null
+            ? new ControllerPeerCommandResult(false, "The master controller returned an empty response.")
+            : new ControllerPeerCommandResult(result.Accepted, result.Message);
     }
 
     public async Task<ControllerConnectionPullResult> PullMasterConnectionsAsync(
@@ -195,8 +231,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 0);
         }
 
-        await ScanNowAsync();
-        var master = Snapshot().FirstOrDefault(peer => peer.IsMaster);
+        var master = await ResolveMasterAsync(cancellationToken);
         if (master is null)
         {
             return new ControllerConnectionPullResult(
@@ -206,19 +241,122 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         }
 
         return await SynchronizeFromMasterAsync(
-            new ControllerPeerPresence
-            {
-                ControllerId = master.ControllerId,
-                MachineName = master.MachineName,
-                Version = master.Version,
-                IsMaster = master.IsMaster,
-                MasterSinceUtc = master.MasterSinceUtc,
-                ControllerAddress = master.ControllerAddress,
-                PeerAccessKey = master.PeerAccessKey,
-                ActivePosMachines = [.. master.ActivePosMachines]
-            },
+            ToPresence(master),
             cancellationToken,
             waitForCurrentSync: true);
+    }
+
+    public async Task<ControllerMasterConnectionResult> ConnectToMasterAsync(
+        string connectionValue,
+        CancellationToken cancellationToken = default)
+    {
+        if (_state.IsMaster)
+        {
+            return new ControllerMasterConnectionResult(
+                false,
+                "This computer is already the master controller.");
+        }
+
+        connectionValue = connectionValue?.Trim() ?? string.Empty;
+        if (TryBuildManualControllerAddress(connectionValue, out var address))
+        {
+            var presence = await AnnounceAsync(address, cancellationToken);
+            if (presence is null)
+            {
+                return new ControllerMasterConnectionResult(
+                    false,
+                    "No Kiosk Controller answered at that private-network IP address.");
+            }
+            if (!presence.IsMaster)
+            {
+                return new ControllerMasterConnectionResult(
+                    false,
+                    $"{presence.MachineName} answered at that address, but it is not the master controller.");
+            }
+
+            var result = await SynchronizeFromMasterAsync(
+                presence,
+                cancellationToken,
+                waitForCurrentSync: true);
+            return new ControllerMasterConnectionResult(result.Success, result.Message);
+        }
+
+        if (connectionValue.Length is < 16 or > 1_000)
+        {
+            return new ControllerMasterConnectionResult(
+                false,
+                "Enter the master computer's private IPv4 address or its full pairing key.");
+        }
+
+        var fingerprint = ControllerSecurity.Fingerprint(connectionValue);
+        var matchingMaster = Snapshot().FirstOrDefault(peer =>
+            peer.IsMaster &&
+            string.Equals(peer.PairingKeyFingerprint, fingerprint, StringComparison.Ordinal));
+        if (matchingMaster is null)
+        {
+            await ScanNowAsync(cancellationToken);
+            matchingMaster = Snapshot().FirstOrDefault(peer =>
+                peer.IsMaster &&
+                string.Equals(peer.PairingKeyFingerprint, fingerprint, StringComparison.Ordinal));
+        }
+        if (matchingMaster is null)
+        {
+            foreach (var legacyMaster in Snapshot().Where(peer =>
+                         peer.IsMaster &&
+                         string.IsNullOrWhiteSpace(peer.PairingKeyFingerprint)))
+            {
+                var legacyResult = await SynchronizeFromMasterAsync(
+                    ToPresence(legacyMaster),
+                    cancellationToken,
+                    waitForCurrentSync: true,
+                    expectedPairingKey: connectionValue);
+                if (legacyResult.Success)
+                {
+                    return new ControllerMasterConnectionResult(
+                        true,
+                        legacyResult.Message);
+                }
+            }
+            return new ControllerMasterConnectionResult(
+                false,
+                "No master controller using that pairing key was found on the local network. " +
+                "If the master is on another subnet, enter its private IP address instead.");
+        }
+
+        var syncResult = await SynchronizeFromMasterAsync(
+            ToPresence(matchingMaster),
+            cancellationToken,
+            waitForCurrentSync: true,
+            expectedPairingKey: connectionValue);
+        return new ControllerMasterConnectionResult(syncResult.Success, syncResult.Message);
+    }
+
+    public async Task<ControllerMasterConnectionResult> ConnectToStoredMasterAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var stored = _state.MasterControllerSnapshot();
+        if (stored is null)
+        {
+            return new ControllerMasterConnectionResult(
+                false,
+                "No master controller connection has been saved on this computer yet.");
+        }
+
+        var master = await ResolveMasterAsync(cancellationToken, stored);
+        if (master is null)
+        {
+            return new ControllerMasterConnectionResult(
+                false,
+                $"The saved master controller {stored.MachineName} could not be reached. " +
+                "Confirm that it is running and connected to the private network.");
+        }
+
+        var result = await SynchronizeFromMasterAsync(
+            ToPresence(master),
+            cancellationToken,
+            waitForCurrentSync: true,
+            expectedPairingKey: stored.PairingKey);
+        return new ControllerMasterConnectionResult(result.Success, result.Message);
     }
 
     public ControllerPeerPresence ProcessPresence(
@@ -235,18 +373,21 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         return CreateLocalPresence(BuildControllerAddress(localAddress));
     }
 
-    public async Task ScanNowAsync()
+    public async Task ScanNowAsync(CancellationToken cancellationToken = default)
     {
         if (_disposed)
             return;
-        await _scanGate.WaitAsync();
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _stopping.Token);
+        await _scanGate.WaitAsync(linkedCancellation.Token);
         try
         {
             await ProbeControllersAsync(
                 FindSubnetControllerAddresses(),
-                _stopping.Token);
+                linkedCancellation.Token);
         }
-        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+        catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
         {
             // Normal shutdown.
         }
@@ -263,6 +404,15 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
+                var stored = _state.MasterControllerSnapshot();
+                if (stored is not null &&
+                    !Snapshot().Any(peer =>
+                        peer.IsMaster &&
+                        string.Equals(peer.ControllerId, stored.ControllerId, StringComparison.Ordinal)))
+                {
+                    await ProbeStoredMasterAsync(stored, cancellationToken);
+                }
+
                 var known = Snapshot()
                     .Select(peer => peer.ControllerAddress)
                     .Where(address => !string.IsNullOrWhiteSpace(address))
@@ -317,40 +467,69 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             async (address, token) => await AnnounceAsync(address, token));
     }
 
-    private async ValueTask AnnounceAsync(string address, CancellationToken cancellationToken)
+    private async ValueTask<ControllerPeerPresence?> AnnounceAsync(
+        string address,
+        CancellationToken cancellationToken,
+        string? expectedControllerId = null,
+        string? expectedPairingKey = null)
     {
         try
         {
             if (!TryNormalizeControllerAddress(address, out var normalized))
-                return;
+                return null;
             var body = JsonSerializer.Serialize(CreateLocalPresence(string.Empty), JsonOptions);
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             var endpoint = new Uri(new Uri(normalized), PresencePath);
             using var response = await _client.PostAsync(endpoint, content, cancellationToken);
             if (!response.IsSuccessStatusCode)
-                return;
+                return null;
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             var presence = JsonSerializer.Deserialize<ControllerPeerPresence>(responseBody, JsonOptions);
             if (presence is null)
-                return;
+                return null;
             ValidatePresence(presence);
             if (string.Equals(presence.ControllerId, _state.ControllerId, StringComparison.Ordinal))
-                return;
-            if (!ControllerResponseMatchesEndpoint(normalized, presence.ControllerAddress))
-                return;
+                return null;
+            if (!string.IsNullOrWhiteSpace(expectedControllerId) &&
+                !string.Equals(presence.ControllerId, expectedControllerId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+            if (!string.IsNullOrWhiteSpace(expectedPairingKey) &&
+                !string.IsNullOrWhiteSpace(presence.PairingKeyFingerprint) &&
+                !string.Equals(
+                    presence.PairingKeyFingerprint,
+                    ControllerSecurity.Fingerprint(expectedPairingKey),
+                    StringComparison.Ordinal))
+            {
+                return null;
+            }
+            if (string.IsNullOrWhiteSpace(expectedControllerId) &&
+                !ControllerResponseMatchesEndpoint(normalized, presence.ControllerAddress))
+            {
+                return null;
+            }
             UpdatePeer(presence);
             if (presence.IsMaster && !_state.IsMaster)
-                await SynchronizeFromMasterAsync(presence, cancellationToken);
+            {
+                await SynchronizeFromMasterAsync(
+                    presence,
+                    cancellationToken,
+                    expectedPairingKey: expectedPairingKey);
+            }
+            return presence;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Normal shutdown.
+            return null;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or
                                    JsonException or InvalidDataException or IOException or
                                    ObjectDisposedException)
         {
             // Most addresses are not controller computers. Failed probes are expected.
+            return null;
         }
     }
 
@@ -363,6 +542,9 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         MasterSinceUtc = _state.MasterSinceUtc,
         ControllerAddress = address,
         PeerAccessKey = _state.IsMaster ? _state.PeerAccessKey : string.Empty,
+        PairingKeyFingerprint = _state.IsMaster
+            ? ControllerSecurity.Fingerprint(_state.PairingKey)
+            : string.Empty,
         ActivePosMachines = _state.ActivePosMachineNames().ToList()
     };
 
@@ -386,6 +568,10 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 peer.IsMaster != presence.IsMaster ||
                 peer.MasterSinceUtc != presence.MasterSinceUtc ||
                 !string.Equals(peer.PeerAccessKey, presence.PeerAccessKey, StringComparison.Ordinal) ||
+                !string.Equals(
+                    peer.PairingKeyFingerprint,
+                    presence.PairingKeyFingerprint,
+                    StringComparison.Ordinal) ||
                 !peer.ActivePosMachines.SequenceEqual(
                     presence.ActivePosMachines,
                     StringComparer.OrdinalIgnoreCase) ||
@@ -402,6 +588,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             peer.MasterSinceUtc = presence.MasterSinceUtc;
             peer.ControllerAddress = presence.ControllerAddress;
             peer.PeerAccessKey = presence.PeerAccessKey;
+            peer.PairingKeyFingerprint = presence.PairingKeyFingerprint;
             peer.ActivePosMachines = [.. presence.ActivePosMachines];
             peer.LastSeenUtc = DateTime.UtcNow;
         }
@@ -453,6 +640,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             presence.Version?.Length > 100 ||
             presence.ControllerAddress?.Length > 300 ||
             presence.PeerAccessKey?.Length > 200 ||
+            (presence.PairingKeyFingerprint?.Length is not 0 and not 64) ||
             (presence.IsMaster != presence.MasterSinceUtc.HasValue))
         {
             throw new InvalidDataException("The controller presence announcement is invalid.");
@@ -462,6 +650,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             ? "Unknown"
             : presence.Version.Trim();
         presence.PeerAccessKey = presence.PeerAccessKey?.Trim() ?? string.Empty;
+        presence.PairingKeyFingerprint = presence.PairingKeyFingerprint?.Trim() ?? string.Empty;
         presence.ActivePosMachines = (presence.ActivePosMachines ?? [])
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Select(name => name.Trim().Length <= 80 ? name.Trim() : name.Trim()[..80])
@@ -482,7 +671,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
     private async Task<ControllerConnectionPullResult> SynchronizeFromMasterAsync(
         ControllerPeerPresence master,
         CancellationToken cancellationToken,
-        bool waitForCurrentSync = false)
+        bool waitForCurrentSync = false,
+        string? expectedPairingKey = null)
     {
         if (string.IsNullOrWhiteSpace(master.PeerAccessKey))
         {
@@ -531,6 +721,30 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             {
                 throw new InvalidDataException("The master controller replica is invalid.");
             }
+
+            if (!string.IsNullOrWhiteSpace(master.PairingKeyFingerprint) &&
+                !string.Equals(
+                    master.PairingKeyFingerprint,
+                    ControllerSecurity.Fingerprint(replica.PairingKey),
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("The master controller pairing identity did not match.");
+            }
+            if (!string.IsNullOrWhiteSpace(expectedPairingKey) &&
+                !string.Equals(
+                    ControllerSecurity.Fingerprint(expectedPairingKey),
+                    ControllerSecurity.Fingerprint(replica.PairingKey),
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("The saved master pairing key did not match.");
+            }
+
+            _state.RememberMasterController(
+                master.ControllerId,
+                master.MachineName,
+                master.ControllerAddress,
+                replica.PairingKey,
+                master.PeerAccessKey);
 
             if (_state.ApplyMasterReplica(replica))
             {
@@ -642,6 +856,127 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                IPAddress.TryParse(responseUri.Host, out var responseIp)
             ? requestedIp.Equals(responseIp)
             : string.Equals(requestUri.Host, responseUri.Host, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<DiscoveredControllerPeer?> ResolveMasterAsync(
+        CancellationToken cancellationToken,
+        StoredMasterControllerConnection? requiredMaster = null)
+    {
+        var stored = requiredMaster ?? _state.MasterControllerSnapshot();
+        var master = FindPreferredMaster(stored, allowOtherMaster: requiredMaster is null);
+        if (master is not null)
+            return master;
+
+        if (stored is not null)
+        {
+            await ProbeStoredMasterAsync(stored, cancellationToken);
+            master = FindPreferredMaster(stored, allowOtherMaster: requiredMaster is null);
+            if (master is not null)
+                return master;
+            if (requiredMaster is not null)
+            {
+                await ScanNowAsync(cancellationToken);
+                return FindPreferredMaster(stored, allowOtherMaster: false);
+            }
+        }
+
+        await ScanNowAsync(cancellationToken);
+        return FindPreferredMaster(stored);
+    }
+
+    private DiscoveredControllerPeer? FindPreferredMaster(
+        StoredMasterControllerConnection? stored,
+        bool allowOtherMaster = true)
+    {
+        var peers = Snapshot();
+        if (stored is not null)
+        {
+            var savedMaster = peers.FirstOrDefault(peer =>
+                peer.IsMaster &&
+                !string.IsNullOrWhiteSpace(peer.ControllerAddress) &&
+                !string.IsNullOrWhiteSpace(peer.PeerAccessKey) &&
+                string.Equals(peer.ControllerId, stored.ControllerId, StringComparison.Ordinal));
+            if (savedMaster is not null)
+                return savedMaster;
+        }
+        return allowOtherMaster
+            ? peers.FirstOrDefault(peer =>
+                peer.IsMaster &&
+                !string.IsNullOrWhiteSpace(peer.ControllerAddress) &&
+                !string.IsNullOrWhiteSpace(peer.PeerAccessKey))
+            : null;
+    }
+
+    private async Task ProbeStoredMasterAsync(
+        StoredMasterControllerConnection stored,
+        CancellationToken cancellationToken)
+    {
+        var targets = new List<string>();
+        if (TryNormalizeControllerAddress(stored.LastKnownAddress, out var savedAddress))
+            targets.Add(savedAddress);
+        if (TryBuildComputerNameAddress(stored.MachineName, out var computerNameAddress))
+            targets.Add(computerNameAddress);
+
+        foreach (var target in targets.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var presence = await AnnounceAsync(
+                target,
+                cancellationToken,
+                stored.ControllerId,
+                stored.PairingKey);
+            if (presence?.IsMaster == true)
+                return;
+        }
+    }
+
+    private static ControllerPeerPresence ToPresence(DiscoveredControllerPeer peer) => new()
+    {
+        ControllerId = peer.ControllerId,
+        MachineName = peer.MachineName,
+        Version = peer.Version,
+        IsMaster = peer.IsMaster,
+        MasterSinceUtc = peer.MasterSinceUtc,
+        ControllerAddress = peer.ControllerAddress,
+        PeerAccessKey = peer.PeerAccessKey,
+        PairingKeyFingerprint = peer.PairingKeyFingerprint,
+        ActivePosMachines = [.. peer.ActivePosMachines]
+    };
+
+    private static bool TryBuildManualControllerAddress(string value, out string address)
+    {
+        address = string.Empty;
+        if (IPAddress.TryParse(value, out var parsedAddress))
+        {
+            if (parsedAddress.IsIPv4MappedToIPv6)
+                parsedAddress = parsedAddress.MapToIPv4();
+            if (!IsPrivateAddress(parsedAddress))
+                return false;
+            address = BuildControllerAddress(parsedAddress);
+            return true;
+        }
+
+        if (!TryNormalizeControllerAddress(value, out var normalized) ||
+            !Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
+            !IPAddress.TryParse(uri.Host, out parsedAddress) ||
+            !IsPrivateAddress(parsedAddress))
+        {
+            return false;
+        }
+        address = normalized;
+        return true;
+    }
+
+    private static bool TryBuildComputerNameAddress(string machineName, out string address)
+    {
+        address = string.Empty;
+        machineName = machineName?.Trim() ?? string.Empty;
+        if (machineName.Length is < 1 or > 200 ||
+            Uri.CheckHostName(machineName) == UriHostNameType.Unknown)
+        {
+            return false;
+        }
+        address = $"http://{machineName}:{ControllerServer.Port}{ControllerServer.BasePath}";
+        return true;
     }
 
     private static IEnumerable<string> FindSubnetControllerAddresses()

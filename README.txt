@@ -89,13 +89,19 @@ connections and relay commands to it. The master also keeps a dedicated
 master-connections.json recovery catalog in its local controller data folder.
 Use Pull Connections in the Controller Program section to reload that file on
 the master or fetch the active master's stored list on another local controller.
+If no master is detected, that button changes to Connect to Master and accepts
+the master PC's private IPv4 address or full pairing key. A verified master is
+saved by stable controller ID and computer name as well as its last address, so
+the controller can find it again after DHCP changes the IP. Assistance,
+open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.1, Kiosk Controller version 1.12.1, and Mullet Hop POS
+Waiver Kiosk version 2.11.2, Kiosk Controller version 1.12.2, and Mullet Hop POS
 version 1.5.0 are the matching package releases. Waiver Kiosk version 2.11.0 adds
 Last Jump Time Sold schedules, the editable looping closed video and next-opening
 time, closing-time blackout, and the reorganized staff settings navigation.
-Waiver Kiosk version 2.11.1 keeps the assistance card at the bottom of the
+Waiver Kiosk version 2.11.2 is the matching kiosk package for the controller
+connection-recovery release. Version 2.11.1 keeps the assistance card at the bottom of the
 right-side waiver controls. Waiver Kiosk version 2.10.1 places
 guest assistance in a compact highlighted card
 with the other right-side waiver controls and moves that card stack near the top
@@ -162,8 +168,10 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Kiosk Controller version 1.12.1 adds the dedicated master connection recovery
-catalog and the manual Pull Connections control. Version 1.12.0 adds Software Downloads, master kiosk-connection
+Kiosk Controller version 1.12.2 adds manual master connection by private IPv4
+address or pairing key, remembers the master by stable controller identity, and
+reconnects after DHCP address changes. Version 1.12.1 adds the dedicated master
+connection recovery catalog and the manual Pull Connections control. Version 1.12.0 adds Software Downloads, master kiosk-connection
 mirroring and command relay for non-master installations, the active master PC
 name beside the status lights, and a live three-POS workstation count. Kiosk
 Controller version 1.11.0 fixes dashboard restoration from the fish-and-
