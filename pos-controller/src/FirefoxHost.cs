@@ -28,8 +28,11 @@ internal sealed class FirefoxHost : IDisposable
     private Process? _windowProcess;
     private IntPtr _firefoxWindow;
     private DateTime _startedUtc;
+    private DateTime _attachedUtc;
     private int _attachAttempts;
     private bool _crashReported;
+    private bool _automaticRecoveryUsed;
+    private bool _recoveryQueued;
     private bool _restarting;
     private bool _disposed;
 
@@ -82,11 +85,18 @@ internal sealed class FirefoxHost : IDisposable
         catch (Exception ex)
         {
             PosLog.Write("Firefox startup error: " + ex);
-            SetStatus("Firefox could not start: " + ex.Message);
+            HandleFailure(
+                "Firefox could not start. Select Refresh Lilypad to try again.\n\n" + ex.Message);
         }
     }
 
     public void Restart()
+    {
+        _automaticRecoveryUsed = false;
+        RestartCore();
+    }
+
+    private void RestartCore()
     {
         if (_disposed)
             return;
@@ -113,7 +123,8 @@ internal sealed class FirefoxHost : IDisposable
         if (restartError is not null)
         {
             PosLog.Write("Firefox restart error: " + restartError.Message);
-            ReportCrash("Firefox could not be restarted. Try RELOAD LILYPAD again or restart Mullet Hop POS.");
+            ReportFinalFailure(
+                "Firefox could not be restarted. Select Refresh Lilypad to try again or restart Mullet Hop POS.");
             return;
         }
         ClearFirefoxSessionState();
@@ -122,6 +133,8 @@ internal sealed class FirefoxHost : IDisposable
 
     public void ResizeToHost() => ResizeEmbeddedWindow();
 
+    public void FocusBrowser() => FocusEmbeddedWindow();
+
     private void FindAndAttachWindow()
     {
         if (_disposed)
@@ -129,6 +142,17 @@ internal sealed class FirefoxHost : IDisposable
 
         if (_firefoxWindow != IntPtr.Zero && IsWindow(_firefoxWindow))
         {
+            if (_automaticRecoveryUsed && DateTime.UtcNow - _attachedUtc >= TimeSpan.FromSeconds(20))
+            {
+                _automaticRecoveryUsed = false;
+                PosLog.Write("Firefox remained healthy after automatic recovery; crash retry is available again.");
+            }
+            if (IsHungAppWindow(_firefoxWindow) || WindowTitleIndicatesFailure())
+            {
+                HandleFailure(
+                    "Firefox stopped responding. Select Refresh Lilypad to close it and reopen the LilyPad POS home page.");
+                return;
+            }
             ResizeEmbeddedWindow();
             DetectTabCrash();
             return;
@@ -147,7 +171,8 @@ internal sealed class FirefoxHost : IDisposable
         if (_attachAttempts >= 40)
         {
             _windowTimer.Stop();
-            SetStatus("Firefox started, but its window could not be placed in the application. Use RELOAD LILYPAD to retry.");
+            HandleFailure(
+                "Firefox started, but its window could not be placed in the application. Select Refresh Lilypad to try again.");
         }
     }
 
@@ -211,7 +236,9 @@ internal sealed class FirefoxHost : IDisposable
         style |= WsChild | WsVisible;
         SetWindowStyle(window, style);
         SetParent(window, _host.Handle);
+        _attachedUtc = DateTime.UtcNow;
         ResizeEmbeddedWindow();
+        FocusEmbeddedWindow();
     }
 
     private void ResizeEmbeddedWindow()
@@ -239,7 +266,8 @@ internal sealed class FirefoxHost : IDisposable
             {
                 _firefoxWindow = IntPtr.Zero;
                 _windowTimer.Stop();
-                ReportCrash("Firefox has crashed. Use RELOAD LILYPAD in this app to restart Firefox and reopen the home page.");
+                HandleFailure(
+                    "Firefox has crashed. Select Refresh Lilypad to restart Firefox and reopen the LilyPad POS home page.");
             }));
         }
         catch
@@ -259,16 +287,84 @@ internal sealed class FirefoxHost : IDisposable
         if (value.Contains("tab crash", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("crash reporter", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("your tab just crashed", StringComparison.OrdinalIgnoreCase))
-            ReportCrash("The Firefox tab has crashed. Use RELOAD LILYPAD in this app to restart Firefox and reopen the home page.");
+            HandleFailure(
+                "The Firefox tab has crashed. Select Refresh Lilypad to restart Firefox and reopen the LilyPad POS home page.");
     }
 
-    private void ReportCrash(string message)
+    private bool WindowTitleIndicatesFailure()
+    {
+        var length = GetWindowTextLength(_firefoxWindow);
+        if (length <= 0)
+            return false;
+        var title = new StringBuilder(length + 1);
+        _ = GetWindowText(_firefoxWindow, title, title.Capacity);
+        return title.ToString().Contains("not responding", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void HandleFailure(string finalMessage)
+    {
+        if (_disposed || _restarting || _crashReported || _recoveryQueued)
+            return;
+
+        if (_automaticRecoveryUsed)
+        {
+            ReportFinalFailure(finalMessage);
+            return;
+        }
+
+        _automaticRecoveryUsed = true;
+        _recoveryQueued = true;
+        _windowTimer.Stop();
+        SetStatus("Firefox encountered a problem. Closing it and reopening LilyPad POS once automatically…");
+        PosLog.Write("Firefox automatic recovery attempt started.");
+        try
+        {
+            _host.BeginInvoke(new Action(() =>
+            {
+                _recoveryQueued = false;
+                RestartCore();
+            }));
+        }
+        catch
+        {
+            _recoveryQueued = false;
+            ReportFinalFailure(finalMessage);
+        }
+    }
+
+    private void ReportFinalFailure(string message)
     {
         if (_crashReported)
             return;
         _crashReported = true;
         SetStatus(message);
         CrashDetected?.Invoke(this, message);
+    }
+
+    private void FocusEmbeddedWindow()
+    {
+        if (_firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow))
+            return;
+
+        var form = _host.FindForm();
+        if (form is null || !form.ContainsFocus)
+            return;
+
+        var browserThread = GetWindowThreadProcessId(_firefoxWindow, out _);
+        var currentThread = GetCurrentThreadId();
+        var attached = browserThread != 0 && browserThread != currentThread &&
+                       AttachThreadInput(currentThread, browserThread, true);
+        try
+        {
+            _host.Focus();
+            _ = SetForegroundWindow(form.Handle);
+            _ = SetFocus(_firefoxWindow);
+        }
+        finally
+        {
+            if (attached)
+                _ = AttachThreadInput(currentThread, browserThread, false);
+        }
     }
 
     private static string PrepareFirefoxProfile()
@@ -299,7 +395,10 @@ internal sealed class FirefoxHost : IDisposable
             foreach (var fileName in new[]
                      {
                          "sessionstore.jsonlz4",
-                         "sessionCheckpoints.json"
+                         "sessionCheckpoints.json",
+                         "parent.lock",
+                         "lock",
+                         ".parentlock"
                      })
             {
                 var path = Path.Combine(profilePath, fileName);
@@ -423,9 +522,6 @@ internal sealed class FirefoxHost : IDisposable
 
     private void StopFirefoxProcesses()
     {
-        if (_firefoxWindow != IntPtr.Zero && IsWindow(_firefoxWindow))
-            PostMessage(_firefoxWindow, 0x0010, IntPtr.Zero, IntPtr.Zero);
-
         var processes = new[] { _windowProcess, _process }
             .Where(process => process is not null)
             .Cast<Process>()
@@ -435,10 +531,14 @@ internal sealed class FirefoxHost : IDisposable
         foreach (var process in processes)
         {
             process.Exited -= FirefoxExited;
-            if (!process.HasExited && !process.WaitForExit(1500))
+            if (!process.HasExited)
+            {
                 process.Kill(entireProcessTree: true);
+                _ = process.WaitForExit(3000);
+            }
             process.Dispose();
         }
+        PosLog.Write("The complete embedded Firefox process tree was terminated.");
     }
 
     private static long GetWindowStyle(IntPtr window) => IntPtr.Size == 8
@@ -464,10 +564,19 @@ internal sealed class FirefoxHost : IDisposable
     private static extern bool IsWindow(IntPtr window);
 
     [DllImport("user32.dll")]
+    private static extern bool IsHungAppWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr window);
 
     [DllImport("user32.dll")]
-    private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    private static extern IntPtr SetFocus(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);

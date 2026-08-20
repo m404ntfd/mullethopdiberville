@@ -160,16 +160,20 @@ controllers cannot be assigned as the local master.
 USE THE DASHBOARD
 -----------------
 
-Select one kiosk in the list, then choose:
+Check one or more kiosks in the list, then choose:
 
 * Open Selected: removes the staff-controlled closed screen and resets to a
   fresh waiver.
-* Close Selected: displays the normal Waiver Station Closed screen.
+* Close Selected: asks for Staff Closure or Business Closure. Staff Closure
+  displays the normal Waiver Station Closed screen and reports red. Business
+  Closure starts the Business Closed video and reports blue.
 * Check Kiosk Update: checks the public GitHub release without installing it.
-* Install Kiosk Update: checks, downloads, installs, and restarts that kiosk when a
-  newer version exists.
+* Install Kiosk Update: checks, downloads, installs, and restarts the selected
+  kiosk or kiosks when a newer version exists.
 
-Double-clicking a kiosk row also toggles that kiosk between open and closed.
+If no boxes are checked, the currently highlighted row remains the action target.
+Checkbox selections are preserved while the status list refreshes. Double-clicking
+an open kiosk asks for the closure reason; double-clicking a closed kiosk reopens it.
 
 When a guest selects Call for Assistance at a kiosk, that kiosk's Assistance
 column flashes yellow with HELP. Mullet Hop POS can acknowledge the call;
@@ -180,14 +184,15 @@ The call remains active until it is cleared at the kiosk.
 An online kiosk that is showing its scheduled Business Closed video/page or the
 business-hours blackout screen is reported with a blue Business Closed indicator
 and row. Staff-closed, offline, and error states remain separate.
-Mullet Hop POS asks staff to choose Staff Closure or Business Closure before it
-queues a Close command, ensuring the kiosk reports the intended red or blue state.
+Mullet Hop POS and the Kiosk Controller both ask staff to choose Staff Closure or
+Business Closure before they queue a Close command, ensuring the kiosk reports the
+intended red or blue state.
 Business Hours profiles include opening, Last Jump Time Sold, and closing times
 for each day, plus Show Closed Video, Blackout at closing time, and the existing
 pre-opening screensaver setting.
 
-Open All and Close All apply to every known station. Close All asks for
-confirmation. Offline stations retain the latest queued command and carry it out
+Open All and Close All apply to every known station. Close All asks for the closure
+reason before applying it. Offline stations retain the latest queued command and carry it out
 when they reconnect.
 
 The lower-right Controller Program section includes the controller's own
@@ -200,8 +205,10 @@ update is waiting, Restart Controller offers to install it. Minimizing the windo
 or selecting X sends the controller to the Windows system tray while its network
 service continues running. Single-click or double-click the fish-and-springs tray
 icon, select Open Kiosk Controller from its tray menu, or select its notification
-to restore the dashboard. Only the in-app Exit Program button ends the controller
-service during normal use.
+to restore the dashboard. The restore path also brings an off-screen or minimized
+window back to the active desktop. Right-click the tray icon and select **Exit Kiosk
+Controller** to close the program and terminate its Windows process; the in-app Exit
+Program button performs the same shutdown.
 
 The master controller keeps a dedicated recovery catalog at
 `%LOCALAPPDATA%\MulletHopKioskController\master-connections.json` whenever its
@@ -263,7 +270,9 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.12.2 adds manual master connection by private IPv4
+Kiosk Controller version 1.12.3 improves tray restoration, adds a tray Exit
+command, enables checked multi-kiosk actions, and prompts for Staff or Business
+Closure. Version 1.12.2 adds manual master connection by private IPv4
 address or pairing key, remembers the master by stable controller identity, and
 reconnects after DHCP address changes. Version 1.12.1 adds a dedicated master
 connection recovery catalog and the manual Pull Connections control. Version 1.12.0 shows the active master PC and network-wide POS

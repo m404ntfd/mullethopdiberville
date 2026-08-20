@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace MulletHopKioskController;
 
@@ -41,6 +42,7 @@ internal sealed class ControllerForm : Form
     private readonly Button _masterToggleButton = new();
     private readonly NotifyIcon _trayIcon = new();
     private readonly ContextMenuStrip _trayMenu = new();
+    private readonly HashSet<string> _checkedKioskIds = new(StringComparer.Ordinal);
     private readonly RemoteAccessSettings _remoteSettings = RemoteAccessSettingsStore.Load();
     private CloudSyncService? _cloudSync;
     private bool _lastResolvedDarkMode;
@@ -49,6 +51,7 @@ internal sealed class ControllerForm : Form
     private bool _allowApplicationExit;
     private bool _trayNoticeShown;
     private bool _assistanceFlashOn;
+    private bool _refreshingKioskList;
 
     public ControllerForm()
     {
@@ -129,6 +132,14 @@ internal sealed class ControllerForm : Form
         open.Font = new Font(open.Font, FontStyle.Bold);
         open.Click += (_, _) => RestoreControllerFromTray();
         _trayMenu.Items.Add(open);
+        _trayMenu.Items.Add(new ToolStripSeparator());
+        var exit = new ToolStripMenuItem("Exit Kiosk Controller…");
+        exit.Click += (_, _) =>
+        {
+            RestoreControllerFromTray();
+            BeginInvoke(new Action(CloseController));
+        };
+        _trayMenu.Items.Add(exit);
         _trayIcon.Text = "Mullet Hop Kiosk Controller";
         _trayIcon.ContextMenuStrip = _trayMenu;
         _trayIcon.Visible = true;
@@ -188,14 +199,30 @@ internal sealed class ControllerForm : Form
         }
 
         ShowInTaskbar = true;
-        Visible = true;
-        Show();
+        if (!Visible)
+            Show();
+        _ = ShowWindowAsync(Handle, SwRestore);
         WindowState = FormWindowState.Normal;
+        EnsureControllerIsOnScreen();
         TopMost = true;
         Activate();
         BringToFront();
         Focus();
+        _ = SetForegroundWindow(Handle);
         TopMost = false;
+    }
+
+    private void EnsureControllerIsOnScreen()
+    {
+        if (Screen.AllScreens.Any(screen => screen.WorkingArea.IntersectsWith(Bounds)))
+            return;
+
+        var workingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1320, 820);
+        Bounds = new Rectangle(
+            workingArea.Left + Math.Max(0, (workingArea.Width - Width) / 2),
+            workingArea.Top + Math.Max(0, (workingArea.Height - Height) / 2),
+            Math.Min(Width, workingArea.Width),
+            Math.Min(Height, workingArea.Height));
     }
 
     private Panel BuildHeader()
@@ -488,7 +515,7 @@ internal sealed class ControllerForm : Form
         ConfigureTableActionButton(_checkUpdateButton, "Check Kiosk Update", Color.FromArgb(105, 210, 236));
         ConfigureTableActionButton(_installUpdateButton, "Install Kiosk Update", Color.FromArgb(117, 68, 154), Color.White);
         _openButton.Click += async (_, _) => await QueueSelectedAsync(CommandTypes.SetClosed, false);
-        _closeButton.Click += async (_, _) => await QueueSelectedAsync(CommandTypes.SetClosed, true);
+        _closeButton.Click += async (_, _) => await CloseSelectedKiosksAsync();
         _checkUpdateButton.Click += async (_, _) => await QueueSelectedAsync(CommandTypes.CheckUpdate);
         _installUpdateButton.Click += async (_, _) => await InstallSelectedUpdateAsync();
 
@@ -706,11 +733,12 @@ internal sealed class ControllerForm : Form
         _kioskList.View = View.Details;
         _kioskList.FullRowSelect = true;
         _kioskList.HideSelection = false;
+        _kioskList.CheckBoxes = true;
         _kioskList.MultiSelect = false;
         _kioskList.GridLines = true;
         _kioskList.BackColor = Color.White;
         _kioskList.BorderStyle = BorderStyle.FixedSingle;
-        _kioskList.Columns.Add("Status", 80);
+        _kioskList.Columns.Add("Status", 105);
         _kioskList.Columns.Add("Kiosk Name", 150);
         _kioskList.Columns.Add("PC Name", 120);
         _kioskList.Columns.Add("Version", 70);
@@ -721,11 +749,27 @@ internal sealed class ControllerForm : Form
         _kioskList.Columns.Add("Last Seen", 105);
         _kioskList.Columns.Add("IP Address", 120);
         _kioskList.SelectedIndexChanged += (_, _) => UpdateActionButtons();
+        _kioskList.ItemChecked += (_, e) =>
+        {
+            if (_refreshingKioskList || e.Item.Tag is not string stationId)
+                return;
+            if (e.Item.Checked)
+                _checkedKioskIds.Add(stationId);
+            else
+                _checkedKioskIds.Remove(stationId);
+            BeginInvoke(new Action(UpdateActionButtons));
+        };
         _kioskList.DoubleClick += async (_, _) =>
         {
             var kiosk = SelectedKiosk();
-            if (kiosk is not null)
-                await QueueSelectedAsync(CommandTypes.SetClosed, !kiosk.StationClosed);
+            if (kiosk is null)
+                return;
+            if (kiosk.BusinessHoursClosed)
+                await QueueKiosksAsync([kiosk], CommandTypes.SetBusinessClosed, false);
+            else if (kiosk.StationClosed)
+                await QueueKiosksAsync([kiosk], CommandTypes.SetClosed, false);
+            else
+                await PromptForClosureAsync([kiosk]);
         };
     }
 
@@ -932,6 +976,8 @@ internal sealed class ControllerForm : Form
         _assistanceFlashOn = !_assistanceFlashOn;
         var selectedId = SelectedStationId();
         var kiosks = _state.Snapshot();
+        _checkedKioskIds.IntersectWith(kiosks.Select(kiosk => kiosk.StationId));
+        _refreshingKioskList = true;
         _kioskList.BeginUpdate();
         try
         {
@@ -948,6 +994,7 @@ internal sealed class ControllerForm : Form
                     : "○ Offline")
                 {
                     Tag = kiosk.StationId,
+                    Checked = _checkedKioskIds.Contains(kiosk.StationId),
                     UseItemStyleForSubItems = false,
                     ForeColor = kiosk.IsOnline
                         ? businessClosed
@@ -997,6 +1044,7 @@ internal sealed class ControllerForm : Form
         finally
         {
             _kioskList.EndUpdate();
+            _refreshingKioskList = false;
         }
 
         _onlineSummary.Text = $"{kiosks.Count(kiosk => kiosk.IsOnline)} ONLINE";
@@ -1150,49 +1198,85 @@ internal sealed class ControllerForm : Form
 
     private async Task QueueSelectedAsync(string type, bool? closed = null)
     {
-        var kiosk = SelectedKiosk();
-        if (kiosk is null)
+        var kiosks = SelectedKiosks();
+        if (kiosks.Count == 0)
             return;
 
-        var result = await _server.QueueCommandAsync(kiosk.StationId, type, closed);
-        _selectionStatus.Text = result.Accepted
-            ? $"Command queued for {kiosk.StationName}."
-            : result.Message;
-        RefreshKioskList();
+        await QueueKiosksAsync(kiosks, type, closed);
     }
 
     private async Task InstallSelectedUpdateAsync()
     {
-        var kiosk = SelectedKiosk();
-        if (kiosk is null)
+        var kiosks = SelectedKiosks();
+        if (kiosks.Count == 0)
             return;
+        var target = kiosks.Count == 1 ? kiosks[0].StationName : $"{kiosks.Count} selected kiosks";
         var answer = MessageBox.Show(this,
-            $"Check GitHub and install an available update on {kiosk.StationName}?\n\nThe kiosk may restart automatically.",
+            $"Check GitHub and install an available update on {target}?\n\nThe selected kiosks may restart automatically.",
             "Install Kiosk Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
         if (answer == DialogResult.Yes)
-            await QueueSelectedAsync(CommandTypes.InstallUpdate);
+            await QueueKiosksAsync(kiosks, CommandTypes.InstallUpdate);
     }
 
     private async Task QueueForAllAsync(string type, bool? closed = null)
     {
-        var count = 0;
-        foreach (var kiosk in _state.Snapshot())
-        {
-            var result = await _server.QueueCommandAsync(kiosk.StationId, type, closed);
-            if (result.Accepted)
-                count++;
-        }
-        _selectionStatus.Text = $"Command queued for {count} kiosk(s).";
-        RefreshKioskList();
+        await QueueKiosksAsync(_state.Snapshot(), type, closed);
     }
 
     private async Task CloseAllKiosksAsync()
     {
-        var answer = MessageBox.Show(this,
-            "Turn on the closed screen for every known kiosk?",
-            "Close All Kiosks", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-        if (answer == DialogResult.Yes)
-            await QueueForAllAsync(CommandTypes.SetClosed, true);
+        var kiosks = _state.Snapshot();
+        if (kiosks.Count > 0)
+            await PromptForClosureAsync(kiosks);
+    }
+
+    private async Task CloseSelectedKiosksAsync()
+    {
+        var kiosks = SelectedKiosks();
+        if (kiosks.Count > 0)
+            await PromptForClosureAsync(kiosks);
+    }
+
+    private async Task PromptForClosureAsync(IReadOnlyList<ManagedKiosk> kiosks)
+    {
+        var target = kiosks.Count == 1
+            ? kiosks[0].StationName
+            : $"{kiosks.Count} selected kiosks";
+        using var dialog = new ControllerKioskClosureDialog(target);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        await QueueKiosksAsync(
+            kiosks,
+            dialog.SelectedClosureType == ControllerKioskClosureType.Business
+                ? CommandTypes.SetBusinessClosed
+                : CommandTypes.SetClosed,
+            true);
+    }
+
+    private async Task QueueKiosksAsync(
+        IReadOnlyList<ManagedKiosk> kiosks,
+        string type,
+        bool? closed = null)
+    {
+        var accepted = 0;
+        var lastError = string.Empty;
+        foreach (var kiosk in kiosks)
+        {
+            var result = await _server.QueueCommandAsync(kiosk.StationId, type, closed);
+            if (result.Accepted)
+                accepted++;
+            else
+                lastError = result.Message;
+        }
+
+        var resultText = accepted == kiosks.Count
+            ? $"Command queued for {accepted} kiosk{(accepted == 1 ? "" : "s")}."
+            : accepted == 0
+                ? lastError
+                : $"Command queued for {accepted} of {kiosks.Count} kiosks. {lastError}";
+        RefreshKioskList();
+        _selectionStatus.Text = resultText;
     }
 
     private async Task CheckControllerUpdateAsync(bool showUpToDateMessage)
@@ -1397,6 +1481,18 @@ internal sealed class ControllerForm : Form
             : _state.Snapshot().FirstOrDefault(kiosk => kiosk.StationId == id);
     }
 
+    private IReadOnlyList<ManagedKiosk> SelectedKiosks()
+    {
+        var kiosks = _state.Snapshot();
+        if (_checkedKioskIds.Count > 0)
+            return kiosks.Where(kiosk => _checkedKioskIds.Contains(kiosk.StationId)).ToList();
+
+        var selectedId = SelectedStationId();
+        return selectedId is null
+            ? []
+            : kiosks.Where(kiosk => kiosk.StationId == selectedId).ToList();
+    }
+
     private string? SelectedStationId() =>
         _kioskList.SelectedItems.Count == 0
             ? null
@@ -1404,16 +1500,27 @@ internal sealed class ControllerForm : Form
 
     private void UpdateActionButtons()
     {
-        var kiosk = SelectedKiosk();
-        var enabled = kiosk is not null;
+        var kiosks = SelectedKiosks();
+        var enabled = kiosks.Count > 0;
         _openButton.Enabled = enabled;
         _closeButton.Enabled = enabled;
         _checkUpdateButton.Enabled = enabled;
         _installUpdateButton.Enabled = enabled;
-        if (kiosk is not null)
+        _openButton.Text = kiosks.Count > 1 ? $"Open {kiosks.Count} Selected" : "Open Selected";
+        _closeButton.Text = kiosks.Count > 1 ? $"Close {kiosks.Count} Selected" : "Close Selected";
+        if (kiosks.Count > 1)
         {
+            _selectionStatus.Text = $"{kiosks.Count} kiosks checked for group actions.";
+        }
+        else if (kiosks.Count == 1)
+        {
+            var kiosk = kiosks[0];
             _selectionStatus.Text =
                 $"Selected: {kiosk.StationName} — {(kiosk.IsOnline ? "online" : "offline; commands will wait")}.";
+        }
+        else
+        {
+            _selectionStatus.Text = "Check one or more kiosks above to manage them together.";
         }
     }
 
@@ -1543,4 +1650,12 @@ internal sealed class ControllerForm : Form
         button.FlatStyle = FlatStyle.Flat;
         button.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
     }
+
+    private const int SwRestore = 9;
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
 }

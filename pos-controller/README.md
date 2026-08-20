@@ -33,20 +33,20 @@ waiver kiosks and keeps their controls available without covering the POS page.
   schedule still applies.
 * **Reset** returns the kiosk to the beginning of the waiver.
 
-The bottom of the sidebar contains Reload LilyPad, Staff Menu, Check for Updates,
+The bottom of the sidebar contains Refresh Lilypad, Settings, Check for Updates,
 Minimize, and Exit Application. **Minimize** sends Mullet Hop POS and its Firefox
-window to the Windows notification area. Double-click the orange-fish tray icon,
-or right-click it and select **Show Mullet Hop POS**, to restore the full-screen
-window. A normal close command also sends the application to the tray. Only the
-passcode-protected **Exit Application** command closes Firefox and stops the
-application. Press **Ctrl + Alt + M** while Mullet Hop POS is active to open the protected
-Staff Menu.
+window to the Windows taskbar. Select the Mullet Hop POS taskbar icon to restore
+the full-screen window. Only the passcode-protected **Exit Application** command
+closes Firefox and stops the application. Press **Ctrl + Alt + M** while Mullet
+Hop POS is active to open the protected Settings window.
 
-Firefox is embedded with its normal browser controls instead of kiosk mode. If
-Firefox exits or a tab-crash title is detected, a red banner appears above the
-browser and tells staff to use **Reload LilyPad**. Reload LilyPad terminates the
-embedded Firefox session, clears every saved tab, and opens one fresh window at
-the LilyPad home page. The banner also includes its own reload button.
+Firefox is embedded with its normal browser controls instead of kiosk mode. The
+application restores Firefox input focus when the POS window activates and checks
+for a hung browser, a failed startup, a Firefox process exit, and a tab-crash title.
+It terminates and reopens the complete embedded Firefox session once automatically.
+Only if the recovery also fails does a red banner ask staff to use **Refresh
+Lilypad**. Refresh Lilypad forcibly terminates the Firefox process tree, clears
+every saved tab and session, and opens one fresh LilyPad home page.
 
 ## Installation
 
@@ -56,7 +56,7 @@ the LilyPad home page. The banner also includes its own reload button.
 3. Extract the complete `Mullet-Hop-POS` ZIP package.
 4. Run `Install-Mullet-Hop-POS.cmd`.
 5. Create a 4–8 digit Staff Menu passcode on the first launch.
-6. Open **Staff Menu**, then copy the controller address and pairing key from the
+6. Open **Settings**, then copy the controller address and pairing key from the
    main Kiosk Controller.
 7. Select **Connect & Remember**. The verified controller address and pairing key
    are saved immediately.
@@ -78,7 +78,10 @@ The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
 restarts without changing the user's normal Firefox profile.
 
-Version 1.5.0 keeps Firefox's menu and browser controls visible, detects a crashed
+Version 1.5.1 minimizes to the Windows taskbar, renames the controls to Settings
+and Refresh Lilypad, restores Firefox input focus, and performs one automatic
+full-session recovery before reporting a Firefox failure. Version 1.5.0 keeps
+Firefox's menu and browser controls visible, detects a crashed
 Firefox tab or process, and provides a Reload LilyPad action that terminates the
 dedicated Firefox session, clears all of its tabs, and opens one fresh LilyPad
 home page. It also identifies the POS workstation to the controller so three

@@ -96,12 +96,13 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.2, Kiosk Controller version 1.12.2, and Mullet Hop POS
-version 1.5.0 are the matching package releases. Waiver Kiosk version 2.11.0 adds
+Waiver Kiosk version 2.11.3, Kiosk Controller version 1.12.3, and Mullet Hop POS
+version 1.5.1 are the matching package releases. Waiver Kiosk version 2.11.0 adds
 Last Jump Time Sold schedules, the editable looping closed video and next-opening
 time, closing-time blackout, and the reorganized staff settings navigation.
-Waiver Kiosk version 2.11.2 is the matching kiosk package for the controller
-connection-recovery release. Version 2.11.1 keeps the assistance card at the bottom of the
+Waiver Kiosk version 2.11.3 is the matching kiosk package for the controller and
+POS reliability release. Version 2.11.2 is the matching kiosk package for the
+controller connection-recovery release. Version 2.11.1 keeps the assistance card at the bottom of the
 right-side waiver controls. Waiver Kiosk version 2.10.1 places
 guest assistance in a compact highlighted card
 with the other right-side waiver controls and moves that card stack near the top
@@ -168,7 +169,9 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Kiosk Controller version 1.12.2 adds manual master connection by private IPv4
+Kiosk Controller version 1.12.3 improves tray restoration, adds a tray Exit
+command, enables checked multi-kiosk actions, and prompts for Staff or Business
+Closure. Version 1.12.2 adds manual master connection by private IPv4
 address or pairing key, remembers the master by stable controller identity, and
 reconnects after DHCP address changes. Version 1.12.1 adds the dedicated master
 connection recovery catalog and the manual Pull Connections control. Version 1.12.0 adds Software Downloads, master kiosk-connection
@@ -214,21 +217,25 @@ Business Closure starts the Business Closed video and reports blue. Open
 clears either manually selected closure, while the configured business schedule
 continues to apply.
 
-Reload LilyPad, Staff Menu, Check for Updates, Minimize, and Exit Application
-remain at the bottom of the sidebar. Minimize and normal close commands send the
-application to the Windows notification area. Double-click its orange-fish tray icon
-to restore it. Only the passcode-protected Exit Application command closes
-Firefox and stops Mullet Hop POS. Firefox runs with its normal browser controls visible.
-If Firefox or its active tab crashes, a red message appears above the browser and
-directs staff to Reload LilyPad. Reload LilyPad closes every tab in the dedicated
-Firefox session and opens one fresh window at the LilyPad home page. Ctrl + Alt + M
-opens the Staff Menu. The Staff Menu
-requires the application's 4-8 digit passcode. The Staff Menu finds
+Refresh Lilypad, Settings, Check for Updates, Minimize, and Exit Application
+remain at the bottom of the sidebar. Minimize sends the application to the Windows
+taskbar, where selecting its taskbar icon restores it. Only the passcode-protected
+Exit Application command closes Firefox and stops Mullet Hop POS. Firefox runs with
+its normal browser controls visible. The application restores Firefox input focus
+when its window activates and checks the embedded browser for startup, hang, process,
+and tab-crash failures. It closes and reopens the complete Firefox session once
+automatically before showing a red problem message. Refresh Lilypad forcibly closes
+the dedicated Firefox process tree, clears its saved tabs and session state, and
+opens one fresh window at the LilyPad home page. Ctrl + Alt + M opens Settings. Settings
+requires the application's 4-8 digit passcode. The Settings window finds
 kiosks already paired with the on-site Kiosk Controller, remembers the controller
 address and pairing key, and saves each kiosk's identity and Kiosk 1-4 position.
 Selecting a machine already assigned elsewhere moves or swaps it automatically.
 
-Version 1.5.0 keeps Firefox controls visible, detects Firefox crashes, and makes
+Version 1.5.1 minimizes to the Windows taskbar, renames the controls to Settings
+and Refresh Lilypad, restores Firefox input focus, and performs one automatic
+full-session recovery before reporting a Firefox failure. Version 1.5.0 keeps
+Firefox controls visible, detects Firefox crashes, and makes
 Reload LilyPad terminate the dedicated Firefox session, clear every tab, and
 open one fresh LilyPad home page. Three POS workstations can simultaneously see
 and control the same four kiosk assignments. Version 1.4.1 retains the former
