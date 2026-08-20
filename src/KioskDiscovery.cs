@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MulletHop.KioskDiscovery;
+using MulletHop.LocalNetworking;
 
 namespace MulletHopWaiverKiosk;
 
@@ -466,7 +467,7 @@ internal sealed class KioskDiscoveryClient : IDisposable
                 {
                     var address = unicast.Address;
                     if (address.AddressFamily != AddressFamily.InterNetwork ||
-                        !IsPrivateAddress(address))
+                        !LocalNetworkAddress.IsUsableAdapterIpv4(address))
                     {
                         continue;
                     }
@@ -504,16 +505,6 @@ internal sealed class KioskDiscoveryClient : IDisposable
         }
 
         return addresses;
-    }
-
-    private static bool IsPrivateAddress(IPAddress address)
-    {
-        var bytes = address.GetAddressBytes();
-        return bytes[0] == 10 ||
-               bytes[0] == 127 ||
-               (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
-               (bytes[0] == 192 && bytes[1] == 168) ||
-               (bytes[0] == 169 && bytes[1] == 254);
     }
 
     private static string BuildControllerAddress(IPAddress address) =>

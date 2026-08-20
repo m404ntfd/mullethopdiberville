@@ -233,7 +233,7 @@ internal sealed class ControllerConnectionTroubleshooterDialog : Form
         return detectedMaster is null
             ? new ControllerMasterConnectionResult(
                 false,
-                "No master Systems Controller was detected. Enter its private IPv4 address or pairing key and run the repair again.")
+                "No master Systems Controller was detected. Enter its local IPv4 address or pairing key and run the repair again.")
             : await _server.Peers.ConnectToMasterAsync(detectedMaster.ControllerAddress);
     }
 

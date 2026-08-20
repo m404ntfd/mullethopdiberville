@@ -437,7 +437,7 @@ internal sealed class ControllerForm : Form
             _addresses.Text.Contains("localhost", StringComparison.OrdinalIgnoreCase))
         {
             MessageBox.Show(this,
-                "This computer does not currently have a usable private-network IPv4 address. Connect it to the kiosk network, then restart the controller.",
+                "This computer does not currently have a usable local-network IPv4 address. Connect it to the kiosk network, then restart the controller.",
                 "Add Kiosk Manually", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }

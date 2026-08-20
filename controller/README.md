@@ -1,7 +1,7 @@
 # Mullet Hop Systems Controller
 
 The controller is installed on a Windows 10 or Windows 11 office computer on
-the same private network as the waiver kiosks. Additional local controller
+the same local network as the waiver kiosks. Additional local controller
 computers discover each other, and one can be designated as the master. It provides:
 
 * Online/offline, version, open/closed, assistance, last-seen, and IP status per kiosk.
@@ -133,12 +133,12 @@ MASTER CONTROLLER ROLE
 
 The Controller Program section has dark red and green indicator lenses and a
 **Make This Master** button. Green means this controller is the master; red means
-it is not. Local controller applications scan the private network when they
+it is not. Local controller applications scan the directly connected adapter subnet when they
 launch, recheck known controllers every few seconds, and show the detected
 master computer by name.
 
 When no live master is detected, **Pull Connections** changes to **Connect to
-Master**. Enter the master PC's private IPv4 address or its full pairing key.
+Master**. Enter the master PC's local IPv4 address or its full pairing key.
 After the signed connection succeeds, this controller saves the master's stable
 controller ID, computer name, verified address, and connection credentials in
 its local `controller.json` file. The connection window also offers **Use Saved
@@ -146,7 +146,7 @@ Master** on later attempts.
 
 The saved computer identity is independent of its last IP address. The
 controller retries the last address and Windows computer name, then scans the
-current private subnet for the same controller ID. If DHCP assigns the master a
+current directly connected subnet for the same controller ID. If DHCP assigns the master a
 different address, the saved record is updated automatically after the signed
 connection is verified. Assistance acknowledgements, reset/open/close commands,
 and kiosk update commands use this recovery path before reporting that the
@@ -267,6 +267,11 @@ NETWORK NOTES
 
 * Controller port: TCP 47832.
 * Windows network profile on the controller should be Private.
+* Controller and kiosk discovery supports every usable IPv4 address on the
+  Windows adapter's directly connected subnet. This includes local installations
+  such as `128.0.0.0/25` that do not use an RFC 1918 address. A non-private
+  address is accepted only when Windows confirms it belongs to that adapter's
+  subnet; unrelated Internet addresses remain blocked.
 * Select **Connection Troubleshooter** to test discovery, the saved or entered
   master, TCP 47832, the Windows network profile, firewall rule, URL reservation,
   and the local controller service. **Diagnose & Repair** requests administrator
@@ -279,7 +284,9 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.14.0 adds the built-in Connection Troubleshooter,
+Systems Controller version 1.14.1 enables controller and kiosk discovery on the
+Windows adapter's directly connected IPv4 subnet, including the `128.0.0.0/25`
+network, while continuing to reject unrelated public addresses. Version 1.14.0 adds the built-in Connection Troubleshooter,
 repairs the local Windows Private-network/firewall/URL-listener configuration,
 retries saved, detected, IP-address, or pairing-key master connections, and
 automatically replaces a duplicated non-master identity left by a copied PC

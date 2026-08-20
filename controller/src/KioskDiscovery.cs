@@ -1,5 +1,6 @@
 using System.Net;
 using MulletHop.KioskDiscovery;
+using MulletHop.LocalNetworking;
 
 namespace MulletHopKioskController;
 
@@ -394,12 +395,7 @@ internal sealed class KioskDiscoveryCoordinator
             return false;
         }
 
-        var bytes = address.GetAddressBytes();
-        var isPrivate = bytes[0] == 10 ||
-                        (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
-                        (bytes[0] == 192 && bytes[1] == 168) ||
-                        (bytes[0] == 169 && bytes[1] == 254);
-        if (!isPrivate)
+        if (!LocalNetworkAddress.IsPrivateOrDirectlyConnectedIpv4(address))
             return false;
         normalized = address.ToString();
         return true;

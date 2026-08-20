@@ -31,7 +31,7 @@ internal sealed class MasterConnectionDialog : Form
         var explanation = new Label
         {
             AutoSize = false,
-            Text = "Enter the master PC's private IPv4 address or copy its full pairing key from the Controller Setup section. The connection is saved by computer identity so a future DHCP address change can be found automatically.",
+            Text = "Enter the master PC's local IPv4 address or copy its full pairing key from the Controller Setup section. Directly connected adapter subnets are supported even when they do not use a standard private address range.",
             Bounds = new Rectangle(42, 68, 616, 65),
             ForeColor = Color.FromArgb(52, 65, 76),
             TextAlign = ContentAlignment.MiddleCenter
@@ -52,7 +52,7 @@ internal sealed class MasterConnectionDialog : Form
         var keyNote = new Label
         {
             AutoSize = false,
-            Text = "A pairing key locates the master on this local subnet. Use the private IP address when the master is on a different routed subnet.",
+            Text = "A pairing key locates the master on this local subnet. You can also enter its IPv4 address directly.",
             Bounds = new Rectangle(42, 222, 616, 44),
             Font = new Font("Segoe UI", 9),
             ForeColor = Color.FromArgb(83, 97, 109),
@@ -110,7 +110,7 @@ internal sealed class MasterConnectionDialog : Form
             if (string.IsNullOrWhiteSpace(ConnectionValue))
             {
                 MessageBox.Show(this,
-                    "Enter the master computer's private IPv4 address or pairing key.",
+                    "Enter the master computer's local IPv4 address or pairing key.",
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 _connectionValue.Focus();
                 return;

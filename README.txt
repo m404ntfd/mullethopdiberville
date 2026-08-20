@@ -90,14 +90,17 @@ master-connections.json recovery catalog in its local controller data folder.
 Use Pull Connections in the Controller Program section to reload that file on
 the master or fetch the active master's stored list on another local controller.
 If no master is detected, that button changes to Connect to Master and accepts
-the master PC's private IPv4 address or full pairing key. A verified master is
+the master PC's local IPv4 address or full pairing key. A verified master is
 saved by stable controller ID and computer name as well as its last address, so
 the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.4, Systems Controller version 1.13.0, and Mullet Hop POS
-version 1.6.0 are the matching package releases. Waiver Kiosk version 2.11.0 adds
+Waiver Kiosk version 2.11.6, Systems Controller version 1.14.1, and Mullet Hop POS
+version 1.7.0 are the matching package releases. Kiosk 2.11.6 and Systems Controller
+1.14.1 support controller and kiosk discovery on the Windows adapter's directly
+connected IPv4 subnet, including non-RFC 1918 installations such as
+128.0.0.0/25. Waiver Kiosk version 2.11.0 adds
 Last Jump Time Sold schedules, the editable looping closed video and next-opening
 time, closing-time blackout, and the reorganized staff settings navigation.
 Waiver Kiosk version 2.11.3 is the matching kiosk package for the controller and
