@@ -355,6 +355,7 @@ internal sealed partial class KioskForm : Form
     public KioskForm(KioskSettings settings)
     {
         _settings = settings;
+        _manualBusinessBlackout = _settings.ManualBusinessBlackout;
         _lastDarkTheme = KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
 
         Text = "Mullet Hop Waiver Kiosk";
@@ -2478,6 +2479,8 @@ internal sealed partial class KioskForm : Form
                                 return;
                             case StaffSettingsAction.ReturnToKiosk:
                                 _manualBusinessBlackout = false;
+                                _settings.ManualBusinessBlackout = false;
+                                _settings.Save();
                                 await ResetForNextGuestAsync(
                                     "staff returned to kiosk", showStatus: false);
                                 return;
@@ -2509,7 +2512,7 @@ internal sealed partial class KioskForm : Form
                                 }
                                 continue;
                             case StaffSettingsAction.StartBusinessBlackout:
-                                ShowBlackoutPage(manual: true);
+                                await SetBusinessClosedAsync(true, "staff settings");
                                 KioskLog.Write("Staff started an immediate business-hours blackout.");
                                 return;
                         }
@@ -3981,6 +3984,7 @@ internal sealed class KioskSettings
     public int ScreensaverTimeoutMinutes { get; set; } = 3;
     public int CompletionResetSeconds { get; set; } = 15;
     public bool StationClosed { get; set; }
+    public bool ManualBusinessBlackout { get; set; }
     public bool BusinessHoursEnabled { get; set; }
     public int BusinessClosedMessageMinutes { get; set; } = 5;
     public int PreOpeningScreensaverMinutes { get; set; } = 30;
@@ -4131,6 +4135,8 @@ internal sealed class KioskSettings
             : StationName.Trim();
         if (!AssistanceRequested)
             AssistanceAcknowledged = false;
+        if (StationClosed)
+            ManualBusinessBlackout = false;
         RemoteLastCommandId ??= string.Empty;
         RemoteLastCommandMessage ??= string.Empty;
         AdvertisementSyncRevision ??= string.Empty;

@@ -23,7 +23,7 @@ internal sealed class PinEntryDialog : Form
     public string Pin => _pin.Text;
 
     public PinEntryDialog(
-        string title = "Kiosk Status Viewer Staff Menu",
+        string title = "Mullet Hop POS Staff Menu",
         string? instruction = null,
         string actionText = "Open Staff Menu")
     {
@@ -92,7 +92,7 @@ internal sealed class PinSetupDialog : Form
 
     public PinSetupDialog()
     {
-        Text = "Create Kiosk Status Viewer Passcode";
+        Text = "Create Mullet Hop POS Passcode";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
@@ -102,7 +102,7 @@ internal sealed class PinSetupDialog : Form
 
         Controls.Add(new Label
         {
-            Text = "Protect the Kiosk Status Viewer settings",
+            Text = "Protect Mullet Hop POS settings",
             Font = new Font("Segoe UI", 14, FontStyle.Bold),
             Bounds = new Rectangle(25, 20, 420, 36),
             TextAlign = ContentAlignment.MiddleCenter

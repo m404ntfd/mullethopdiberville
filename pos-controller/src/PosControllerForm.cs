@@ -38,7 +38,7 @@ internal sealed class PosControllerForm : Form
     public PosControllerForm(PosSettings settings)
     {
         _settings = settings;
-        Text = "Mullet Hop Kiosk Status Viewer";
+        Text = "Mullet Hop POS";
         var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         if (appIcon is not null)
             Icon = appIcon;
@@ -134,7 +134,7 @@ internal sealed class PosControllerForm : Form
         _brandLogo.SizeMode = PictureBoxSizeMode.Zoom;
         _brandLogo.BackColor = Color.Transparent;
         _brandLogo.Margin = new Padding(4);
-        _brandTitle.Text = "KIOSK STATUS VIEWER";
+        _brandTitle.Text = "MULLET HOP POS";
         _brandTitle.Dock = DockStyle.Fill;
         _brandTitle.TextAlign = ContentAlignment.MiddleLeft;
         _brandTitle.Font = new Font("Segoe UI", 15, FontStyle.Bold);
@@ -159,7 +159,7 @@ internal sealed class PosControllerForm : Form
             _cards[index] = new KioskControlCard(index + 1);
             var slot = index;
             _cards[index].CloseRequested += async (_, _) =>
-                await SendCommandAsync(slot, PosCommandTypes.SetClosed, true);
+                await PromptForClosureAsync(slot);
             _cards[index].OpenRequested += async (_, _) =>
                 await SendCommandAsync(slot, PosCommandTypes.SetClosed, false);
             _cards[index].ResetRequested += async (_, _) =>
@@ -266,7 +266,7 @@ internal sealed class PosControllerForm : Form
             if (PosUpdater.HasStagedUpdate)
             {
                 PromptToInstallPosUpdate(
-                    "A downloaded Kiosk Status Viewer update is ready to install.");
+                    "A downloaded Mullet Hop POS update is ready to install.");
                 return;
             }
 
@@ -281,7 +281,7 @@ internal sealed class PosControllerForm : Form
                 return;
             }
 
-            MessageBox.Show(this, result.Message, "Kiosk Status Viewer Update",
+            MessageBox.Show(this, result.Message, "Mullet Hop POS Update",
                 MessageBoxButtons.OK,
                 result.Status == PosUpdateStatus.Failed
                     ? MessageBoxIcon.Warning
@@ -303,8 +303,8 @@ internal sealed class PosControllerForm : Form
     private void PromptToInstallPosUpdate(string message)
     {
         var answer = MessageBox.Show(this,
-            message + "\n\nInstall it now? The Kiosk Status Viewer will close and restart automatically.",
-            "Install Kiosk Status Viewer Update",
+            message + "\n\nInstall it now? Mullet Hop POS will close and restart automatically.",
+            "Install Mullet Hop POS Update",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
         if (answer != DialogResult.Yes)
@@ -319,7 +319,7 @@ internal sealed class PosControllerForm : Form
             _exitApproved = false;
         if (!IsDisposed && result.Status != PosUpdateStatus.Applying)
         {
-            MessageBox.Show(this, result.Message, "Kiosk Status Viewer Update",
+            MessageBox.Show(this, result.Message, "Mullet Hop POS Update",
                 MessageBoxButtons.OK,
                 result.Status == PosUpdateStatus.Failed
                     ? MessageBoxIcon.Warning
@@ -334,7 +334,7 @@ internal sealed class PosControllerForm : Form
         if (!_settings.HasConnectionSettings)
         {
             UpdateUnlinkedCards();
-            SetConnectionStatus("Open Staff Menu to connect the viewer.", false);
+            SetConnectionStatus("Open Staff Menu to connect Mullet Hop POS.", false);
             return;
         }
 
@@ -387,6 +387,18 @@ internal sealed class PosControllerForm : Form
         }
     }
 
+    private async Task PromptForClosureAsync(int slot)
+    {
+        using var dialog = new KioskClosureDialog(slot + 1);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        if (dialog.SelectedClosureType == KioskClosureType.Business)
+            await SendCommandAsync(slot, PosCommandTypes.SetBusinessClosed, true);
+        else
+            await SendCommandAsync(slot, PosCommandTypes.SetClosed, true);
+    }
+
     private async Task SendCommandAsync(int slot, string commandType, bool? closed = null)
     {
         if (slot < 0 || slot >= _settings.KioskSlots.Count)
@@ -409,7 +421,9 @@ internal sealed class PosControllerForm : Form
                 throw new InvalidOperationException(result.Message);
 
             if (commandType == PosCommandTypes.SetClosed && closed == true)
-                _cards[slot].ShowPendingState(open: false, "Closing waiver station…");
+                _cards[slot].ShowPendingState(open: false, "Applying staff closure…");
+            else if (commandType == PosCommandTypes.SetBusinessClosed && closed == true)
+                _cards[slot].ShowPendingBusinessClosure("Applying business closure…");
             else if (commandType == PosCommandTypes.SetClosed)
                 _cards[slot].ShowPendingState(open: true, "Putting waiver station in service…");
             else if (commandType == PosCommandTypes.AcknowledgeAssistance)
@@ -447,7 +461,7 @@ internal sealed class PosControllerForm : Form
                 MessageBox.Show(this,
                     "The Staff Menu passcode was not correct.",
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                PosLog.Write("Incorrect Kiosk Status Viewer staff-menu passcode entered.");
+                PosLog.Write("Incorrect Mullet Hop POS staff-menu passcode entered.");
                 return;
             }
 
@@ -477,8 +491,8 @@ internal sealed class PosControllerForm : Form
         {
             RestoreFromTray();
             using var pin = new PinEntryDialog(
-                "Exit Kiosk Status Viewer",
-                "Enter the Staff Menu passcode to close Firefox and the Kiosk Status Viewer.",
+                "Exit Mullet Hop POS",
+                "Enter the Staff Menu passcode to close Firefox and Mullet Hop POS.",
                 "Exit Application");
             if (pin.ShowDialog(this) != DialogResult.OK)
                 return;
@@ -490,8 +504,8 @@ internal sealed class PosControllerForm : Form
             }
 
             var answer = MessageBox.Show(this,
-                "Close LilyPad POS, Firefox, and the Kiosk Status Viewer?",
-                "Exit Kiosk Status Viewer",
+                "Close LilyPad POS, Firefox, and Mullet Hop POS?",
+                "Exit Mullet Hop POS",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
             if (answer != DialogResult.Yes)
@@ -518,7 +532,7 @@ internal sealed class PosControllerForm : Form
 
     private void ConfigureTrayIcon()
     {
-        var showItem = new ToolStripMenuItem("Show Kiosk Status Viewer");
+        var showItem = new ToolStripMenuItem("Show Mullet Hop POS");
         showItem.Click += (_, _) => RestoreFromTray();
         var staffItem = new ToolStripMenuItem("Staff Menu");
         staffItem.Click += (_, _) =>
@@ -535,7 +549,7 @@ internal sealed class PosControllerForm : Form
 
         _trayIcon.ContextMenuStrip = _trayMenu;
         _trayIcon.Icon = Icon ?? SystemIcons.Application;
-        _trayIcon.Text = "Mullet Hop Kiosk Status Viewer";
+        _trayIcon.Text = "Mullet Hop POS";
         _trayIcon.Visible = true;
         _trayIcon.DoubleClick += (_, _) => RestoreFromTray();
     }
@@ -551,7 +565,7 @@ internal sealed class PosControllerForm : Form
         ShowInTaskbar = false;
         Hide();
         WindowState = FormWindowState.Normal;
-        PosLog.Write("Kiosk Status Viewer minimized to the notification area.");
+        PosLog.Write("Mullet Hop POS minimized to the notification area.");
     }
 
     private void RestoreFromTray()
@@ -660,10 +674,99 @@ internal sealed class PosControllerForm : Form
     }
 }
 
+internal enum KioskClosureType
+{
+    Staff,
+    Business
+}
+
+internal sealed class KioskClosureDialog : Form
+{
+    public KioskClosureType SelectedClosureType { get; private set; } = KioskClosureType.Staff;
+
+    public KioskClosureDialog(int kioskNumber)
+    {
+        Text = $"Close Kiosk {kioskNumber}";
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        StartPosition = FormStartPosition.CenterParent;
+        MinimizeBox = false;
+        MaximizeBox = false;
+        ShowInTaskbar = false;
+        ClientSize = new Size(540, 245);
+        Font = new Font("Segoe UI", 10);
+        BackColor = Color.White;
+
+        var heading = new Label
+        {
+            Text = $"How should Kiosk {kioskNumber} be closed?",
+            Dock = DockStyle.Top,
+            Height = 58,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font("Segoe UI", 15, FontStyle.Bold),
+            ForeColor = Color.FromArgb(16, 24, 32)
+        };
+        var explanation = new Label
+        {
+            Text = "Staff Closure shows red. Business Closure starts the black business-hours screen and shows blue.",
+            Dock = DockStyle.Top,
+            Height = 52,
+            Padding = new Padding(24, 0, 24, 8),
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.FromArgb(70, 82, 94)
+        };
+        var buttons = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Padding = new Padding(18, 14, 18, 18)
+        };
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 37));
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 37));
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26));
+
+        var staff = MakeChoiceButton("STAFF CLOSURE", Color.FromArgb(187, 34, 46), Color.White);
+        staff.Click += (_, _) => Complete(KioskClosureType.Staff);
+        var business = MakeChoiceButton("BUSINESS CLOSURE", Color.FromArgb(26, 135, 232), Color.White);
+        business.Click += (_, _) => Complete(KioskClosureType.Business);
+        var cancel = MakeChoiceButton("CANCEL", Color.FromArgb(120, 126, 132), Color.White);
+        cancel.DialogResult = DialogResult.Cancel;
+        CancelButton = cancel;
+        buttons.Controls.Add(staff, 0, 0);
+        buttons.Controls.Add(business, 1, 0);
+        buttons.Controls.Add(cancel, 2, 0);
+
+        Controls.Add(buttons);
+        Controls.Add(explanation);
+        Controls.Add(heading);
+    }
+
+    private void Complete(KioskClosureType closureType)
+    {
+        SelectedClosureType = closureType;
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    private static Button MakeChoiceButton(string text, Color background, Color foreground) => new()
+    {
+        Text = text,
+        Dock = DockStyle.Fill,
+        Margin = new Padding(5),
+        BackColor = background,
+        ForeColor = foreground,
+        FlatStyle = FlatStyle.Flat,
+        Font = new Font("Segoe UI", 9, FontStyle.Bold),
+        Cursor = Cursors.Hand,
+        UseVisualStyleBackColor = false
+    };
+}
+
 internal sealed class KioskControlCard : Panel
 {
     private static readonly Color OnlineColor = Color.FromArgb(38, 205, 91);
     private static readonly Color ErrorColor = Color.FromArgb(244, 34, 48);
+    private static readonly Color BusinessClosedColor = Color.FromArgb(26, 135, 232);
     private static readonly Color AssistanceColor = Color.FromArgb(255, 213, 38);
     private static readonly Color UnlinkedColor = Color.FromArgb(82, 88, 96);
 
@@ -790,7 +893,13 @@ internal sealed class KioskControlCard : Panel
     {
         IsLinked = true;
         var open = kiosk.IsOnline && kiosk.AvailableForGuests && !kiosk.HasError;
-        SetBaseStatusColor(open ? OnlineColor : ErrorColor);
+        var businessClosed = kiosk.IsOnline && kiosk.BusinessHoursClosed &&
+                             !kiosk.StationClosed && !kiosk.HasError;
+        SetBaseStatusColor(open
+            ? OnlineColor
+            : businessClosed
+                ? BusinessClosedColor
+                : ErrorColor);
         SetAssistanceState(kiosk.AssistanceRequested, kiosk.AssistanceAcknowledged);
         var message = kiosk.IsOnline
             ? (string.IsNullOrWhiteSpace(kiosk.StatusMessage)
@@ -798,7 +907,11 @@ internal sealed class KioskControlCard : Panel
                 : kiosk.StatusMessage)
             : "Waiver kiosk is offline";
         _status.Text = $"{kiosk.StationName}\n{message}";
-        _status.ForeColor = open ? Color.FromArgb(44, 116, 29) : Color.FromArgb(187, 34, 46);
+        _status.ForeColor = open
+            ? Color.FromArgb(44, 116, 29)
+            : businessClosed
+                ? Color.FromArgb(10, 91, 160)
+                : Color.FromArgb(187, 34, 46);
         _dot.AccessibleDescription = $"Kiosk {_kioskNumber}: {message}";
         SetButtonsEnabled(true);
     }
@@ -839,6 +952,13 @@ internal sealed class KioskControlCard : Panel
         ShowPendingMessage(message);
     }
 
+    public void ShowPendingBusinessClosure(string message)
+    {
+        SetBaseStatusColor(BusinessClosedColor);
+        ShowPendingMessage(message);
+        _status.ForeColor = Color.FromArgb(10, 91, 160);
+    }
+
     public void ShowPendingMessage(string message)
     {
         _status.Text = message;
@@ -863,7 +983,7 @@ internal sealed class KioskControlCard : Panel
     private void SetBaseStatusColor(Color color)
     {
         _baseStatusColor = color;
-        if (!_assistanceRequested || _assistanceAcknowledged || !_assistanceFlashYellow)
+        if (!_assistanceRequested || !_assistanceFlashYellow)
             _dot.StatusColor = color;
     }
 
@@ -883,7 +1003,7 @@ internal sealed class KioskControlCard : Panel
         _assistanceFlashTimer.Stop();
         _assistanceFlashYellow = false;
         _dot.StatusColor = _baseStatusColor;
-        if (_assistanceRequested && !_assistanceAcknowledged)
+        if (_assistanceRequested)
         {
             _assistanceFlashYellow = true;
             _dot.StatusColor = AssistanceColor;
@@ -904,9 +1024,9 @@ internal sealed class KioskControlCard : Panel
         }
         if (_assistanceAcknowledged)
         {
-            _assistance.Text = "ON WAY";
-            _assistance.BackColor = Color.FromArgb(118, 196, 66);
-            _assistance.ForeColor = Color.FromArgb(16, 24, 32);
+            _assistance.Text = "ANSWERED";
+            _assistance.BackColor = Color.FromArgb(120, 126, 132);
+            _assistance.ForeColor = Color.White;
             _assistance.Enabled = false;
             return;
         }

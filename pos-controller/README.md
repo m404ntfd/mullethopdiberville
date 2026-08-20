@@ -1,6 +1,6 @@
-# Mullet Hop Kiosk Status Viewer
+# Mullet Hop POS
 
-The Kiosk Status Viewer is the full-screen front-desk application for Mullet Hop.
+Mullet Hop POS is the full-screen front-desk application for Mullet Hop.
 It uses Mozilla Firefox installed on the computer to load:
 
 `https://mullet.lilypadpos.app/public/Login.php`
@@ -15,23 +15,31 @@ waiver kiosks and keeps their controls available without covering the POS page.
 * Select the arrow again to expand kiosk names, status messages, and the Close,
   Open, and Reset controls.
 * A green dot means the kiosk is online and open to guests.
-* A red dot means the kiosk is closed, offline, outside business hours, unable to
-  reach the waiver website, or reporting another error.
+* A blue dot means the kiosk is showing the scheduled Business Closed screen or
+  its business-hours blackout screen.
+* A red dot means the kiosk was closed by staff, is offline, cannot reach the
+  waiver website, or is reporting another error.
 * A gray dot means that dashboard position is not assigned.
 * When a guest requests assistance, the kiosk's dot flashes between its current
   status color and yellow. Select **ACK** or **Acknowledge** to tell the guest
-  that assistance is on the way; the dot then returns to its current status color.
-* **Close** displays the waiver-station closed screen.
+  that assistance is on the way. The button then reads **Answered**, stays gray
+  and disabled, and the dot keeps flashing yellow until the call is cleared at
+  the kiosk.
+* **Close** asks whether this is a **Staff Closure** or **Business Closure**.
+  Staff Closure displays the normal closed screen and reports red. Business
+  Closure starts the business-hours blackout screen and reports blue.
 * **Open** removes the staff-controlled closed screen and starts a fresh waiver.
+  It also ends a manually selected Business Closure; the configured business
+  schedule still applies.
 * **Reset** returns the kiosk to the beginning of the waiver.
 
 The bottom of the sidebar contains Reload LilyPad, Staff Menu, Check for Updates,
-Minimize, and Exit Application. **Minimize** sends the viewer and its Firefox
+Minimize, and Exit Application. **Minimize** sends Mullet Hop POS and its Firefox
 window to the Windows notification area. Double-click the orange-fish tray icon,
-or right-click it and select **Show Kiosk Status Viewer**, to restore the full-screen
-window. A normal close command also sends the viewer to the tray. Only the
+or right-click it and select **Show Mullet Hop POS**, to restore the full-screen
+window. A normal close command also sends the application to the tray. Only the
 passcode-protected **Exit Application** command closes Firefox and stops the
-viewer. Press **Ctrl + Alt + M** while the viewer is active to open the protected
+application. Press **Ctrl + Alt + M** while Mullet Hop POS is active to open the protected
 Staff Menu.
 
 ## Installation
@@ -39,8 +47,8 @@ Staff Menu.
 1. Install Mozilla Firefox on the front-desk computer.
 2. Keep the on-site Mullet Hop Kiosk Controller running on the same private
    network as the waiver kiosks and front-desk computer.
-3. Extract the complete `Mullet-Hop-Kiosk-Status-Viewer` ZIP package.
-4. Run `Install-Kiosk-Status-Viewer.cmd`.
+3. Extract the complete `Mullet-Hop-POS` ZIP package.
+4. Run `Install-Mullet-Hop-POS.cmd`.
 5. Create a 4–8 digit Staff Menu passcode on the first launch.
 6. Open **Staff Menu**, then copy the controller address and pairing key from the
    main Kiosk Controller.
@@ -51,27 +59,30 @@ Staff Menu.
    swaps it automatically.
 9. Select **Save Kiosk Assignments** or **Save Settings**.
 
-The viewer talks to the on-site Kiosk Controller over TCP 47832 using the existing
+Mullet Hop POS talks to the on-site Kiosk Controller over TCP 47832 using the existing
 signed local-network connection. It does not open a listening port and does not
-require a firewall exception on the viewer computer. New paired devices are saved
+require a firewall exception on the POS computer. New paired devices are saved
 in the next open position without renumbering existing assignments.
 
 ## Firefox profile and saved data
 
 The application starts Firefox with a dedicated profile stored with the existing
-viewer data. This keeps the LilyPad login and Firefox site data available between
+application data. This keeps the LilyPad login and Firefox site data available between
 restarts without changing the user's normal Firefox profile.
 
-Version 1.4.0 is the first release named **Kiosk Status Viewer**. It preserves the
+Version 1.4.1 is the first release named **Mullet Hop POS**. It adds the blue
+business-hours-closed status, prompts for Staff or Business Closure, and keeps
+acknowledged assistance calls flashing until they are cleared. It preserves the
 former POS Controller's internal package ID, `pos` update channel, saved-data
 folder, controller key, passcode, remembered kiosks, and Kiosk 1–4 assignments so
 existing installations upgrade in place. It also renames the existing Start Menu
 shortcut automatically.
 
-The Kiosk Status Viewer checks the public `mullethopdiberville` GitHub release
+Mullet Hop POS checks the public `mullethopdiberville` GitHub release
 feed when it starts. Select **Check for Updates** in the sidebar to check manually.
-When an update is downloaded, the viewer can install it and restart automatically.
+When an update is downloaded, Mullet Hop POS can install it and restart automatically.
 
-Version 1.3.0 added Ctrl + Alt + M Staff Menu access and automatic move/swap
+Version 1.4.0 added the full-screen Firefox/LilyPad layout and collapsible kiosk
+sidebar. Version 1.3.0 added Ctrl + Alt + M Staff Menu access and automatic move/swap
 assignment behavior. Version 1.2.0 added guest-assistance alerts and response
 controls. Version 1.1.1 added persistent controller connections and assignments.

@@ -21,9 +21,9 @@ SOURCE FOLDER LAYOUT
 * controller\src\ contains the office Kiosk Controller application.
 * controller\install\ contains the controller installer and uninstaller.
 * controller\README.md contains controller setup and network instructions.
-* pos-controller\src\ contains the full-screen front-desk Kiosk Status Viewer.
+* pos-controller\src\ contains the full-screen front-desk Mullet Hop POS.
 * pos-controller\install\ contains its installer and uninstaller.
-* pos-controller\README.md contains viewer, Firefox, status, and linking instructions.
+* pos-controller\README.md contains Mullet Hop POS, Firefox, status, and linking instructions.
 * assets\ and scripts\ contain kiosk branding and screensaver build files.
 * MulletHopKioskSuite.sln opens all three Windows applications together in Visual
   Studio.
@@ -85,14 +85,14 @@ controller, restart the controller, or close it. Red and green lenses show the
 saved master role, and local controllers discover each other when they launch.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.10.3 is the matching package release for the application
-formerly named POS Controller version 1.3.0. Waiver Kiosk version 2.10.1 places
+Waiver Kiosk version 2.10.4, Kiosk Controller version 1.11.1, and Mullet Hop POS
+version 1.4.1 are the matching package releases. Waiver Kiosk version 2.10.1 places
 guest assistance in a compact highlighted card
 with the other right-side waiver controls and moves that card stack near the top
 so it does not cover waiver information. Version 2.10.0 adds the guest-assistance
 request itself. A guest can call for help, which produces a flashing yellow alert
-in the Kiosk Controller and in the kiosk's assigned Kiosk Status Viewer panel.
-Selecting Acknowledge in the viewer acknowledges the call and changes the kiosk
+in the Kiosk Controller and in the kiosk's assigned Mullet Hop POS panel.
+Selecting Acknowledge in Mullet Hop POS acknowledges the call and changes the kiosk
 message to tell the guest that assistance is coming. The kiosk continues flashing
 until the guest or assisting staff member selects Clear Assistance Call.
 
@@ -109,7 +109,7 @@ from the fresh results and choose Request Add. The kiosk displays the controller
 computer and address and requires someone at that kiosk to approve the request
 within two minutes. The encrypted pairing exchange saves the connection
 information automatically, and the first authenticated check-in saves the kiosk
-in the controller. A linked Kiosk Status Viewer then adds the kiosk to its next open
+in the controller. A linked Mullet Hop POS then adds the kiosk to its next open
 Kiosk 1-4 position and saves that assignment automatically.
 
 If discovery does not show the kiosk, select Add Kiosk Manually on the
@@ -162,11 +162,12 @@ the existing outbound discovery and encrypted approval exchange for this release
 The long self-contained setup code remains available only as a fallback.
 
 
-FRONT-DESK KIOSK STATUS VIEWER
+FRONT-DESK MULLET HOP POS
 ------------------------------
 
-The Mullet Hop Kiosk Status Viewer is the third Windows application. Version
-1.4.0 expands the former POS Controller into a full-screen front-desk shell. It
+Mullet Hop POS is the third Windows application. Version 1.4.1 renames the
+full-screen application and preserves its saved settings and update path. Version
+1.4.0 expanded the former POS Controller into a full-screen front-desk shell. It
 uses Mozilla Firefox installed on the computer to load:
 
 https://mullet.lilypadpos.app/public/Login.php
@@ -176,28 +177,36 @@ Kiosk 4. The button at the top collapses the sidebar to one status dot and a
 compact assistance acknowledgement button per kiosk; expanding it adds names,
 messages, and Close, Open, and Reset controls.
 
-A green dot means the assigned kiosk is online and open to guests. A red dot
-means it is closed, offline, outside business hours, unable to reach the waiver
-website, or in another error state. A gray dot is unassigned. When a guest calls
-for help, that kiosk's dot flashes between its current status color and yellow.
-Selecting ACK or Acknowledge tells the guest assistance is on the way and returns
-the viewer dot to its current status color.
+A green dot means the assigned kiosk is online and open to guests. A blue dot
+means it is showing the scheduled Business Closed screen or the business-hours
+blackout screen. A red dot means it was closed by staff, is offline, cannot reach
+the waiver website, or is in another error state. A gray dot is unassigned. When
+a guest calls for help, that kiosk's dot flashes between its current status color
+and yellow. Selecting ACK or Acknowledge tells the guest assistance is on the way.
+The button then reads Answered, stays gray and inactive, and the dot continues
+flashing until the call is cleared at the kiosk.
+
+Selecting Close in a kiosk section asks whether to use Staff Closure or Business
+Closure. Staff Closure displays the normal station-closed screen and reports red.
+Business Closure starts the black business-hours screen and reports blue. Open
+clears either manually selected closure, while the configured business schedule
+continues to apply.
 
 Reload LilyPad, Staff Menu, Check for Updates, Minimize, and Exit Application
 remain at the bottom of the sidebar. Minimize and normal close commands send the
-viewer to the Windows notification area. Double-click its orange-fish tray icon
+application to the Windows notification area. Double-click its orange-fish tray icon
 to restore it. Only the passcode-protected Exit Application command closes
-Firefox and stops the viewer. Ctrl + Alt + M opens the Staff Menu. The Staff Menu
-requires the viewer's 4-8 digit passcode. The Staff Menu finds
+Firefox and stops Mullet Hop POS. Ctrl + Alt + M opens the Staff Menu. The Staff Menu
+requires the application's 4-8 digit passcode. The Staff Menu finds
 kiosks already paired with the on-site Kiosk Controller, remembers the controller
 address and pairing key, and saves each kiosk's identity and Kiosk 1-4 position.
 Selecting a machine already assigned elsewhere moves or swaps it automatically.
 
-Version 1.4.0 retains the former POS Controller's internal package identity,
+Version 1.4.1 retains the former POS Controller's internal package identity,
 automatic-update channel, passcode, controller connection, known machines, and
 assignments. Existing installations therefore update in place and their old
 Start Menu shortcut is renamed automatically. See the README inside the
-Mullet-Hop-Kiosk-Status-Viewer download for installation instructions.
+Mullet-Hop-POS download for installation instructions.
 
 
 STAFF SETTINGS AND EXIT
@@ -471,7 +480,7 @@ The repository includes .github/workflows/release.yml. To publish a new version:
 1. Change the Version value in src\MulletHopWaiverKiosk.csproj. Use a three-part
    version such as 2.0.1, 2.1.0, or 3.0.0. Never reuse an earlier version.
    When those applications change, also update the Version values in the Kiosk
-   Controller and Kiosk Status Viewer project files.
+   Controller and Mullet Hop POS project files.
 2. Commit and push the tested change to the repository's main branch.
 3. Open the repository's Actions tab.
 4. Choose "Publish Kiosk Update" and select "Run workflow."

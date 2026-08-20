@@ -23,7 +23,7 @@ internal sealed class PosSettingsDialog : Form
     public PosSettingsDialog(PosSettings current)
     {
         _working = current.Clone();
-        Text = "Mullet Hop Kiosk Status Viewer Staff Menu";
+        Text = "Mullet Hop POS Staff Menu";
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(760, 650);
         ClientSize = new Size(820, 690);
@@ -33,7 +33,7 @@ internal sealed class PosSettingsDialog : Form
         var header = new Panel { Dock = DockStyle.Top, Height = 76, BackColor = Color.FromArgb(117, 68, 154) };
         header.Controls.Add(new Label
         {
-            Text = "KIOSK STATUS VIEWER STAFF MENU",
+            Text = "MULLET HOP POS STAFF MENU",
             ForeColor = Color.White,
             Font = new Font("Segoe UI", 21, FontStyle.Bold),
             Bounds = new Rectangle(24, 10, 600, 52),
@@ -86,7 +86,7 @@ internal sealed class PosSettingsDialog : Form
         group.Dock = DockStyle.Top;
         var note = new Label
         {
-            Text = "Use the same controller address and pairing key shown in the Mullet Hop Kiosk Controller. The Kiosk Status Viewer remains a separate program.",
+            Text = "Use the same controller address and pairing key shown in the Mullet Hop Kiosk Controller. Mullet Hop POS remains a separate program.",
             Bounds = new Rectangle(18, 30, 710, 42),
             ForeColor = Color.FromArgb(52, 65, 76)
         };
@@ -284,10 +284,10 @@ internal sealed class PosSettingsDialog : Form
         {
             _working.Save();
             AppliedSettings = _working.Clone();
-            _assignmentStatus.Text = "Assignments saved. The viewer sidebar will use these Kiosk 1–4 positions.";
+            _assignmentStatus.Text = "Assignments saved. The Mullet Hop POS sidebar will use these Kiosk 1–4 positions.";
             _assignmentStatus.ForeColor = Color.FromArgb(44, 116, 29);
             MessageBox.Show(this,
-                "The Kiosk 1–4 assignments were saved and will remain assigned after the Kiosk Status Viewer restarts.",
+                "The Kiosk 1–4 assignments were saved and will remain assigned after Mullet Hop POS restarts.",
                 "Kiosk Assignments Saved",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);

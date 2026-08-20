@@ -793,26 +793,38 @@ internal sealed class ControllerForm : Form
             _kioskList.Items.Clear();
             foreach (var kiosk in kiosks)
             {
+                var businessClosed = kiosk.IsOnline && kiosk.BusinessHoursClosed &&
+                                     !kiosk.StationClosed && !kiosk.HasError;
                 var commandText = kiosk.PendingCommand is null
                     ? kiosk.LastResult
                     : "PENDING — " + DescribeCommand(kiosk.PendingCommand);
-                var item = new ListViewItem(kiosk.IsOnline ? "● Online" : "○ Offline")
+                var item = new ListViewItem(kiosk.IsOnline
+                    ? businessClosed ? "● Business Closed" : "● Online"
+                    : "○ Offline")
                 {
                     Tag = kiosk.StationId,
                     UseItemStyleForSubItems = false,
                     ForeColor = kiosk.IsOnline
-                        ? ControllerTheme.OnlineText
+                        ? businessClosed
+                            ? ControllerTheme.BusinessClosedText
+                            : ControllerTheme.OnlineText
                         : ControllerTheme.OfflineText,
                     BackColor = !kiosk.IsOnline
                         ? ControllerTheme.OfflineRow
-                        : kiosk.StationClosed
+                        : businessClosed
+                            ? ControllerTheme.BusinessClosedRow
+                            : kiosk.StationClosed
                             ? ControllerTheme.ClosedRow
                             : ControllerTheme.OnlineRow
                 };
                 item.SubItems.Add(kiosk.StationName);
                 item.SubItems.Add(kiosk.MachineName);
                 item.SubItems.Add(kiosk.Version);
-                item.SubItems.Add(kiosk.StationClosed ? "Closed" : "Open");
+                item.SubItems.Add(kiosk.StationClosed
+                    ? "Closed by staff"
+                    : businessClosed
+                        ? "Business closed"
+                        : "Open");
                 var assistance = item.SubItems.Add(kiosk.AssistanceRequested
                     ? kiosk.AssistanceAcknowledged
                         ? "On the way"
@@ -843,7 +855,7 @@ internal sealed class ControllerForm : Form
         }
 
         _onlineSummary.Text = $"{kiosks.Count(kiosk => kiosk.IsOnline)} ONLINE";
-        _closedSummary.Text = $"{kiosks.Count(kiosk => kiosk.StationClosed)} CLOSED";
+        _closedSummary.Text = $"{kiosks.Count(kiosk => kiosk.StationClosed || kiosk.BusinessHoursClosed)} CLOSED";
         _totalSummary.Text = $"{kiosks.Count} KNOWN KIOSKS";
         UpdateActionButtons();
     }
@@ -1239,6 +1251,8 @@ internal sealed class ControllerForm : Form
     {
         CommandTypes.SetClosed when command.Closed == true => "Turn on closed screen",
         CommandTypes.SetClosed => "Open kiosk",
+        CommandTypes.SetBusinessClosed when command.Closed == true => "Start business closure",
+        CommandTypes.SetBusinessClosed => "End business closure",
         CommandTypes.ResetStart => "Reset to starting page",
         CommandTypes.CheckUpdate => "Check for update",
         CommandTypes.InstallUpdate => "Install update",

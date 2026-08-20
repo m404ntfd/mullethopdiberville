@@ -16,7 +16,7 @@ computers discover each other, and one can be designated as the master. It provi
   until that kiosk reconnects.
 * Optional secure Cloudflare synchronization for a controller installed away
   from the kiosk network.
-* A signed status/control connection for the separate front-desk Kiosk Status Viewer.
+* A signed status/control connection for the separate front-desk Mullet Hop POS.
 * Local-network kiosk discovery with a required approval prompt on the kiosk.
 * Code-free manual pairing by kiosk IPv4 address, plus a self-contained setup-code fallback.
 * A persistent red/green master-controller indicator with single-master checks.
@@ -95,7 +95,7 @@ network discovery.
 Repeat those steps for each kiosk. The discovery exchange encrypts the pairing
 key, and the kiosk saves the approved connection before authenticated remote
 check-ins begin. The controller saves the kiosk in its managed-device history. A
-linked Kiosk Status Viewer then adds it to the next open Kiosk 1–4 position and saves
+linked Mullet Hop POS then adds it to the next open Kiosk 1–4 position and saves
 that assignment automatically.
 
 The controller address and pairing key are exchanged automatically only after
@@ -157,9 +157,16 @@ Select one kiosk in the list, then choose:
 Double-clicking a kiosk row also toggles that kiosk between open and closed.
 
 When a guest selects Call for Assistance at a kiosk, that kiosk's Assistance
-column flashes yellow with HELP. The Kiosk Status Viewer can acknowledge the call;
-the controller row then displays On the way. The call remains active and keeps
-flashing on the kiosk itself until it is cleared at the kiosk.
+column flashes yellow with HELP. Mullet Hop POS can acknowledge the call;
+the controller row then displays On the way. In Mullet Hop POS, the Answered
+button stays gray and disabled while its status dot continues flashing yellow.
+The call remains active until it is cleared at the kiosk.
+
+An online kiosk that is showing its scheduled Business Closed screen or the
+business-hours blackout screen is reported with a blue Business Closed indicator
+and row. Staff-closed, offline, and error states remain separate.
+Mullet Hop POS asks staff to choose Staff Closure or Business Closure before it
+queues a Close command, ensuring the kiosk reports the intended red or blue state.
 
 Open All and Close All apply to every known station. Close All asks for
 confirmation. Offline stations retain the latest queued command and carry it out
@@ -226,15 +233,16 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.11.0 fixes dashboard restoration from the tray icon
-and adds guest-assistance status to every kiosk row. Version 1.10.2 adds
+Kiosk Controller version 1.11.1 adds the distinct business-hours-closed status
+used by Mullet Hop POS. Version 1.11.0 fixes dashboard restoration from the tray
+icon and adds guest-assistance status to every kiosk row. Version 1.10.2 adds
 system-tray operation so minimizing or closing the dashboard does not stop remote
 kiosk service. Version 1.10.1 enlarges
 the Controller Program buttons and adds code-free manual pairing by kiosk IPv4
 address. Waiver Kiosk version 2.10.0 uses
 the existing outbound discovery and encrypted approval exchange for the IP
 workflow. The long self-contained setup code remains available as a fallback.
-Controller version 1.7.0 adds the separate Kiosk Status Viewer connection. Waiver
+Controller version 1.7.0 adds the separate Mullet Hop POS connection. Waiver
 Kiosk version 2.6.0 adds live open-to-guests and error-state reporting plus the
 reset-to-start command.
 

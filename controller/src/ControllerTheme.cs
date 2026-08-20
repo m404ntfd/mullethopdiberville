@@ -57,6 +57,9 @@ internal static class ControllerTheme
     public static Color ClosedRow => IsDark
         ? Color.FromArgb(66, 53, 27)
         : Color.FromArgb(255, 248, 231);
+    public static Color BusinessClosedRow => IsDark
+        ? Color.FromArgb(26, 48, 72)
+        : Color.FromArgb(232, 244, 255);
     public static Color OfflineRow => IsDark
         ? Color.FromArgb(66, 38, 39)
         : Color.FromArgb(255, 240, 237);
@@ -66,6 +69,9 @@ internal static class ControllerTheme
     public static Color OfflineText => IsDark
         ? Color.FromArgb(255, 163, 154)
         : Color.FromArgb(125, 55, 48);
+    public static Color BusinessClosedText => IsDark
+        ? Color.FromArgb(120, 194, 255)
+        : Color.FromArgb(10, 91, 160);
     public static Color AccentText => IsDark
         ? Color.FromArgb(91, 198, 240)
         : Color.FromArgb(8, 119, 189);

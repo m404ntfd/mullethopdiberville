@@ -45,7 +45,7 @@ internal sealed class FirefoxHost : IDisposable
         var firefoxPath = FindFirefoxPath();
         if (firefoxPath is null)
         {
-            SetStatus("Firefox is not installed. Install Mozilla Firefox, then restart the Kiosk Status Viewer.");
+            SetStatus("Firefox is not installed. Install Mozilla Firefox, then restart Mullet Hop POS.");
             return;
         }
 

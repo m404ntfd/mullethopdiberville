@@ -69,7 +69,7 @@ internal static class PosUpdater
         {
             return new PosUpdateResult(
                 PosUpdateStatus.NotConfigured,
-                "This Kiosk Status Viewer build was not created by the GitHub release workflow.");
+                "This Mullet Hop POS build was not created by the GitHub release workflow.");
         }
 
         try
@@ -82,17 +82,17 @@ internal static class PosUpdater
                 _stagedUpdate = null;
                 return new PosUpdateResult(
                     PosUpdateStatus.UpToDate,
-                    $"Kiosk Status Viewer version {CurrentVersion} is up to date.");
+                    $"Mullet Hop POS version {CurrentVersion} is up to date.");
             }
 
             await manager.DownloadUpdatesAsync(update);
             _stagedManager = manager;
             _stagedUpdate = update;
             PosLog.Write(
-                $"Kiosk Status Viewer update {update.TargetFullRelease.Version} is downloaded and ready to install.");
+                $"Mullet Hop POS update {update.TargetFullRelease.Version} is downloaded and ready to install.");
             return new PosUpdateResult(
                 PosUpdateStatus.ReadyToInstall,
-                $"Kiosk Status Viewer version {update.TargetFullRelease.Version} has been downloaded. " +
+                $"Mullet Hop POS version {update.TargetFullRelease.Version} has been downloaded. " +
                 $"This computer currently has version {CurrentVersion}.");
         }
         catch (Exception ex) when (
@@ -100,15 +100,15 @@ internal static class PosUpdater
         {
             return new PosUpdateResult(
                 PosUpdateStatus.NotInstalled,
-                "Kiosk Status Viewer updates begin after installing the application with its Setup file.");
+                "Mullet Hop POS updates begin after installing the application with its Setup file.");
         }
         catch (Exception ex)
         {
-            PosLog.Write("Kiosk Status Viewer update check/download error: " +
+            PosLog.Write("Mullet Hop POS update check/download error: " +
                 ex.GetType().Name + " - " + ex.Message);
             return new PosUpdateResult(
                 PosUpdateStatus.Failed,
-                "The Kiosk Status Viewer update check failed. Verify the internet connection and try again.");
+                "Mullet Hop POS update check failed. Verify the internet connection and try again.");
         }
     }
 
@@ -118,24 +118,24 @@ internal static class PosUpdater
         {
             return new PosUpdateResult(
                 PosUpdateStatus.UpToDate,
-                "No downloaded Kiosk Status Viewer update is waiting to be installed.");
+                "No downloaded Mullet Hop POS update is waiting to be installed.");
         }
 
         try
         {
-            PosLog.Write("The downloaded Kiosk Status Viewer update is being applied.");
+            PosLog.Write("The downloaded Mullet Hop POS update is being applied.");
             _stagedManager.ApplyUpdatesAndRestart(_stagedUpdate);
             return new PosUpdateResult(
                 PosUpdateStatus.Applying,
-                "The Kiosk Status Viewer update is installing. The application will restart automatically.");
+                "Mullet Hop POS update is installing. The application will restart automatically.");
         }
         catch (Exception ex)
         {
-            PosLog.Write("Kiosk Status Viewer update error: " +
+            PosLog.Write("Mullet Hop POS update error: " +
                 ex.GetType().Name + " - " + ex.Message);
             return new PosUpdateResult(
                 PosUpdateStatus.Failed,
-                "The Kiosk Status Viewer update failed. Verify the internet connection and try again.");
+                "Mullet Hop POS update failed. Verify the internet connection and try again.");
         }
     }
 
