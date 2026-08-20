@@ -85,12 +85,14 @@ controller, restart the controller, or close it. Red and green lenses show the
 saved master role, and local controllers discover each other when they launch.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.10.0 adds a guest-assistance panel on the right side of
-the kiosk. A guest can call for help, which produces a flashing yellow alert in
-the Kiosk Controller and in the kiosk's assigned POS Controller panel. Selecting
-Respond: On the Way in POS acknowledges the call and changes the kiosk message
-to tell the guest that assistance is coming. The kiosk continues flashing until
-the guest or assisting staff member selects Clear Assistance Call at the kiosk.
+Waiver Kiosk version 2.10.1 places guest assistance in a compact highlighted card
+with the other right-side waiver controls and moves that card stack near the top
+so it does not cover waiver information. Version 2.10.0 adds the guest-assistance
+request itself. A guest can call for help, which produces a flashing yellow alert
+in the Kiosk Controller and in the kiosk's assigned POS Controller panel.
+Selecting Respond: On the Way in POS acknowledges the call and changes the kiosk
+message to tell the guest that assistance is coming. The kiosk continues flashing
+until the guest or assisting staff member selects Clear Assistance Call.
 
 Download the controller package from:
 

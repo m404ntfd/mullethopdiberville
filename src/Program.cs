@@ -313,7 +313,8 @@ internal sealed partial class KioskForm : Form
 
     private readonly KioskSettings _settings;
     private readonly WebView2 _webView = new();
-    private readonly KioskAssistancePanel _assistancePanel = new();
+    private readonly string _assistanceBrowserSession = Guid.NewGuid().ToString("N");
+    private readonly SemaphoreSlim _waiverPageScriptGate = new(1, 1);
     private readonly Label _banner = new();
     private readonly Label _previewBanner = new();
     private readonly System.Windows.Forms.Timer _idleTimer = new() { Interval = 1000 };
@@ -370,9 +371,6 @@ internal sealed partial class KioskForm : Form
 
         _webView.Dock = DockStyle.Fill;
         _webView.DefaultBackgroundColor = KioskTheme.WindowBackground(_lastDarkTheme);
-        _assistancePanel.ApplyTheme(_lastDarkTheme);
-        _assistancePanel.AssistanceRequested += (_, _) => RequestGuestAssistance();
-        _assistancePanel.AssistanceCleared += (_, _) => ClearGuestAssistance();
 
         _banner.Dock = DockStyle.Top;
         _banner.Height = 48;
@@ -393,10 +391,8 @@ internal sealed partial class KioskForm : Form
         _previewBanner.Visible = false;
 
         Controls.Add(_webView);
-        Controls.Add(_assistancePanel);
         Controls.Add(_banner);
         Controls.Add(_previewBanner);
-        _assistancePanel.BringToFront();
         _banner.BringToFront();
         _previewBanner.BringToFront();
         UpdateAssistancePanelState();
@@ -453,7 +449,7 @@ internal sealed partial class KioskForm : Form
             _settings.AssistanceRequested = true;
             _settings.AssistanceAcknowledged = false;
             _settings.Save();
-            UpdateAssistancePanelState();
+            UpdateAssistanceStateAfterChange();
             MarkActivity();
             _ = CheckInWithControllerAsync();
             KioskLog.Write("A guest requested staff assistance.");
@@ -472,7 +468,7 @@ internal sealed partial class KioskForm : Form
             _settings.AssistanceRequested = false;
             _settings.AssistanceAcknowledged = false;
             _settings.Save();
-            UpdateAssistancePanelState();
+            UpdateAssistanceStateAfterChange();
             MarkActivity();
             _ = CheckInWithControllerAsync();
             KioskLog.Write("The guest assistance call was cleared at the kiosk.");
@@ -486,12 +482,46 @@ internal sealed partial class KioskForm : Form
 
     private void UpdateAssistancePanelState()
     {
-        _assistancePanel.SetState(
-            _settings.AssistanceRequested,
-            _settings.AssistanceAcknowledged);
-        _assistancePanel.Visible = !_promptOpen && !_showingBlackout && !_showingScreensaver;
-        if (_assistancePanel.Visible)
-            _assistancePanel.BringToFront();
+        if (!_browserReady || _webView.CoreWebView2 is null)
+            return;
+
+        var requested = _settings.AssistanceRequested ? "true" : "false";
+        var acknowledged = _settings.AssistanceAcknowledged ? "true" : "false";
+        _ = PushAssistanceStateToWaiverPageAsync(requested, acknowledged);
+    }
+
+    private void UpdateAssistanceStateAfterChange()
+    {
+        UpdateAssistancePanelState();
+        if (_browserReady)
+            _ = RefreshWaiverPageScriptForAssistanceAsync();
+    }
+
+    private async Task RefreshWaiverPageScriptForAssistanceAsync()
+    {
+        try
+        {
+            await InstallWaiverPageScriptAsync();
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed && !Disposing)
+                KioskLog.Write("Future assistance card state update error: " + ex.Message);
+        }
+    }
+
+    private async Task PushAssistanceStateToWaiverPageAsync(string requested, string acknowledged)
+    {
+        try
+        {
+            await _webView.CoreWebView2.ExecuteScriptAsync(
+                $"window.__mulletHopSetAssistanceState?.({requested}, {acknowledged});");
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed && !Disposing)
+                KioskLog.Write("Assistance card update error: " + ex.Message);
+        }
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -563,13 +593,16 @@ internal sealed partial class KioskForm : Form
 
     private async Task InstallWaiverPageScriptAsync()
     {
-        if (_waiverPageScriptId is not null)
+        await _waiverPageScriptGate.WaitAsync();
+        try
         {
-            _webView.CoreWebView2.RemoveScriptToExecuteOnDocumentCreated(_waiverPageScriptId);
-            _waiverPageScriptId = null;
-        }
+            if (_waiverPageScriptId is not null)
+            {
+                _webView.CoreWebView2.RemoveScriptToExecuteOnDocumentCreated(_waiverPageScriptId);
+                _waiverPageScriptId = null;
+            }
 
-        var waiverPageScript = ActivityAndCompletionScript.Replace(
+            var waiverPageScript = ActivityAndCompletionScript.Replace(
                 "__MULLET_HOP_LOGO_DATA_URL__",
                 GetApplicationLogoDataUrl(),
                 StringComparison.Ordinal).Replace(
@@ -581,9 +614,23 @@ internal sealed partial class KioskForm : Form
                 StringComparison.Ordinal).Replace(
                 "__MULLET_HOP_DARK_MODE__",
                 _lastDarkTheme ? "true" : "false",
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_ASSISTANCE_REQUESTED__",
+                _settings.AssistanceRequested ? "true" : "false",
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_ASSISTANCE_ACKNOWLEDGED__",
+                _settings.AssistanceAcknowledged ? "true" : "false",
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_ASSISTANCE_SESSION__",
+                _assistanceBrowserSession,
                 StringComparison.Ordinal);
-        _waiverPageScriptId = await _webView.CoreWebView2
-            .AddScriptToExecuteOnDocumentCreatedAsync(waiverPageScript);
+            _waiverPageScriptId = await _webView.CoreWebView2
+                .AddScriptToExecuteOnDocumentCreatedAsync(waiverPageScript);
+        }
+        finally
+        {
+            _waiverPageScriptGate.Release();
+        }
     }
 
     private async Task ApplyKioskThemeIfChangedAsync(bool force = false)
@@ -595,7 +642,6 @@ internal sealed partial class KioskForm : Form
         _lastDarkTheme = status.IsDark;
         BackColor = KioskTheme.WindowBackground(_lastDarkTheme);
         _webView.DefaultBackgroundColor = KioskTheme.WindowBackground(_lastDarkTheme);
-        _assistancePanel.ApplyTheme(_lastDarkTheme);
         if (!_browserReady) return;
 
         await InstallWaiverPageScriptAsync();
@@ -743,6 +789,10 @@ internal sealed partial class KioskForm : Form
             _ = ResetForNextGuestAsync("guest reset button");
         else if (message == "switch-waiver-reset")
             _ = ResetForNextGuestAsync("waiver type change", showStatus: false);
+        else if (message == "assistance-request")
+            RequestGuestAssistance();
+        else if (message == "assistance-clear")
+            ClearGuestAssistance();
         else if (message.StartsWith('{'))
         {
             try
@@ -2596,6 +2646,79 @@ internal sealed partial class KioskForm : Form
           const providerLogoSource = '__MULLET_HOP_PROVIDER_LOGO_DATA_URL__';
           const kioskBackgroundSource = '__MULLET_HOP_BACKGROUND_URL__';
           let kioskDarkMode = __MULLET_HOP_DARK_MODE__;
+          const assistanceSession = '__MULLET_HOP_ASSISTANCE_SESSION__';
+          let assistanceRequested = __MULLET_HOP_ASSISTANCE_REQUESTED__;
+          let assistanceAcknowledged = __MULLET_HOP_ASSISTANCE_ACKNOWLEDGED__;
+
+          try {
+            const savedAssistance = JSON.parse(
+              sessionStorage.getItem('mullet-hop-assistance-state') || 'null');
+            if (savedAssistance?.session === assistanceSession) {
+              assistanceRequested = Boolean(savedAssistance.requested);
+              assistanceAcknowledged = assistanceRequested && Boolean(savedAssistance.acknowledged);
+            }
+          }
+          catch { }
+
+          const setAssistanceText = (element, text) => {
+            if (element && element.textContent !== text) element.textContent = text;
+          };
+          const updateAssistanceCard = () => {
+            const card = document.getElementById('mullet-hop-assistance-card');
+            if (!card) return;
+
+            card.classList.toggle('is-requested', assistanceRequested);
+            card.classList.toggle('is-acknowledged', assistanceRequested && assistanceAcknowledged);
+            setAssistanceText(
+              card.querySelector('h2'),
+              assistanceRequested
+                ? assistanceAcknowledged ? 'Assistance Is on the Way' : 'Assistance Requested'
+                : 'Need Assistance?');
+            setAssistanceText(
+              card.querySelector('.mullet-hop-assistance-message'),
+              assistanceRequested
+                ? assistanceAcknowledged
+                  ? 'A staff member received your request and is on the way to help.'
+                  : 'A staff member has been notified. Please remain at this waiver station.'
+                : 'Select the button below if you need help completing the waiver.');
+            setAssistanceText(
+              card.querySelector('button'),
+              assistanceRequested ? 'Clear Assistance Call' : 'Call for Assistance');
+          };
+          window.__mulletHopSetAssistanceState = (requested, acknowledged) => {
+            assistanceRequested = Boolean(requested);
+            assistanceAcknowledged = assistanceRequested && Boolean(acknowledged);
+            try {
+              sessionStorage.setItem('mullet-hop-assistance-state', JSON.stringify({
+                session: assistanceSession,
+                requested: assistanceRequested,
+                acknowledged: assistanceAcknowledged
+              }));
+            }
+            catch { }
+            updateAssistanceCard();
+          };
+          const ensureAssistanceCard = tools => {
+            let card = document.getElementById('mullet-hop-assistance-card');
+            if (!card) {
+              card = document.createElement('aside');
+              card.id = 'mullet-hop-assistance-card';
+              card.className = 'mullet-hop-action-card';
+              card.setAttribute('aria-label', 'Request staff assistance');
+              card.innerHTML = `
+                <div class='mullet-hop-assistance-light' aria-hidden='true'></div>
+                <h2>Need Assistance?</h2>
+                <p class='mullet-hop-assistance-message'>Select the button below if you need help completing the waiver.</p>
+                <button type='button' id='mullet-hop-assistance-button'>Call for Assistance</button>
+              `;
+              card.querySelector('button').addEventListener('click', () => {
+                window.chrome.webview.postMessage(
+                  assistanceRequested ? 'assistance-clear' : 'assistance-request');
+              });
+              tools.appendChild(card);
+            }
+            updateAssistanceCard();
+          };
 
           let lastActivityMessage = 0;
           const postActivity = () => {
@@ -3206,9 +3329,9 @@ internal sealed partial class KioskForm : Form
               #mullet-hop-side-tools {
                 position: fixed;
                 z-index: 2147483646;
-                top: 50%;
+                top: 18px;
                 right: 22px;
-                transform: translateY(-50%);
+                transform: none;
                 width: min(340px, calc(100vw - 36px));
                 max-height: calc(100vh - 36px);
                 overflow: auto;
@@ -3275,6 +3398,39 @@ internal sealed partial class KioskForm : Form
               }
               #mullet-hop-switch-button { background: #69d2ec !important; }
               #mullet-hop-switch-button:hover { background: #8bdef1 !important; }
+              #mullet-hop-assistance-card {
+                overflow: hidden;
+                background: linear-gradient(145deg, #fffef2, #fff4b8) !important;
+                border: 5px solid #e8b000 !important;
+                box-shadow: 0 14px 38px rgba(16,24,32,.25), 0 0 0 5px rgba(255,213,38,.24) !important;
+              }
+              #mullet-hop-assistance-card h2 { color: #755000 !important; }
+              #mullet-hop-assistance-button { background: #ffd526 !important; }
+              #mullet-hop-assistance-button:hover { background: #ffe361 !important; }
+              #mullet-hop-assistance-card.is-requested {
+                background: linear-gradient(145deg, #fff7b8, #ffe36a) !important;
+              }
+              #mullet-hop-assistance-card.is-requested #mullet-hop-assistance-button {
+                background: #76c442 !important;
+              }
+              .mullet-hop-assistance-light {
+                display: none;
+                width: 34px;
+                height: 34px;
+                margin: 0 auto 9px;
+                background: #ffdd30;
+                border: 4px solid #8c6500;
+                border-radius: 50%;
+                box-shadow: 0 0 0 7px rgba(255,213,38,.30), 0 0 24px rgba(255,193,7,.88);
+              }
+              #mullet-hop-assistance-card.is-requested .mullet-hop-assistance-light {
+                display: block;
+                animation: mullet-hop-assistance-flash 700ms ease-in-out infinite alternate;
+              }
+              @keyframes mullet-hop-assistance-flash {
+                from { opacity: .38; filter: saturate(.65); transform: scale(.88); }
+                to { opacity: 1; filter: saturate(1.2); transform: scale(1.08); }
+              }
               .mullet-hop-switch-target-choice {
                 outline: 5px solid #f58220 !important;
                 outline-offset: 5px !important;
@@ -3404,6 +3560,14 @@ internal sealed partial class KioskForm : Form
                 background: rgba(27,36,46,.98) !important;
                 border-color: #7f94a6 !important;
               }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme #mullet-hop-assistance-card {
+                color: #f5f8fa !important;
+                background: linear-gradient(145deg, #423b17, #2f2d20) !important;
+                border-color: #ffdc38 !important;
+              }
+              body.mullet-hop-waiver-themed.mullet-hop-dark-theme #mullet-hop-assistance-card h2 {
+                color: #ffe56f !important;
+              }
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme p,
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme label,
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme td,
@@ -3456,7 +3620,7 @@ internal sealed partial class KioskForm : Form
               @media (max-width: 1100px) {
                 body.mullet-hop-waiver-themed,
                 body.mullet-hop-waiver-themed.mullet-hop-has-side-tools {
-                  padding: 16px 12px 570px !important;
+                  padding: 16px 12px 40px !important;
                 }
                 body.mullet-hop-waiver-themed .mullet-hop-form-card {
                   width: 100% !important;
@@ -3477,12 +3641,15 @@ internal sealed partial class KioskForm : Form
                   padding: 4px 0 !important;
                 }
                 #mullet-hop-side-tools {
+                  position: relative;
                   top: auto;
-                  right: 14px;
-                  bottom: 14px;
+                  right: auto;
+                  bottom: auto;
                   transform: none;
-                  width: min(340px, calc(100vw - 28px));
-                  max-height: calc(100vh - 28px);
+                  width: min(600px, 100%);
+                  max-height: none;
+                  margin: 18px auto 0;
+                  overflow: visible;
                 }
                 #mullet-hop-waiver-help,
                 #mullet-hop-side-tools .mullet-hop-action-card {
@@ -3493,12 +3660,11 @@ internal sealed partial class KioskForm : Form
                 #mullet-hop-waiver-help .choice { padding: 9px 10px; font-size: 13px; }
               }
               @media (max-width: 540px) {
-                body.mullet-hop-waiver-themed.mullet-hop-has-side-tools { padding-bottom: 600px !important; }
                 #mullet-hop-side-tools {
-                  left: 10px;
-                  right: 10px;
-                  bottom: 10px;
-                  width: auto;
+                  left: auto;
+                  right: auto;
+                  bottom: auto;
+                  width: 100%;
                 }
               }
             `;
@@ -3580,6 +3746,7 @@ internal sealed partial class KioskForm : Form
                 });
                 tools.insertBefore(help, tools.firstChild);
               }
+              ensureAssistanceCard(tools);
               return;
             }
 
@@ -3618,6 +3785,7 @@ internal sealed partial class KioskForm : Form
               });
               tools.appendChild(switchCard);
             }
+            ensureAssistanceCard(tools);
           };
 
           window.__mulletHopSetWaiverContext = (email, choice) => {
