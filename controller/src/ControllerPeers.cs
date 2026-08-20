@@ -66,6 +66,8 @@ internal sealed class ControllerPeerCommandResponse
 
 internal sealed record ControllerPeerCommandResult(bool Accepted, string Message);
 
+internal sealed record ControllerConnectionPullResult(bool Success, string Message, int ConnectionCount);
+
 internal sealed class ControllerPeerCoordinator : IDisposable
 {
     public const string PresencePath = "api/controller/presence";
@@ -180,6 +182,43 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 false,
                 "The command could not be sent to the master controller.");
         }
+    }
+
+    public async Task<ControllerConnectionPullResult> PullMasterConnectionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (_state.IsMaster)
+        {
+            return new ControllerConnectionPullResult(
+                false,
+                "This PC is the master controller; use its locally stored connection catalog.",
+                0);
+        }
+
+        await ScanNowAsync();
+        var master = Snapshot().FirstOrDefault(peer => peer.IsMaster);
+        if (master is null)
+        {
+            return new ControllerConnectionPullResult(
+                false,
+                "No active master controller was detected on the local network.",
+                0);
+        }
+
+        return await SynchronizeFromMasterAsync(
+            new ControllerPeerPresence
+            {
+                ControllerId = master.ControllerId,
+                MachineName = master.MachineName,
+                Version = master.Version,
+                IsMaster = master.IsMaster,
+                MasterSinceUtc = master.MasterSinceUtc,
+                ControllerAddress = master.ControllerAddress,
+                PeerAccessKey = master.PeerAccessKey,
+                ActivePosMachines = [.. master.ActivePosMachines]
+            },
+            cancellationToken,
+            waitForCurrentSync: true);
     }
 
     public ControllerPeerPresence ProcessPresence(
@@ -440,16 +479,29 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         }
     }
 
-    private async Task SynchronizeFromMasterAsync(
+    private async Task<ControllerConnectionPullResult> SynchronizeFromMasterAsync(
         ControllerPeerPresence master,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool waitForCurrentSync = false)
     {
-        if (string.IsNullOrWhiteSpace(master.PeerAccessKey) ||
-            !await _replicaGate.WaitAsync(0, cancellationToken))
+        if (string.IsNullOrWhiteSpace(master.PeerAccessKey))
         {
-            return;
+            return new ControllerConnectionPullResult(
+                false,
+                "The detected master controller does not support stored-connection transfers.",
+                0);
         }
 
+        var entered = waitForCurrentSync
+            ? await _replicaGate.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken)
+            : await _replicaGate.WaitAsync(0, cancellationToken);
+        if (!entered)
+        {
+            return new ControllerConnectionPullResult(
+                false,
+                "A master connection transfer is already in progress.",
+                0);
+        }
         try
         {
             var body = JsonSerializer.Serialize(new ControllerPeerRequest
@@ -460,7 +512,12 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             using var request = CreateSignedRequest(endpoint, master.PeerAccessKey, body);
             using var response = await _client.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
-                return;
+            {
+                return new ControllerConnectionPullResult(
+                    false,
+                    $"The master controller returned HTTP {(int)response.StatusCode}.",
+                    0);
+            }
 
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             VerifySignedResponse(response, master.PeerAccessKey, responseBody);
@@ -476,16 +533,33 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             }
 
             if (_state.ApplyMasterReplica(replica))
+            {
                 RaisePeersChanged();
+                return new ControllerConnectionPullResult(
+                    true,
+                    $"Pulled and saved {replica.Kiosks.Count} kiosk connection(s) from " +
+                    $"master controller {master.MachineName}.",
+                    replica.Kiosks.Count);
+            }
+
+            return new ControllerConnectionPullResult(
+                true,
+                $"The {replica.Kiosks.Count} stored kiosk connection(s) from " +
+                $"{master.MachineName} are already current on this PC.",
+                replica.Kiosks.Count);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Normal shutdown.
+            return new ControllerConnectionPullResult(false, "The connection transfer was canceled.", 0);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or
                                    JsonException or InvalidDataException or IOException)
         {
             ControllerLog.Write("Master controller synchronization error: " + ex.Message);
+            return new ControllerConnectionPullResult(
+                false,
+                "The stored connections could not be pulled from the master controller.",
+                0);
         }
         finally
         {

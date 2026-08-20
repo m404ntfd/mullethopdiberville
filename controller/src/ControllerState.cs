@@ -143,6 +143,19 @@ internal sealed class ControllerReplicaSnapshot
     public List<ManagedKiosk> Kiosks { get; set; } = [];
 }
 
+internal sealed class StoredControllerConnections
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string ControllerId { get; set; } = string.Empty;
+    public string ControllerMachineName { get; set; } = string.Empty;
+    public string PairingKey { get; set; } = string.Empty;
+    public string PeerAccessKey { get; set; } = string.Empty;
+    public DateTime SavedUtc { get; set; }
+    public List<ManagedKiosk> Kiosks { get; set; } = [];
+}
+
+internal sealed record StoredConnectionsResult(bool Success, string Message, int ConnectionCount);
+
 internal sealed class PosMachinePresence
 {
     public string MachineName { get; set; } = string.Empty;
@@ -174,6 +187,9 @@ internal sealed class ControllerState
     };
     private readonly object _gate = new();
     private readonly string _dataPath = Path.Combine(ControllerLog.DataDirectory, "controller.json");
+    private readonly string _masterConnectionsPath = Path.Combine(
+        ControllerLog.DataDirectory,
+        "master-connections.json");
     private readonly Dictionary<string, PosMachinePresence> _posMachines =
         new(StringComparer.OrdinalIgnoreCase);
     private ControllerData _data;
@@ -208,7 +224,7 @@ internal sealed class ControllerState
             _data.MasterSinceUtc = DateTime.UtcNow;
             changed = true;
         }
-        if (changed)
+        if (changed || (_data.IsMaster && !File.Exists(_masterConnectionsPath)))
             SaveLocked();
     }
 
@@ -359,6 +375,79 @@ internal sealed class ControllerState
                 GeneratedUtc = DateTime.UtcNow,
                 Kiosks = kiosks
             };
+        }
+    }
+
+    public StoredConnectionsResult ReloadStoredMasterConnections()
+    {
+        lock (_gate)
+        {
+            if (!_data.IsMaster)
+            {
+                return new StoredConnectionsResult(
+                    false,
+                    "Only the master controller can reload the connection catalog stored on this PC.",
+                    0);
+            }
+            if (!File.Exists(_masterConnectionsPath))
+            {
+                return new StoredConnectionsResult(
+                    false,
+                    "No stored master connection catalog exists on this PC yet.",
+                    0);
+            }
+
+            try
+            {
+                var stored = JsonSerializer.Deserialize<StoredControllerConnections>(
+                    File.ReadAllText(_masterConnectionsPath),
+                    JsonOptions);
+                if (stored is null ||
+                    stored.SchemaVersion != 1 ||
+                    !Guid.TryParseExact(stored.ControllerId, "N", out _) ||
+                    string.IsNullOrWhiteSpace(stored.PairingKey) ||
+                    stored.PairingKey.Length is < 16 or > 1_000 ||
+                    string.IsNullOrWhiteSpace(stored.PeerAccessKey) ||
+                    stored.PeerAccessKey.Length is < 16 or > 1_000 ||
+                    stored.Kiosks is null ||
+                    stored.Kiosks.Count > 100)
+                {
+                    throw new InvalidDataException("The stored master connection catalog is invalid.");
+                }
+
+                var kiosks = stored.Kiosks
+                    .Where(kiosk => kiosk is not null &&
+                                    Guid.TryParseExact(kiosk.StationId, "N", out _))
+                    .GroupBy(kiosk => kiosk.StationId, StringComparer.Ordinal)
+                    .Select(group => group.Last().Clone())
+                    .ToList();
+                if (kiosks.Count != stored.Kiosks.Count)
+                    throw new InvalidDataException("The stored master connection catalog is invalid.");
+                foreach (var kiosk in kiosks)
+                    kiosk.PendingCommand = null;
+
+                _data.ControllerId = stored.ControllerId;
+                _data.PairingKey = stored.PairingKey.Trim();
+                _data.PeerAccessKey = stored.PeerAccessKey.Trim();
+                _data.Kiosks = kiosks;
+                _lastMasterReplicaRevision = string.Empty;
+                SaveLocked();
+                ControllerLog.Write(
+                    $"Reloaded {kiosks.Count} kiosk connection(s) from {_masterConnectionsPath}.");
+                return new StoredConnectionsResult(
+                    true,
+                    $"Reloaded {kiosks.Count} stored kiosk connection(s) from this master PC.",
+                    kiosks.Count);
+            }
+            catch (Exception ex)
+            {
+                ControllerLog.Write("Stored master connection reload error: " + ex.Message);
+                return new StoredConnectionsResult(
+                    false,
+                    "The stored master connection catalog could not be read. " +
+                    "Check the controller log for details.",
+                    0);
+            }
         }
     }
 
@@ -808,10 +897,38 @@ internal sealed class ControllerState
             var temporaryPath = _dataPath + ".new";
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(_data, JsonOptions));
             File.Move(temporaryPath, _dataPath, true);
+            if (_data.IsMaster)
+                SaveMasterConnectionsLocked();
         }
         catch (Exception ex)
         {
             ControllerLog.Write("Controller data save error: " + ex.Message);
+        }
+    }
+
+    private void SaveMasterConnectionsLocked()
+    {
+        try
+        {
+            var kiosks = _data.Kiosks.Select(kiosk => kiosk.Clone()).ToList();
+            foreach (var kiosk in kiosks)
+                kiosk.PendingCommand = null;
+            var stored = new StoredControllerConnections
+            {
+                ControllerId = _data.ControllerId,
+                ControllerMachineName = Environment.MachineName,
+                PairingKey = _data.PairingKey,
+                PeerAccessKey = _data.PeerAccessKey,
+                SavedUtc = DateTime.UtcNow,
+                Kiosks = kiosks
+            };
+            var temporaryPath = _masterConnectionsPath + ".new";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(stored, JsonOptions));
+            File.Move(temporaryPath, _masterConnectionsPath, true);
+        }
+        catch (Exception ex)
+        {
+            ControllerLog.Write("Master connection catalog save error: " + ex.Message);
         }
     }
 

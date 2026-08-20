@@ -2841,8 +2841,8 @@ internal sealed partial class KioskForm : Form
                 window.chrome.webview.postMessage(
                   assistanceRequested ? 'assistance-clear' : 'assistance-request');
               });
-              tools.appendChild(card);
             }
+            tools.appendChild(card);
             updateAssistanceCard();
           };
 
