@@ -186,7 +186,8 @@ internal sealed class ControllerServer : IDisposable
                 if (commandRequest is null ||
                     !Guid.TryParseExact(commandRequest.StationId, "N", out _) ||
                     (commandRequest.Type != CommandTypes.SetClosed &&
-                     commandRequest.Type != CommandTypes.ResetStart) ||
+                     commandRequest.Type != CommandTypes.ResetStart &&
+                     commandRequest.Type != CommandTypes.AcknowledgeAssistance) ||
                     (commandRequest.Type == CommandTypes.SetClosed && !commandRequest.Closed.HasValue))
                 {
                     await WritePlainResponseAsync(context, HttpStatusCode.BadRequest, "Invalid POS command.");

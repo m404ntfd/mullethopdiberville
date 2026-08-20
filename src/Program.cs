@@ -313,6 +313,7 @@ internal sealed partial class KioskForm : Form
 
     private readonly KioskSettings _settings;
     private readonly WebView2 _webView = new();
+    private readonly KioskAssistancePanel _assistancePanel = new();
     private readonly Label _banner = new();
     private readonly Label _previewBanner = new();
     private readonly System.Windows.Forms.Timer _idleTimer = new() { Interval = 1000 };
@@ -369,6 +370,9 @@ internal sealed partial class KioskForm : Form
 
         _webView.Dock = DockStyle.Fill;
         _webView.DefaultBackgroundColor = KioskTheme.WindowBackground(_lastDarkTheme);
+        _assistancePanel.ApplyTheme(_lastDarkTheme);
+        _assistancePanel.AssistanceRequested += (_, _) => RequestGuestAssistance();
+        _assistancePanel.AssistanceCleared += (_, _) => ClearGuestAssistance();
 
         _banner.Dock = DockStyle.Top;
         _banner.Height = 48;
@@ -389,10 +393,13 @@ internal sealed partial class KioskForm : Form
         _previewBanner.Visible = false;
 
         Controls.Add(_webView);
+        Controls.Add(_assistancePanel);
         Controls.Add(_banner);
         Controls.Add(_previewBanner);
+        _assistancePanel.BringToFront();
         _banner.BringToFront();
         _previewBanner.BringToFront();
+        UpdateAssistancePanelState();
 
         _idleTimer.Tick += IdleTimer_Tick;
         _completionTimer.Interval = Math.Max(12, _settings.CompletionResetSeconds) * 1000;
@@ -437,6 +444,54 @@ internal sealed partial class KioskForm : Form
             if (!_allowExit)
                 e.Cancel = true;
         };
+    }
+
+    private void RequestGuestAssistance()
+    {
+        try
+        {
+            _settings.AssistanceRequested = true;
+            _settings.AssistanceAcknowledged = false;
+            _settings.Save();
+            UpdateAssistancePanelState();
+            MarkActivity();
+            _ = CheckInWithControllerAsync();
+            KioskLog.Write("A guest requested staff assistance.");
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Assistance request save error: " + ex.Message);
+            ShowBanner("The assistance request could not be saved. Please ask a staff member for help.", false);
+        }
+    }
+
+    private void ClearGuestAssistance()
+    {
+        try
+        {
+            _settings.AssistanceRequested = false;
+            _settings.AssistanceAcknowledged = false;
+            _settings.Save();
+            UpdateAssistancePanelState();
+            MarkActivity();
+            _ = CheckInWithControllerAsync();
+            KioskLog.Write("The guest assistance call was cleared at the kiosk.");
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write("Assistance clear save error: " + ex.Message);
+            ShowBanner("The assistance call could not be cleared. Please try again.", false);
+        }
+    }
+
+    private void UpdateAssistancePanelState()
+    {
+        _assistancePanel.SetState(
+            _settings.AssistanceRequested,
+            _settings.AssistanceAcknowledged);
+        _assistancePanel.Visible = !_promptOpen && !_showingBlackout && !_showingScreensaver;
+        if (_assistancePanel.Visible)
+            _assistancePanel.BringToFront();
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -540,6 +595,7 @@ internal sealed partial class KioskForm : Form
         _lastDarkTheme = status.IsDark;
         BackColor = KioskTheme.WindowBackground(_lastDarkTheme);
         _webView.DefaultBackgroundColor = KioskTheme.WindowBackground(_lastDarkTheme);
+        _assistancePanel.ApplyTheme(_lastDarkTheme);
         if (!_browserReady) return;
 
         await InstallWaiverPageScriptAsync();
@@ -745,6 +801,7 @@ internal sealed partial class KioskForm : Form
     private void IdleTimer_Tick(object? sender, EventArgs e)
     {
         if (!_browserReady || _promptOpen || _isResetting || _completionTimer.Enabled ||
+            _settings.AssistanceRequested ||
             _showingClosedPage || _showingBusinessClosedPage || _showingBlackout ||
             _showingScreensaver)
             return;
@@ -893,6 +950,7 @@ internal sealed partial class KioskForm : Form
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
+        UpdateAssistancePanelState();
         _webView.CoreWebView2.NavigateToString(BuildThankYouHtml(scheduleTimeOverride));
         _completionTimer.Start();
         KioskLog.Write(staffPreview
@@ -1083,6 +1141,7 @@ internal sealed partial class KioskForm : Form
         ResetBusinessClosedPeriod();
         SetBrowserInputEnabled(true);
         _webView.CoreWebView2.Navigate(_settings.StartUrl);
+        UpdateAssistancePanelState();
     }
 
     private async Task ApplyBusinessHoursStateAsync()
@@ -1211,6 +1270,7 @@ internal sealed partial class KioskForm : Form
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
+        UpdateAssistancePanelState();
         _webView.CoreWebView2.NavigateToString(BuildBusinessClosedHtml(nextOpening));
         KioskLog.Write("The scheduled Business Closed page was displayed.");
     }
@@ -1302,6 +1362,7 @@ internal sealed partial class KioskForm : Form
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
+        UpdateAssistancePanelState();
         _webView.CoreWebView2.NavigateToString(BuildBlackoutHtml());
         SetBrowserInputEnabled(false);
         KioskLog.Write("The scheduled business-hours blackout started. Only the staff shortcut remains active.");
@@ -1324,6 +1385,7 @@ internal sealed partial class KioskForm : Form
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
+        UpdateAssistancePanelState();
         _webView.CoreWebView2.NavigateToString(BuildStationClosedHtml(connectionError));
 
         if (connectionError && !_settings.StationClosed)
@@ -1337,7 +1399,8 @@ internal sealed partial class KioskForm : Form
     private void ShowScreensaver(bool preOpening = false, DateTime? openingTime = null)
     {
         if (!_browserReady || (_isResetting && !preOpening) || _promptOpen ||
-            _settings.StationClosed || _showingClosedPage || _showingBusinessClosedPage ||
+            _settings.StationClosed || _settings.AssistanceRequested ||
+            _showingClosedPage || _showingBusinessClosedPage ||
             _showingBlackout || _showingScreensaver)
             return;
 
@@ -1363,6 +1426,7 @@ internal sealed partial class KioskForm : Form
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
+        UpdateAssistancePanelState();
         _webView.CoreWebView2.NavigateToString(BuildScreensaverHtml());
         KioskLog.Write(preOpening
             ? "The pre-opening screensaver started for the scheduled opening at " +
@@ -2328,6 +2392,7 @@ internal sealed partial class KioskForm : Form
             return;
 
         _promptOpen = true;
+        UpdateAssistancePanelState();
         _idleTimer.Stop();
         TopMost = false;
 
@@ -2410,6 +2475,7 @@ internal sealed partial class KioskForm : Form
         finally
         {
             _promptOpen = false;
+            UpdateAssistancePanelState();
             if (!_allowExit)
             {
                 TopMost = true;
@@ -3761,6 +3827,8 @@ internal sealed class KioskSettings
     public string RemotePairingKey { get; set; } = string.Empty;
     public string StationId { get; set; } = Guid.NewGuid().ToString("N");
     public string StationName { get; set; } = Environment.MachineName;
+    public bool AssistanceRequested { get; set; }
+    public bool AssistanceAcknowledged { get; set; }
     public string RemoteLastCommandId { get; set; } = string.Empty;
     public bool RemoteLastCommandSuccess { get; set; }
     public string RemoteLastCommandMessage { get; set; } = string.Empty;
@@ -3893,6 +3961,8 @@ internal sealed class KioskSettings
         StationName = string.IsNullOrWhiteSpace(StationName)
             ? Environment.MachineName
             : StationName.Trim();
+        if (!AssistanceRequested)
+            AssistanceAcknowledged = false;
         RemoteLastCommandId ??= string.Empty;
         RemoteLastCommandMessage ??= string.Empty;
         AdvertisementSyncRevision ??= string.Empty;

@@ -108,6 +108,8 @@ internal sealed class PosControllerForm : Form
                 await SendCommandAsync(slot, PosCommandTypes.SetClosed, false);
             _cards[index].ResetRequested += async (_, _) =>
                 await SendCommandAsync(slot, PosCommandTypes.ResetStart);
+            _cards[index].AssistanceAcknowledgedRequested += async (_, _) =>
+                await SendCommandAsync(slot, PosCommandTypes.AcknowledgeAssistance);
             layout.Controls.Add(_cards[index], index, 0);
         }
         background.Controls.Add(layout);
@@ -313,6 +315,8 @@ internal sealed class PosControllerForm : Form
                 _cards[slot].ShowPendingState(open: false, "Closing waiver station…");
             else if (commandType == PosCommandTypes.SetClosed)
                 _cards[slot].ShowPendingState(open: true, "Putting waiver station in service…");
+            else if (commandType == PosCommandTypes.AcknowledgeAssistance)
+                _cards[slot].ShowAssistanceAcknowledgedPending();
             else
                 _cards[slot].ShowPendingMessage("Resetting to the starting page…");
 
@@ -396,14 +400,22 @@ internal sealed class KioskControlCard : Panel
 {
     private readonly StatusLight _red = new(Color.FromArgb(244, 34, 48), Color.FromArgb(80, 25, 29));
     private readonly StatusLight _green = new(Color.FromArgb(38, 205, 91), Color.FromArgb(23, 75, 42));
+    private readonly StatusLight _yellow = new(Color.FromArgb(255, 213, 38), Color.FromArgb(82, 68, 18));
     private readonly Label _status = new();
     private readonly Button _close = new();
     private readonly Button _open = new();
     private readonly Button _reset = new();
+    private readonly Button _assistance = new();
+    private readonly System.Windows.Forms.Timer _assistanceFlashTimer = new() { Interval = 450 };
+    private bool _assistanceRequested;
+    private bool _assistanceAcknowledged;
+    private bool _assistanceFlashBright = true;
+    private bool _buttonsEnabled;
 
     public event EventHandler? CloseRequested;
     public event EventHandler? OpenRequested;
     public event EventHandler? ResetRequested;
+    public event EventHandler? AssistanceAcknowledgedRequested;
     public bool IsLinked { get; set; }
 
     public KioskControlCard(int kioskNumber)
@@ -427,18 +439,21 @@ internal sealed class KioskControlCard : Panel
         {
             Dock = DockStyle.Top,
             Height = 76,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
-            Padding = new Padding(58, 8, 58, 8)
+            Padding = new Padding(36, 8, 36, 8)
         };
-        lightPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        lightPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        for (var column = 0; column < 3; column++)
+            lightPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
         _red.Dock = DockStyle.Fill;
         _red.Margin = new Padding(4);
         _green.Dock = DockStyle.Fill;
         _green.Margin = new Padding(4);
+        _yellow.Dock = DockStyle.Fill;
+        _yellow.Margin = new Padding(4);
         lightPanel.Controls.Add(_red, 0, 0);
         lightPanel.Controls.Add(_green, 1, 0);
+        lightPanel.Controls.Add(_yellow, 2, 0);
 
         _status.Dock = DockStyle.Top;
         _status.Height = 74;
@@ -450,21 +465,30 @@ internal sealed class KioskControlCard : Panel
         var actions = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            RowCount = 3,
+            RowCount = 4,
             ColumnCount = 1,
             Padding = new Padding(10, 12, 10, 10)
         };
-        for (var row = 0; row < 3; row++)
-            actions.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
+        for (var row = 0; row < 4; row++)
+            actions.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
         ConfigureButton(_close, "CLOSE STATION", Color.FromArgb(245, 130, 32), Color.White);
         ConfigureButton(_open, "PUT IN SERVICE", Color.FromArgb(239, 42, 55), Color.White);
         ConfigureButton(_reset, "RESET TO START", Color.FromArgb(8, 119, 189), Color.White);
+        ConfigureButton(_assistance, "NO ASSISTANCE CALL", Color.FromArgb(120, 126, 132), Color.White);
         _close.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
         _open.Click += (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty);
         _reset.Click += (_, _) => ResetRequested?.Invoke(this, EventArgs.Empty);
+        _assistance.Click += (_, _) => AssistanceAcknowledgedRequested?.Invoke(this, EventArgs.Empty);
         actions.Controls.Add(_close, 0, 0);
         actions.Controls.Add(_open, 0, 1);
         actions.Controls.Add(_reset, 0, 2);
+        actions.Controls.Add(_assistance, 0, 3);
+
+        _assistanceFlashTimer.Tick += (_, _) =>
+        {
+            _assistanceFlashBright = !_assistanceFlashBright;
+            _yellow.Active = _assistanceFlashBright;
+        };
 
         Controls.Add(actions);
         Controls.Add(_status);
@@ -478,6 +502,7 @@ internal sealed class KioskControlCard : Panel
         var open = kiosk.IsOnline && kiosk.AvailableForGuests && !kiosk.HasError;
         _green.Active = open;
         _red.Active = !open;
+        SetAssistanceState(kiosk.AssistanceRequested, kiosk.AssistanceAcknowledged);
         _status.Text = kiosk.IsOnline
             ? (string.IsNullOrWhiteSpace(kiosk.StatusMessage)
                 ? (open ? "Online and open to guests" : "Waiver station unavailable")
@@ -492,6 +517,7 @@ internal sealed class KioskControlCard : Panel
         IsLinked = false;
         _red.Active = false;
         _green.Active = false;
+        SetAssistanceState(false, false);
         _status.Text = "Not linked\nOpen Settings to assign a kiosk";
         _status.ForeColor = Color.FromArgb(83, 97, 109);
         SetButtonsEnabled(false);
@@ -502,6 +528,7 @@ internal sealed class KioskControlCard : Panel
         IsLinked = true;
         _red.Active = true;
         _green.Active = false;
+        SetAssistanceState(false, false);
         _status.Text = "Linked kiosk not found by controller";
         _status.ForeColor = Color.FromArgb(187, 34, 46);
         SetButtonsEnabled(true);
@@ -511,6 +538,7 @@ internal sealed class KioskControlCard : Panel
     {
         _red.Active = true;
         _green.Active = false;
+        SetAssistanceState(false, false);
         _status.Text = "Kiosk status unavailable";
         _status.ForeColor = Color.FromArgb(187, 34, 46);
     }
@@ -528,6 +556,12 @@ internal sealed class KioskControlCard : Panel
         _status.ForeColor = Color.FromArgb(125, 77, 9);
     }
 
+    public void ShowAssistanceAcknowledgedPending()
+    {
+        SetAssistanceState(requested: true, acknowledged: true);
+        ShowPendingMessage("The guest was told assistance is on the way.");
+    }
+
     public void ShowCommandError(string message)
     {
         _red.Active = true;
@@ -540,9 +574,58 @@ internal sealed class KioskControlCard : Panel
 
     private void SetButtonsEnabled(bool enabled)
     {
+        _buttonsEnabled = enabled;
         _close.Enabled = enabled;
         _open.Enabled = enabled;
         _reset.Enabled = enabled;
+        UpdateAssistanceButton();
+    }
+
+    private void SetAssistanceState(bool requested, bool acknowledged)
+    {
+        _assistanceRequested = requested;
+        _assistanceAcknowledged = requested && acknowledged;
+        _assistanceFlashTimer.Stop();
+        _assistanceFlashBright = true;
+        _yellow.Active = false;
+        if (_assistanceRequested && !_assistanceAcknowledged)
+        {
+            _yellow.Active = true;
+            _assistanceFlashTimer.Start();
+        }
+        UpdateAssistanceButton();
+    }
+
+    private void UpdateAssistanceButton()
+    {
+        if (!_assistanceRequested)
+        {
+            _assistance.Text = "NO ASSISTANCE CALL";
+            _assistance.BackColor = Color.FromArgb(120, 126, 132);
+            _assistance.ForeColor = Color.White;
+            _assistance.Enabled = false;
+            return;
+        }
+        if (_assistanceAcknowledged)
+        {
+            _assistance.Text = "ASSISTANCE ON THE WAY";
+            _assistance.BackColor = Color.FromArgb(118, 196, 66);
+            _assistance.ForeColor = Color.FromArgb(16, 24, 32);
+            _assistance.Enabled = false;
+            return;
+        }
+
+        _assistance.Text = "RESPOND: ON THE WAY";
+        _assistance.BackColor = Color.FromArgb(255, 193, 7);
+        _assistance.ForeColor = Color.FromArgb(16, 24, 32);
+        _assistance.Enabled = _buttonsEnabled;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _assistanceFlashTimer.Dispose();
+        base.Dispose(disposing);
     }
 
     private static void ConfigureButton(Button button, string text, Color background, Color foreground)

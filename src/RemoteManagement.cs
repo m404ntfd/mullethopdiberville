@@ -189,6 +189,8 @@ internal sealed partial class KioskForm
         StationClosed = _settings.StationClosed,
         AvailableForGuests = IsAvailableForGuests(),
         HasError = IsInErrorState(),
+        AssistanceRequested = _settings.AssistanceRequested,
+        AssistanceAcknowledged = _settings.AssistanceAcknowledged,
         StatusMessage = CurrentPosStatusMessage(),
         LastCommandId = _settings.RemoteLastCommandId,
         LastCommandSuccess = _settings.RemoteLastCommandSuccess,
@@ -554,6 +556,26 @@ internal sealed partial class KioskForm
                     SaveRemoteCommandResult(command.Id, hoursResult.Success, hoursResult.Message);
                     break;
 
+                case RemoteCommandTypes.AcknowledgeAssistance:
+                    if (_settings.AssistanceRequested)
+                    {
+                        _settings.AssistanceAcknowledged = true;
+                        _settings.Save();
+                        UpdateAssistancePanelState();
+                        SaveRemoteCommandResult(
+                            command.Id,
+                            true,
+                            "The guest was told that assistance is on the way.");
+                    }
+                    else
+                    {
+                        SaveRemoteCommandResult(
+                            command.Id,
+                            true,
+                            "The assistance call had already been cleared at the kiosk.");
+                    }
+                    break;
+
                 default:
                     SaveRemoteCommandResult(command.Id, false, "The controller sent an unsupported command.");
                     break;
@@ -629,6 +651,7 @@ internal static class RemoteCommandTypes
     public const string CheckUpdate = "check-update";
     public const string InstallUpdate = "install-update";
     public const string SyncBusinessHours = "sync-business-hours";
+    public const string AcknowledgeAssistance = "acknowledge-assistance";
 }
 
 internal sealed class KioskCheckInRequest
@@ -640,6 +663,8 @@ internal sealed class KioskCheckInRequest
     public bool StationClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
+    public bool AssistanceRequested { get; set; }
+    public bool AssistanceAcknowledged { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public string LastCommandId { get; set; } = string.Empty;
     public bool LastCommandSuccess { get; set; }

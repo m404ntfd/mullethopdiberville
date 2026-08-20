@@ -9,6 +9,7 @@ internal static class PosCommandTypes
 {
     public const string SetClosed = "set-closed";
     public const string ResetStart = "reset-start";
+    public const string AcknowledgeAssistance = "acknowledge-assistance";
 }
 
 internal sealed class PosKioskStatus
@@ -20,6 +21,8 @@ internal sealed class PosKioskStatus
     public bool StationClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
+    public bool AssistanceRequested { get; set; }
+    public bool AssistanceAcknowledged { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public DateTime LastSeenUtc { get; set; }
 }

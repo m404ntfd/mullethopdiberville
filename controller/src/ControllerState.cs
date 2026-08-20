@@ -10,6 +10,7 @@ internal static class CommandTypes
     public const string CheckUpdate = "check-update";
     public const string InstallUpdate = "install-update";
     public const string SyncBusinessHours = "sync-business-hours";
+    public const string AcknowledgeAssistance = "acknowledge-assistance";
 }
 
 internal sealed class KioskCheckInRequest
@@ -21,6 +22,8 @@ internal sealed class KioskCheckInRequest
     public bool StationClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
+    public bool AssistanceRequested { get; set; }
+    public bool AssistanceAcknowledged { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public string LastCommandId { get; set; } = string.Empty;
     public bool LastCommandSuccess { get; set; }
@@ -63,6 +66,8 @@ internal sealed class ManagedKiosk
     public bool StationClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
+    public bool AssistanceRequested { get; set; }
+    public bool AssistanceAcknowledged { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public DateTime LastSeenUtc { get; set; }
     public string LastIpAddress { get; set; } = string.Empty;
@@ -85,6 +90,8 @@ internal sealed class ManagedKiosk
         StationClosed = StationClosed,
         AvailableForGuests = AvailableForGuests,
         HasError = HasError,
+        AssistanceRequested = AssistanceRequested,
+        AssistanceAcknowledged = AssistanceAcknowledged,
         StatusMessage = StatusMessage,
         LastSeenUtc = LastSeenUtc,
         LastIpAddress = LastIpAddress,
@@ -107,6 +114,8 @@ internal sealed class PosKioskStatus
     public bool StationClosed { get; set; }
     public bool AvailableForGuests { get; set; }
     public bool HasError { get; set; }
+    public bool AssistanceRequested { get; set; }
+    public bool AssistanceAcknowledged { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public DateTime LastSeenUtc { get; set; }
 }
@@ -305,6 +314,8 @@ internal sealed class ControllerState
                     StationClosed = kiosk.StationClosed,
                     AvailableForGuests = kiosk.AvailableForGuests,
                     HasError = kiosk.HasError,
+                    AssistanceRequested = kiosk.AssistanceRequested,
+                    AssistanceAcknowledged = kiosk.AssistanceAcknowledged,
                     StatusMessage = kiosk.StatusMessage,
                     LastSeenUtc = kiosk.LastSeenUtc
                 })
@@ -400,6 +411,8 @@ internal sealed class ControllerState
             kiosk.StationClosed = request.StationClosed;
             kiosk.AvailableForGuests = request.AvailableForGuests;
             kiosk.HasError = request.HasError;
+            kiosk.AssistanceRequested = request.AssistanceRequested;
+            kiosk.AssistanceAcknowledged = request.AssistanceRequested && request.AssistanceAcknowledged;
             kiosk.StatusMessage = Clean(
                 request.StatusMessage,
                 request.AvailableForGuests ? "Online and open to guests." : "Not available to guests.",
@@ -664,6 +677,7 @@ internal sealed class ControllerState
         CommandTypes.CheckUpdate => "Update check queued.",
         CommandTypes.InstallUpdate => "Update installation queued.",
         CommandTypes.SyncBusinessHours => "Business Hours sync queued.",
+        CommandTypes.AcknowledgeAssistance => "Assistance response queued.",
         _ => "Command queued."
     };
 

@@ -6,12 +6,16 @@ It shows four numbered waiver-station controls based on the supplied layout:
 * A bright green light means the linked kiosk is online and open to guests.
 * A bright red light means the kiosk is offline, closed, outside business hours,
   unable to reach the waiver website, or reporting another error.
-* Both indicator lenses remain visible in a dark state when a dashboard slot is
-  not linked.
+* All three indicator lenses remain visible in a dark state when a dashboard
+  slot is not linked.
+* A flashing yellow light means the guest has requested staff assistance.
 * **Close Station** displays the waiver station closed screen.
 * **Put In Service** removes the staff-controlled closed screen and returns the
   station to a fresh waiver.
 * **Reset to Start** clears the current waiver and returns to its starting page.
+* **Respond: On the Way** acknowledges an assistance call. The yellow POS light
+  stops flashing and the kiosk tells the guest that a staff member is coming.
+  The kiosk continues flashing until the call is cleared on that kiosk.
 
 The dashboard buttons and **Check for Updates** do not require a passcode. The
 Settings button does. There is no settings shortcut key.
@@ -55,7 +59,9 @@ changes to **Install Update** until the downloaded update is installed. Its
 passcode and kiosk assignments are stored separately from both the Waiver Kiosk
 and Kiosk Controller settings.
 
-POS Controller version 1.1.1 immediately remembers every verified controller
-connection and preserves the identity and Kiosk 1–4 position of each linked
-waiver station. Use the visible **Settings** button in the upper-right corner to
-change the controller address, pairing key, assignments, or Settings passcode.
+POS Controller version 1.2.0 adds a flashing yellow guest-assistance light and a
+per-kiosk response button. Version 1.1.1 immediately remembers every verified
+controller connection and preserves the identity and Kiosk 1–4 position of each
+linked waiver station. Use the visible **Settings** button in the upper-right
+corner to change the controller address, pairing key, assignments, or Settings
+passcode.

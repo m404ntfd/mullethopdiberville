@@ -85,6 +85,13 @@ controller, restart the controller, or close it. Red and green lenses show the
 saved master role, and local controllers discover each other when they launch.
 The controller also checks for its own updates automatically whenever it opens.
 
+Waiver Kiosk version 2.10.0 adds a guest-assistance panel on the right side of
+the kiosk. A guest can call for help, which produces a flashing yellow alert in
+the Kiosk Controller and in the kiosk's assigned POS Controller panel. Selecting
+Respond: On the Way in POS acknowledges the call and changes the kiosk message
+to tell the guest that assistance is coming. The kiosk continues flashing until
+the guest or assisting staff member selects Clear Assistance Call at the kiosk.
+
 Download the controller package from:
 
 https://github.com/m404ntfd/mullethopdiberville/releases/latest
@@ -141,10 +148,12 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Kiosk Controller version 1.10.2 adds system-tray operation so minimizing or
-closing the dashboard does not stop remote kiosk service. Version 1.10.1 enlarges
+Kiosk Controller version 1.11.0 fixes dashboard restoration from the fish-and-
+springs system-tray icon and adds guest-assistance status to each kiosk row.
+Version 1.10.2 adds system-tray operation so minimizing or closing the dashboard
+does not stop remote kiosk service. Version 1.10.1 enlarges
 the Controller Program buttons and adds code-free manual pairing by kiosk IPv4
-address. Waiver Kiosk version 2.9.3 uses
+address. Waiver Kiosk version 2.10.0 uses
 the existing outbound discovery and encrypted approval exchange for this release.
 The long self-contained setup code remains available only as a fallback.
 
@@ -159,16 +168,19 @@ newer supplies the live guest-availability and error status used by its lights.
 
 A green light means the assigned kiosk is online and open to guests. A red light
 means it is closed, offline, outside business hours, unable to reach the waiver
-website, or in another error state. The dark red and green lenses remain visible
-when a slot is not linked. Front-desk staff can close a station, put it back in
-service, or reset the current waiver to its starting page.
+website, or in another error state. A flashing yellow light means a guest has
+requested assistance. The dark red, green, and yellow lenses remain visible when
+a slot is not linked. Front-desk staff can close a station, put it back in
+service, reset the current waiver to its starting page, or acknowledge an
+assistance call so the guest sees that help is on the way.
 
-The dashboard has no shortcut key. Its three daily-use controls and the visible
+The dashboard has no shortcut key. Its four daily-use controls and the visible
 Check for Updates button do not ask for a passcode. Opening Settings requires the
 POS Controller's own 4-8 digit passcode. Settings finds the kiosks already paired
 with the on-site Kiosk Controller and automatically adds new devices to the next
 open Kiosk 1 through Kiosk 4 dashboard position without renumbering existing
-assignments. POS Controller version 1.1.1 saves a verified controller address and
+assignments. POS Controller version 1.2.0 adds the assistance alert and response
+button. Version 1.1.1 saves a verified controller address and
 pairing key immediately, and remembers each kiosk's identity, name, and assigned
 number across application and computer restarts. The visible Settings button in
 the upper-right corner can change the saved connection, assignments, or POS

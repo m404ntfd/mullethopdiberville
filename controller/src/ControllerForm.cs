@@ -45,6 +45,7 @@ internal sealed class ControllerForm : Form
     private bool _masterChangeInProgress;
     private bool _allowApplicationExit;
     private bool _trayNoticeShown;
+    private bool _assistanceFlashOn;
 
     public ControllerForm()
     {
@@ -105,7 +106,7 @@ internal sealed class ControllerForm : Form
         Resize += (_, _) =>
         {
             if (WindowState == FormWindowState.Minimized)
-                BeginInvoke(new Action(HideControllerInTray));
+                HideControllerInTray();
         };
         Activated += (_, _) =>
         {
@@ -118,12 +119,23 @@ internal sealed class ControllerForm : Form
     private void ConfigureTrayIcon()
     {
         var open = new ToolStripMenuItem("Open Kiosk Controller");
+        open.Font = new Font(open.Font, FontStyle.Bold);
         open.Click += (_, _) => RestoreControllerFromTray();
         _trayMenu.Items.Add(open);
         _trayIcon.Text = "Mullet Hop Kiosk Controller";
         _trayIcon.ContextMenuStrip = _trayMenu;
         _trayIcon.Visible = true;
-        _trayIcon.DoubleClick += (_, _) => RestoreControllerFromTray();
+        _trayIcon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+                RestoreControllerFromTray();
+        };
+        _trayIcon.MouseDoubleClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+                RestoreControllerFromTray();
+        };
+        _trayIcon.BalloonTipClicked += (_, _) => RestoreControllerFromTray();
     }
 
     private void HandleFormClosing(object? sender, FormClosingEventArgs e)
@@ -162,12 +174,21 @@ internal sealed class ControllerForm : Form
     {
         if (IsDisposed)
             return;
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(RestoreControllerFromTray));
+            return;
+        }
 
         ShowInTaskbar = true;
+        Visible = true;
         Show();
         WindowState = FormWindowState.Normal;
+        TopMost = true;
         Activate();
         BringToFront();
+        Focus();
+        TopMost = false;
     }
 
     private Panel BuildHeader()
@@ -655,6 +676,7 @@ internal sealed class ControllerForm : Form
         _kioskList.Columns.Add("PC Name", 120);
         _kioskList.Columns.Add("Version", 70);
         _kioskList.Columns.Add("Guest", 90);
+        _kioskList.Columns.Add("Assistance", 115);
         _kioskList.Columns.Add("Ads Synced", 125);
         _kioskList.Columns.Add("Command / Result", 295);
         _kioskList.Columns.Add("Last Seen", 105);
@@ -762,6 +784,7 @@ internal sealed class ControllerForm : Form
     private void RefreshKioskList()
     {
         UpdateMasterStatus();
+        _assistanceFlashOn = !_assistanceFlashOn;
         var selectedId = SelectedStationId();
         var kiosks = _state.Snapshot();
         _kioskList.BeginUpdate();
@@ -776,6 +799,7 @@ internal sealed class ControllerForm : Form
                 var item = new ListViewItem(kiosk.IsOnline ? "● Online" : "○ Offline")
                 {
                     Tag = kiosk.StationId,
+                    UseItemStyleForSubItems = false,
                     ForeColor = kiosk.IsOnline
                         ? ControllerTheme.OnlineText
                         : ControllerTheme.OfflineText,
@@ -789,10 +813,25 @@ internal sealed class ControllerForm : Form
                 item.SubItems.Add(kiosk.MachineName);
                 item.SubItems.Add(kiosk.Version);
                 item.SubItems.Add(kiosk.StationClosed ? "Closed" : "Open");
+                var assistance = item.SubItems.Add(kiosk.AssistanceRequested
+                    ? kiosk.AssistanceAcknowledged
+                        ? "On the way"
+                        : _assistanceFlashOn ? "● HELP" : "○ HELP"
+                    : string.Empty);
                 item.SubItems.Add(FormatAdvertisementSync(kiosk));
                 item.SubItems.Add(commandText);
                 item.SubItems.Add(FormatLastSeen(kiosk.LastSeenUtc));
                 item.SubItems.Add(kiosk.LastIpAddress);
+                foreach (ListViewItem.ListViewSubItem subItem in item.SubItems)
+                {
+                    subItem.ForeColor = item.ForeColor;
+                    subItem.BackColor = item.BackColor;
+                }
+                assistance.ForeColor = kiosk.AssistanceRequested && !kiosk.AssistanceAcknowledged
+                    ? _assistanceFlashOn
+                        ? Color.FromArgb(255, 193, 7)
+                        : Color.FromArgb(125, 103, 28)
+                    : item.ForeColor;
                 _kioskList.Items.Add(item);
                 if (string.Equals(kiosk.StationId, selectedId, StringComparison.Ordinal))
                     item.Selected = true;
@@ -1203,6 +1242,7 @@ internal sealed class ControllerForm : Form
         CommandTypes.ResetStart => "Reset to starting page",
         CommandTypes.CheckUpdate => "Check for update",
         CommandTypes.InstallUpdate => "Install update",
+        CommandTypes.AcknowledgeAssistance => "Tell guest assistance is on the way",
         _ => command.Type
     };
 
