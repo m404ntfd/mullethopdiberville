@@ -34,3 +34,38 @@ if ($actualSha256 -ne $expectedSha256) {
 
 $video = Get-Item -LiteralPath $outputPath
 Write-Host "Screensaver video assembled and verified: $($video.Length) bytes."
+
+$businessClosedPartsDirectory = Join-Path $repositoryRoot "assets/business-closed-parts"
+$businessClosedOutputPath = Join-Path $repositoryRoot "assets/MulletHopBusinessClosed.mp4"
+$businessClosedExpectedSha256 = "b8d7cd5142a000027e5e0bff2d3024d3cf614b8064bcf8c7bb0d719b7c42ef1b"
+
+$businessClosedParts = @(Get-ChildItem -LiteralPath $businessClosedPartsDirectory -File -Filter "part-*.bin" |
+    Sort-Object Name)
+if ($businessClosedParts.Count -eq 0) {
+    throw "No Business Closed video parts were found in $businessClosedPartsDirectory."
+}
+
+$businessClosedOutput = [System.IO.File]::Create($businessClosedOutputPath)
+try {
+    foreach ($part in $businessClosedParts) {
+        $input = [System.IO.File]::OpenRead($part.FullName)
+        try {
+            $input.CopyTo($businessClosedOutput)
+        }
+        finally {
+            $input.Dispose()
+        }
+    }
+}
+finally {
+    $businessClosedOutput.Dispose()
+}
+
+$businessClosedActualSha256 =
+    (Get-FileHash -LiteralPath $businessClosedOutputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($businessClosedActualSha256 -ne $businessClosedExpectedSha256) {
+    throw "The assembled Business Closed video did not match the uploaded MP4."
+}
+
+$businessClosedVideo = Get-Item -LiteralPath $businessClosedOutputPath
+Write-Host "Business Closed video assembled and verified: $($businessClosedVideo.Length) bytes."
