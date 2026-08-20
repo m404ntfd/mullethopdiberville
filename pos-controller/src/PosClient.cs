@@ -45,6 +45,7 @@ internal sealed class PosControllerClient
 {
     private const string TimestampHeader = "X-MulletHop-Timestamp";
     private const string SignatureHeader = "X-MulletHop-Signature";
+    private const string PosMachineHeader = "X-MulletHop-POS-Machine";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient Client = CreateClient();
     private readonly string _controllerUrl;
@@ -125,6 +126,7 @@ internal sealed class PosControllerClient
         request.Headers.TryAddWithoutValidation(
             SignatureHeader,
             Sign(pairingKey.Trim(), timestamp, body));
+        request.Headers.TryAddWithoutValidation(PosMachineHeader, Environment.MachineName);
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue(
             "MulletHopPosController", PosUpdater.CurrentVersion));
         return request;

@@ -114,7 +114,7 @@ internal sealed class KioskDiscoveryCoordinator
         {
             return new IpPairingQueueResult(
                 false,
-                "Enter the private IPv4 address shown in Remote Control Options on the waiver kiosk.",
+                "Enter the private IPv4 address shown on the waiver kiosk's Remote Control tab.",
                 string.Empty,
                 DateTime.MinValue);
         }
@@ -162,7 +162,7 @@ internal sealed class KioskDiscoveryCoordinator
             return new IpPairingQueueResult(
                 true,
                 $"Waiting for the waiver kiosk at {ipAddress} to contact this controller. " +
-                "Remote Control Options must be enabled on that kiosk.",
+                "Remote Control must be enabled on that kiosk.",
                 requestId,
                 expiresUtc);
         }

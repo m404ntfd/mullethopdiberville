@@ -10,8 +10,8 @@ computers discover each other, and one can be designated as the master. It provi
 * A non-installing update check per selected kiosk.
 * An install-update command per selected kiosk.
 * A central scheduled-advertisement catalog with automatic kiosk synchronization.
-* A lower-right Controller Program section with update, ad-management, restart,
-  and close controls.
+* A lower-right Controller Program section with update, ad-management, software
+  download, restart, and close controls.
 * Queued commands: if a kiosk is temporarily offline, the newest command waits
   until that kiosk reconnects.
 * Optional secure Cloudflare synchronization for a controller installed away
@@ -81,7 +81,7 @@ network discovery.
 1. Make sure the controller computer and waiver kiosk are on the same private
    network, then leave the Waiver Kiosk app open.
 2. On the kiosk, press **Ctrl + Alt + M**, open Staff Settings, and select
-   **Remote Control Options**.
+   **Remote Control**.
 3. Check **Enable remote control and network discovery**, enter a unique kiosk
    name, and save. No controller address or pairing key is needed.
 4. On the controller, select **Discover Kiosks**. A fresh 15-second network scan
@@ -106,7 +106,7 @@ updates the saved address automatically.
 
 If a kiosk does not appear in the discovery scan:
 
-1. At the kiosk, open **Remote Control Options** and note the displayed IPv4
+1. At the kiosk, open **Remote Control** and note the displayed IPv4
    address.
 2. On the controller, select **Add Kiosk Manually**, enter that IPv4 address,
    and select **Send Secure Request**.
@@ -162,11 +162,14 @@ the controller row then displays On the way. In Mullet Hop POS, the Answered
 button stays gray and disabled while its status dot continues flashing yellow.
 The call remains active until it is cleared at the kiosk.
 
-An online kiosk that is showing its scheduled Business Closed screen or the
+An online kiosk that is showing its scheduled Business Closed video/page or the
 business-hours blackout screen is reported with a blue Business Closed indicator
 and row. Staff-closed, offline, and error states remain separate.
 Mullet Hop POS asks staff to choose Staff Closure or Business Closure before it
 queues a Close command, ensuring the kiosk reports the intended red or blue state.
+Business Hours profiles include opening, Last Jump Time Sold, and closing times
+for each day, plus Show Closed Video, Blackout at closing time, and the existing
+pre-opening screensaver setting.
 
 Open All and Close All apply to every known station. Close All asks for
 confirmation. Offline stations retain the latest queued command and carry it out
@@ -174,8 +177,10 @@ when they reconnect.
 
 The lower-right Controller Program section includes the controller's own
 Auto/Light/Dark appearance selector, master-controller indicator and toggle,
-plus Check Updates, Manage Ads, Business Hours, Remote Access, Restart Controller,
-and Exit Program buttons in a larger three-column, two-row grid. If a downloaded
+plus Check Updates, Manage Ads, Business Hours, Download Apps, Remote Access,
+Restart Controller, and Exit Program buttons. Download Apps opens a Software
+Downloads window that finds the latest published Waiver Kiosk installer or Mullet
+Hop POS package, asks where to save it, and shows progress. If a downloaded
 update is waiting, Restart Controller offers to install it. Minimizing the window
 or selecting X sends the controller to the Windows system tray while its network
 service continues running. Single-click or double-click the fish-and-springs tray
@@ -210,8 +215,9 @@ MANAGE HOURS AND KIOSK APPEARANCE
 ---------------------------------
 
 Select Business Hours in the Controller Program section. The Business Hours tab
-sets each day's opening and closing time, the Business Closed video duration,
-and the pre-opening screensaver time. The Business Closed video displays the next
+sets each day's opening, Last Jump Time Sold, and closing time; whether to show
+the Business Closed video at the cutoff; whether to black out at closing; and
+the pre-opening screensaver time. The Business Closed video displays the next
 opening day and time from this synced schedule. The Kiosk Appearance tab selects Auto,
 Light, or Dark for the kiosks and can schedule selected days and a time to switch
 Light kiosks to Dark.
@@ -234,8 +240,12 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.11.1 adds the distinct business-hours-closed status
-used by Mullet Hop POS. Version 1.11.0 fixes dashboard restoration from the tray
+Kiosk Controller version 1.12.0 shows the active master PC and network-wide POS
+count beside the master lights. Non-master controller installations automatically
+mirror the master's saved kiosk connections and relay kiosk and POS commands to
+it. Three POS workstations can simultaneously use the same four kiosk assignments.
+Version 1.11.1 adds the distinct business-hours-closed status used by Mullet Hop
+POS. Version 1.11.0 fixes dashboard restoration from the tray
 icon and adds guest-assistance status to every kiosk row. Version 1.10.2 adds
 system-tray operation so minimizing or closing the dashboard does not stop remote
 kiosk service. Version 1.10.1 enlarges

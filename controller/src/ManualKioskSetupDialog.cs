@@ -67,7 +67,7 @@ internal sealed class ManualKioskSetupDialog : Form
         var ipNote = new Label
         {
             AutoSize = false,
-            Text = "Use the IPv4 address shown on the kiosk under Staff Settings > Remote Control Options. Remote control must be enabled on the kiosk.",
+            Text = "Use the IPv4 address shown on the kiosk under Staff Settings > Remote Control. Remote control must be enabled on the kiosk.",
             Bounds = new Rectangle(18, 26, 684, 48),
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.2f),
@@ -111,7 +111,7 @@ internal sealed class ManualKioskSetupDialog : Form
         var fallbackNote = new Label
         {
             AutoSize = false,
-            Text = "If IP pairing cannot communicate, copy this setup code and paste it into Remote Control Options on the kiosk. This self-contained code is longer because it securely carries the controller address and full pairing key.",
+            Text = "If IP pairing cannot communicate, copy this setup code and paste it into the Remote Control tab on the kiosk. This self-contained code is longer because it securely carries the controller address and full pairing key.",
             Bounds = new Rectangle(18, 25, 684, 53),
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.1f),
@@ -192,7 +192,7 @@ internal sealed class ManualKioskSetupDialog : Form
             parsedAddress = parsedAddress.MapToIPv4();
         if (parsedAddress.AddressFamily != AddressFamily.InterNetwork)
         {
-            SetIpError("Use the IPv4 address shown in Remote Control Options on the kiosk.");
+            SetIpError("Use the IPv4 address shown on the Remote Control tab on the kiosk.");
             _ipAddress.Focus();
             return;
         }
@@ -242,7 +242,7 @@ internal sealed class ManualKioskSetupDialog : Form
             if (DateTime.UtcNow >= _ipRequestExpiresUtc)
             {
                 SetIpError(
-                    "The kiosk did not contact this controller before the request expired. Verify the IP address, confirm Remote Control Options is enabled, and try again.");
+                    "The kiosk did not contact this controller before the request expired. Verify the IP address, confirm Remote Control is enabled, and try again.");
                 EndIpRequest();
                 return;
             }
@@ -305,7 +305,7 @@ internal sealed class ManualKioskSetupDialog : Form
         {
             Clipboard.SetText(_setupCode.Text);
             _setupStatus.Text =
-                "Setup code copied. Paste it into Remote Control Options on the waiver kiosk.";
+                "Setup code copied. Paste it into the Remote Control tab on the waiver kiosk.";
             _setupStatus.ForeColor = ControllerTheme.AccentText;
         }
         catch (Exception ex)

@@ -41,7 +41,7 @@ internal sealed class KioskDiscoveryDialog : Form
             Dock = DockStyle.Top,
             Height = 62,
             Padding = new Padding(20, 6, 20, 8),
-            Text = "Select Scan Network to run a fresh 15-second search for kiosks with Remote Control Options enabled. " +
+            Text = "Select Scan Network to run a fresh 15-second search for kiosks with Remote Control enabled. " +
                    "Select a result and choose Request Add; someone must then press Yes on that kiosk within two minutes.",
             ForeColor = Color.FromArgb(52, 65, 76),
             BackColor = Color.White
@@ -220,7 +220,7 @@ internal sealed class KioskDiscoveryDialog : Form
             _scanNetwork.Text = "Scan Again";
             _scanNetwork.Enabled = true;
             _status.Text = discovered.Count == 0
-                ? "Scan complete. No kiosks responded. Make sure Remote Control Options is enabled on each kiosk and all computers are on the same private network."
+                ? "Scan complete. No kiosks responded. Make sure Remote Control is enabled on each kiosk and all computers are on the same private network."
                 : $"Scan complete. Found {discovered.Count} kiosk{(discovered.Count == 1 ? "" : "s")}. Select one, then choose Request Add.";
             _status.ForeColor = discovered.Count == 0
                 ? ControllerTheme.ErrorText

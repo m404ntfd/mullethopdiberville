@@ -12,17 +12,22 @@ internal sealed class ControllerBusinessDayHours
     public DayOfWeek Day { get; set; }
     public bool IsOpen { get; set; } = true;
     public TimeSpan OpenTime { get; set; } = TimeSpan.FromHours(10);
+    public TimeSpan LastJumpTimeSold { get; set; }
     public TimeSpan CloseTime { get; set; } = TimeSpan.FromHours(22);
 
     public ControllerBusinessDayHours Clone() => new()
     {
-        Day = Day, IsOpen = IsOpen, OpenTime = OpenTime, CloseTime = CloseTime
+        Day = Day, IsOpen = IsOpen, OpenTime = OpenTime,
+        LastJumpTimeSold = LastJumpTimeSold, CloseTime = CloseTime
     };
 }
 
 internal sealed class ControllerBusinessHours
 {
     public bool Enabled { get; set; }
+    public bool ShowClosedVideo { get; set; } = true;
+    public bool BlackoutAtClosingTime { get; set; } = true;
+    // Retained so profiles created by older releases still deserialize cleanly.
     public int ClosedMessageMinutes { get; set; } = 5;
     public int PreOpeningScreensaverMinutes { get; set; } = 30;
     public ControllerKioskThemeMode ThemeMode { get; set; } = ControllerKioskThemeMode.Auto;
@@ -38,11 +43,17 @@ internal sealed class ControllerBusinessHours
     ];
 
     public static List<ControllerBusinessDayHours> CreateDefaultDays() =>
-        OrderedDays.Select(day => new ControllerBusinessDayHours { Day = day }).ToList();
+        OrderedDays.Select(day => new ControllerBusinessDayHours
+        {
+            Day = day,
+            LastJumpTimeSold = TimeSpan.FromHours(21)
+        }).ToList();
 
     public ControllerBusinessHours Clone() => new()
     {
         Enabled = Enabled,
+        ShowClosedVideo = ShowClosedVideo,
+        BlackoutAtClosingTime = BlackoutAtClosingTime,
         ClosedMessageMinutes = ClosedMessageMinutes,
         PreOpeningScreensaverMinutes = PreOpeningScreensaverMinutes,
         ThemeMode = ThemeMode,
@@ -58,16 +69,24 @@ internal sealed class ControllerBusinessHours
         var saved = Days.Where(day => Enum.IsDefined(day.Day))
             .GroupBy(day => day.Day).ToDictionary(group => group.Key, group => group.First());
         Days = OrderedDays.Select(day => saved.TryGetValue(day, out var value)
-                ? value.Clone() : new ControllerBusinessDayHours { Day = day }).ToList();
+                ? value.Clone() : new ControllerBusinessDayHours
+                {
+                    Day = day,
+                    LastJumpTimeSold = TimeSpan.FromHours(21)
+                }).ToList();
         foreach (var day in Days)
         {
             day.OpenTime = NormalizeTime(day.OpenTime);
+            day.LastJumpTimeSold = NormalizeTime(day.LastJumpTimeSold);
             day.CloseTime = NormalizeTime(day.CloseTime);
             if (day.IsOpen && day.CloseTime <= day.OpenTime)
             {
                 day.OpenTime = TimeSpan.FromHours(10);
                 day.CloseTime = TimeSpan.FromHours(22);
             }
+            if (day.LastJumpTimeSold <= day.OpenTime ||
+                day.LastJumpTimeSold > day.CloseTime)
+                day.LastJumpTimeSold = day.CloseTime;
         }
         ClosedMessageMinutes = Math.Clamp(ClosedMessageMinutes, 1, 240);
         PreOpeningScreensaverMinutes = Math.Clamp(PreOpeningScreensaverMinutes, 0, 240);
@@ -93,6 +112,9 @@ internal sealed class BusinessHoursSyncPackage
     public string Revision { get; set; } = string.Empty;
     public DateTime GeneratedUtc { get; set; }
     public bool Enabled { get; set; }
+    public bool IncludesClosureSettings { get; set; }
+    public bool ShowClosedVideo { get; set; }
+    public bool BlackoutAtClosingTime { get; set; }
     public int ClosedMessageMinutes { get; set; }
     public int PreOpeningScreensaverMinutes { get; set; }
     public bool IncludesAppearanceSettings { get; set; }
@@ -108,6 +130,7 @@ internal sealed class BusinessHoursSyncItem
     public int Day { get; set; }
     public bool IsOpen { get; set; }
     public TimeSpan OpenTime { get; set; }
+    public TimeSpan LastJumpTimeSold { get; set; }
     public TimeSpan CloseTime { get; set; }
 }
 
@@ -121,7 +144,8 @@ internal sealed class ControllerBusinessHoursDialog : Form
     private readonly ControllerState _state;
     private readonly string? _selectedStationId;
     private readonly CheckBox _enabled = new();
-    private readonly NumericUpDown _closedMinutes = new();
+    private readonly CheckBox _showClosedVideo = new();
+    private readonly CheckBox _blackoutAtClosingTime = new();
     private readonly NumericUpDown _preOpeningMinutes = new();
     private readonly ComboBox _kioskThemeMode = new();
     private readonly CheckBox _scheduledDarkEnabled = new();
@@ -129,7 +153,8 @@ internal sealed class ControllerBusinessHoursDialog : Form
     private readonly Label _status = new();
     private readonly ProgressBar _progress = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 1000 };
-    private readonly Dictionary<DayOfWeek, (CheckBox Open, DateTimePicker Starts, DateTimePicker Ends)> _days = [];
+    private readonly Dictionary<DayOfWeek,
+        (CheckBox Open, DateTimePicker Starts, DateTimePicker LastJump, DateTimePicker Ends)> _days = [];
     private readonly Dictionary<DayOfWeek, CheckBox> _scheduledDarkDays = [];
 
     public ControllerBusinessHoursDialog(ControllerState state, string? selectedStationId)
@@ -173,20 +198,24 @@ internal sealed class ControllerBusinessHoursDialog : Form
             Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(8, 119, 189)
         };
         weekly.Controls.AddRange([
-            LabelAt("Day", 18, 28, 100, true), LabelAt("Open", 120, 28, 60, true),
-            LabelAt("Opening time", 194, 28, 145, true), LabelAt("Closing time", 360, 28, 145, true)
+            LabelAt("Day", 10, 28, 72, true), LabelAt("Open", 77, 28, 44, true),
+            LabelAt("Opening", 120, 28, 120, true),
+            LabelAt("Last Jump Time Sold", 250, 28, 145, true),
+            LabelAt("Closing", 405, 28, 140, true)
         ]);
         for (var index = 0; index < ControllerBusinessHours.OrderedDays.Length; index++)
         {
             var day = ControllerBusinessHours.OrderedDays[index];
             var value = profile.Days.First(item => item.Day == day);
             var y = 55 + index * 30;
-            var open = new CheckBox { Checked = value.IsOpen, Bounds = new Rectangle(140, y + 2, 25, 25) };
-            var starts = TimePicker(value.OpenTime, 194, y);
-            var ends = TimePicker(value.CloseTime, 360, y);
-            _days[day] = (open, starts, ends);
+            var open = new CheckBox { Checked = value.IsOpen, Bounds = new Rectangle(88, y + 2, 25, 25) };
+            var starts = TimePicker(value.OpenTime, 120, y, 120);
+            var lastJump = TimePicker(value.LastJumpTimeSold, 250, y, 145);
+            var ends = TimePicker(value.CloseTime, 405, y, 140);
+            _days[day] = (open, starts, lastJump, ends);
             open.CheckedChanged += (_, _) => UpdateEnabledState();
-            weekly.Controls.AddRange([LabelAt(day.ToString(), 18, y + 2, 105), open, starts, ends]);
+            weekly.Controls.AddRange([
+                LabelAt(day.ToString(), 10, y + 2, 72), open, starts, lastJump, ends]);
         }
 
         var display = new GroupBox
@@ -194,14 +223,19 @@ internal sealed class ControllerBusinessHoursDialog : Form
             Text = "Closed Display and Pre-Opening", Bounds = new Rectangle(10, 336, 590, 124),
             Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(117, 68, 154)
         };
-        _closedMinutes.SetBounds(250, 30, 72, 30);
-        _closedMinutes.Minimum = 1; _closedMinutes.Maximum = 240; _closedMinutes.Value = profile.ClosedMessageMinutes;
+        _showClosedVideo.Text = "Show Closed Video";
+        _showClosedVideo.Checked = profile.ShowClosedVideo;
+        _showClosedVideo.AutoSize = true;
+        _showClosedVideo.Location = new Point(18, 32);
+        _blackoutAtClosingTime.Text = "Blackout at closing time";
+        _blackoutAtClosingTime.Checked = profile.BlackoutAtClosingTime;
+        _blackoutAtClosingTime.AutoSize = true;
+        _blackoutAtClosingTime.Location = new Point(300, 32);
         _preOpeningMinutes.SetBounds(250, 73, 72, 30);
         _preOpeningMinutes.Minimum = 0; _preOpeningMinutes.Maximum = 240; _preOpeningMinutes.Value = profile.PreOpeningScreensaverMinutes;
         display.Controls.AddRange([
-            LabelAt("Show Business Closed screen for:", 18, 31, 225), _closedMinutes,
-            LabelAt("minutes, then black out", 334, 31, 210),
-            LabelAt("Start the screensaver:", 18, 74, 225), _preOpeningMinutes,
+            _showClosedVideo, _blackoutAtClosingTime,
+            LabelAt("Start the screensaver before opening:", 18, 74, 225), _preOpeningMinutes,
             LabelAt("minutes before opening (0 = off)", 334, 74, 260)
         ]);
 
@@ -330,7 +364,8 @@ internal sealed class ControllerBusinessHoursDialog : Form
         var profile = new ControllerBusinessHours
         {
             Enabled = _enabled.Checked,
-            ClosedMessageMinutes = (int)_closedMinutes.Value,
+            ShowClosedVideo = _showClosedVideo.Checked,
+            BlackoutAtClosingTime = _blackoutAtClosingTime.Checked,
             PreOpeningScreensaverMinutes = (int)_preOpeningMinutes.Value,
             ThemeMode = _kioskThemeMode.SelectedIndex switch
             {
@@ -353,10 +388,22 @@ internal sealed class ControllerBusinessHoursDialog : Form
                 controls.Ends.Focus();
                 return null;
             }
+            if (controls.Open.Checked &&
+                (controls.LastJump.Value.TimeOfDay <= controls.Starts.Value.TimeOfDay ||
+                 controls.LastJump.Value.TimeOfDay > controls.Ends.Value.TimeOfDay))
+            {
+                MessageBox.Show(this,
+                    day + " Last Jump Time Sold must be later than opening and no later than closing.",
+                    "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                controls.LastJump.Focus();
+                return null;
+            }
             profile.Days.Add(new ControllerBusinessDayHours
             {
                 Day = day, IsOpen = controls.Open.Checked,
-                OpenTime = controls.Starts.Value.TimeOfDay, CloseTime = controls.Ends.Value.TimeOfDay
+                OpenTime = controls.Starts.Value.TimeOfDay,
+                LastJumpTimeSold = controls.LastJump.Value.TimeOfDay,
+                CloseTime = controls.Ends.Value.TimeOfDay
             });
         }
         return profile;
@@ -403,9 +450,11 @@ internal sealed class ControllerBusinessHoursDialog : Form
         {
             controls.Open.Enabled = _enabled.Checked;
             controls.Starts.Enabled = _enabled.Checked && controls.Open.Checked;
+            controls.LastJump.Enabled = _enabled.Checked && controls.Open.Checked;
             controls.Ends.Enabled = _enabled.Checked && controls.Open.Checked;
         }
-        _closedMinutes.Enabled = _enabled.Checked;
+        _showClosedVideo.Enabled = _enabled.Checked;
+        _blackoutAtClosingTime.Enabled = _enabled.Checked;
         _preOpeningMinutes.Enabled = _enabled.Checked;
     }
 
@@ -424,10 +473,10 @@ internal sealed class ControllerBusinessHoursDialog : Form
         TextAlign = ContentAlignment.MiddleLeft
     };
 
-    private static DateTimePicker TimePicker(TimeSpan value, int x, int y) => new()
+    private static DateTimePicker TimePicker(TimeSpan value, int x, int y, int width) => new()
     {
         Format = DateTimePickerFormat.Custom, CustomFormat = "h:mm tt", ShowUpDown = true,
-        Value = DateTime.Today + value, Bounds = new Rectangle(x, y, 145, 27), Font = new Font("Segoe UI", 9)
+        Value = DateTime.Today + value, Bounds = new Rectangle(x, y, width, 27), Font = new Font("Segoe UI", 9)
     };
 
     private static Button ButtonAt(string text, int x, int y, int width, Color background, Color? foreground = null)

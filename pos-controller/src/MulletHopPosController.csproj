@@ -9,7 +9,7 @@
     <RootNamespace>MulletHopPosController</RootNamespace>
     <AssemblyTitle>Mullet Hop POS</AssemblyTitle>
     <ApplicationIcon>..\..\assets\MulletHopStatusViewerFish.ico</ApplicationIcon>
-    <Version>1.4.1</Version>
+    <Version>1.5.0</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop POS</Product>
     <Description>Full-screen LilyPad POS and front-desk controls for Mullet Hop waiver kiosks.</Description>

@@ -80,14 +80,18 @@ kiosks, check one kiosk for an update without installing it, or tell one kiosk t
 install an available update. The controller can also publish Business Hours and
 Kiosk Appearance settings, including Auto/Light/Dark mode and a selected-day
 Dark-mode schedule, to one kiosk or all kiosks. The lower-right Controller
-Program section can check for controller updates, choose the single master
-controller, restart the controller, or close it. Red and green lenses show the
-saved master role, and local controllers discover each other when they launch.
+Program section can check for controller updates, download the latest Kiosk or
+POS software, choose the single master controller, restart the controller, or
+close it. Red and green lenses show the saved master role and the name of the
+current master PC. Local controllers discover each other when they launch;
+non-master installations automatically mirror the master's saved kiosk
+connections and relay commands to it.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.10.5, Kiosk Controller version 1.11.1, and Mullet Hop POS
-version 1.4.1 are the matching package releases. Waiver Kiosk version 2.10.5 adds
-the looping sold-out video with a live next-opening time from Business Hours.
+Waiver Kiosk version 2.11.0, Kiosk Controller version 1.12.0, and Mullet Hop POS
+version 1.5.0 are the matching package releases. Waiver Kiosk version 2.11.0 adds
+Last Jump Time Sold schedules, the editable looping closed video and next-opening
+time, closing-time blackout, and the reorganized staff settings navigation.
 Waiver Kiosk version 2.10.1 places
 guest assistance in a compact highlighted card
 with the other right-side waiver controls and moves that card stack near the top
@@ -115,7 +119,7 @@ in the controller. A linked Mullet Hop POS then adds the kiosk to its next open
 Kiosk 1-4 position and saves that assignment automatically.
 
 If discovery does not show the kiosk, select Add Kiosk Manually on the
-controller and enter the IPv4 address shown in Remote Control Options on that
+controller and enter the IPv4 address shown on the Remote Control tab on that
 kiosk. Select Send Secure Request. The kiosk contacts the controller using its
 normal outbound discovery connection, receives the encrypted key exchange, and
 asks someone at the kiosk to approve the request. No code is required for this
@@ -154,7 +158,10 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Kiosk Controller version 1.11.0 fixes dashboard restoration from the fish-and-
+Kiosk Controller version 1.12.0 adds Software Downloads, master kiosk-connection
+mirroring and command relay for non-master installations, the active master PC
+name beside the status lights, and a live three-POS workstation count. Kiosk
+Controller version 1.11.0 fixes dashboard restoration from the fish-and-
 springs system-tray icon and adds guest-assistance status to each kiosk row.
 Version 1.10.2 adds system-tray operation so minimizing or closing the dashboard
 does not stop remote kiosk service. Version 1.10.1 enlarges
@@ -190,7 +197,7 @@ flashing until the call is cleared at the kiosk.
 
 Selecting Close in a kiosk section asks whether to use Staff Closure or Business
 Closure. Staff Closure displays the normal station-closed screen and reports red.
-Business Closure starts the black business-hours screen and reports blue. Open
+Business Closure starts the Business Closed video and reports blue. Open
 clears either manually selected closure, while the configured business schedule
 continues to apply.
 
@@ -198,13 +205,21 @@ Reload LilyPad, Staff Menu, Check for Updates, Minimize, and Exit Application
 remain at the bottom of the sidebar. Minimize and normal close commands send the
 application to the Windows notification area. Double-click its orange-fish tray icon
 to restore it. Only the passcode-protected Exit Application command closes
-Firefox and stops Mullet Hop POS. Ctrl + Alt + M opens the Staff Menu. The Staff Menu
+Firefox and stops Mullet Hop POS. Firefox runs with its normal browser controls visible.
+If Firefox or its active tab crashes, a red message appears above the browser and
+directs staff to Reload LilyPad. Reload LilyPad closes every tab in the dedicated
+Firefox session and opens one fresh window at the LilyPad home page. Ctrl + Alt + M
+opens the Staff Menu. The Staff Menu
 requires the application's 4-8 digit passcode. The Staff Menu finds
 kiosks already paired with the on-site Kiosk Controller, remembers the controller
 address and pairing key, and saves each kiosk's identity and Kiosk 1-4 position.
 Selecting a machine already assigned elsewhere moves or swaps it automatically.
 
-Version 1.4.1 retains the former POS Controller's internal package identity,
+Version 1.5.0 keeps Firefox controls visible, detects Firefox crashes, and makes
+Reload LilyPad terminate the dedicated Firefox session, clear every tab, and
+open one fresh LilyPad home page. Three POS workstations can simultaneously see
+and control the same four kiosk assignments. Version 1.4.1 retains the former
+POS Controller's internal package identity,
 automatic-update channel, passcode, controller connection, known machines, and
 assignments. Existing installations therefore update in place and their old
 Start Menu shortcut is renamed automatically. See the README inside the
@@ -221,7 +236,8 @@ Ctrl + Alt + M
 Enter the staff password, then select "Open Staff Settings." The menu provides:
 
 Settings use a left-side navigation rail with Connection & Updates, Date & Time,
-Appearance, Waiver Station, Business Hours, and Ads & Staff Tools pages.
+Appearance, Waiver Station, Business Hours, Advertisements, Remote Control, and
+Misc pages.
 
 * Exit Kiosk.
 * Check whether the computer can reach the live waiver website.
@@ -233,6 +249,11 @@ Appearance, Waiver Station, Business Hours, and Ads & Staff Tools pages.
 * Schedule Dark mode for selected days and a selected time. When the underlying
   appearance is Light, the kiosk remains dark overnight and returns to Light or
   Auto at the next configured business opening.
+* Set opening, Last Jump Time Sold, and closing times for every business day.
+* Start the Business Closed video automatically at Last Jump Time Sold, optionally
+  black out the screen at closing, and keep the pre-opening screensaver window.
+* Preview the Staff Closure screen or the next-business-day closed video. Press
+  Esc to leave the closed-video preview and return to Staff Settings.
 * Add, edit, enable, disable, or delete scheduled JPG advertisements.
 * View kiosk-manager advertisement sync status and progress, see the last
   successful sync time, or start a manual sync.
@@ -243,19 +264,19 @@ Appearance, Waiver Station, Business Hours, and Ads & Staff Tools pages.
 * Select how many minutes of guest inactivity pass before the video screensaver
   begins. The default is 3 minutes, and the saved delay is retained after the
   kiosk or computer restarts.
-* Enable automatic business hours and set opening and closing times independently
+* Enable automatic business hours and set opening, Last Jump Time Sold, and
+  closing times independently
   for every day of the week. Automatic business hours are off until staff enable
   them, so updating an existing kiosk does not unexpectedly close it.
-* Select how long the looping Business Closed video remains visible before the
-  display becomes fully black. The default is 5 minutes. Its live overlay says
+* Choose whether the looping Business Closed video begins at Last Jump Time Sold
+  and whether the display becomes fully black at closing. The live message says
   that no jump times remain today and shows the next opening day and time from
   the saved Business Hours schedule.
 * Select how many minutes before the next scheduled opening the normal video
   screensaver begins. The default is 30 minutes; selecting 0 disables the
   pre-opening screensaver.
-* Start an immediate temporary blackout. The display ignores ordinary keyboard,
-  mouse, and touch input until staff use Ctrl + Alt + M, enter the
-  password, and select Return to Kiosk.
+* Start the Business Closed video immediately. It remains active until staff use
+  Ctrl + Alt + M, enter the password, and select Return to Kiosk.
 * Change the staff password after verifying the current password.
 * Return to the kiosk and load a clean waiver starting page.
 
@@ -283,7 +304,7 @@ when the new password has been saved successfully.
 SCHEDULED ADVERTISEMENTS
 ------------------------
 
-Open Staff Settings and select "Manage Advertisements." Each advertisement can:
+Open Staff Settings and select the "Advertisements" tab. Each advertisement can:
 
 * Upload a JPG or JPEG image up to 25 MB.
 * Run once between a specific starting and ending date and time.

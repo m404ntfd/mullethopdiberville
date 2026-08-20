@@ -234,6 +234,7 @@ internal enum BusinessHoursMode
 {
     Disabled,
     Open,
+    LastJumpSold,
     Closed,
     PreOpening
 }
@@ -262,13 +263,27 @@ internal static class BusinessHoursCalculator
         return null;
     }
 
+    public static DateTime? FindNextBusinessDayOpening(KioskSettings settings, DateTime now)
+    {
+        for (var dayOffset = 1; dayOffset <= 7; dayOffset++)
+        {
+            var date = now.Date.AddDays(dayOffset);
+            var schedule = settings.BusinessHours.First(item => item.Day == date.DayOfWeek);
+            if (schedule.IsOpen)
+                return date + schedule.OpenTime;
+        }
+
+        return null;
+    }
+
     public static BusinessHoursStatus Evaluate(KioskSettings settings, DateTime now)
     {
         if (!settings.BusinessHoursEnabled)
             return new BusinessHoursStatus(BusinessHoursMode.Disabled, null, null);
 
         var today = settings.BusinessHours.First(schedule => schedule.Day == now.DayOfWeek);
-        if (today.IsOpen && now.TimeOfDay >= today.OpenTime && now.TimeOfDay < today.CloseTime)
+        if (today.IsOpen && now.TimeOfDay >= today.OpenTime &&
+            now.TimeOfDay < today.LastJumpTimeSold)
         {
             return new BusinessHoursStatus(
                 BusinessHoursMode.Open,
@@ -277,6 +292,15 @@ internal static class BusinessHoursCalculator
         }
 
         var nextOpening = FindNextOpening(settings, now);
+
+        if (today.IsOpen && now.TimeOfDay >= today.LastJumpTimeSold &&
+            now.TimeOfDay < today.CloseTime)
+        {
+            return new BusinessHoursStatus(
+                BusinessHoursMode.LastJumpSold,
+                nextOpening,
+                now.Date + today.CloseTime);
+        }
 
         if (nextOpening.HasValue && settings.PreOpeningScreensaverMinutes > 0 &&
             nextOpening.Value - now <=
@@ -347,9 +371,8 @@ internal sealed partial class KioskForm : Form
     private DateTime? _previewStartedUtc;
     private string? _dateTimePreviewScriptId;
     private string? _waiverPageScriptId;
-    private DateTime? _businessClosedPeriodStartedUtc;
-    private string? _businessClosedPeriodKey;
     private long? _businessClosedDisplayedOpeningTicks;
+    private bool _businessClosedVideoPlaying;
     private long? _dismissedPreOpeningTicks;
     private DateTime? _preOpeningScreensaverOpeningTime;
     private bool _lastDarkTheme;
@@ -1151,7 +1174,10 @@ internal sealed partial class KioskForm : Form
     {
         if (_manualBusinessBlackout)
         {
-            ShowBlackoutPage(manual: true);
+            ShowBusinessClosedPage(
+                BusinessHoursCalculator.FindNextOpening(_settings, DateTime.Now),
+                playVideo: true,
+                manual: true);
             return;
         }
 
@@ -1171,27 +1197,27 @@ internal sealed partial class KioskForm : Form
 
         if (status.Mode == BusinessHoursMode.PreOpening && !preOpeningWasDismissed)
         {
-            ResetBusinessClosedPeriod();
+            ResetBusinessClosedDisplay();
             ShowScreensaver(preOpening: true, openingTime: status.NextOpening);
+            return;
+        }
+
+        if (status.Mode == BusinessHoursMode.LastJumpSold)
+        {
+            ShowBusinessClosedPage(status.NextOpening, _settings.ShowClosedVideo);
             return;
         }
 
         if (status.Mode == BusinessHoursMode.Closed)
         {
-            EnsureBusinessClosedPeriod(status, now);
-            if (DateTime.UtcNow - _businessClosedPeriodStartedUtc!.Value >=
-                TimeSpan.FromMinutes(_settings.BusinessClosedMessageMinutes))
-            {
+            if (_settings.BlackoutAtClosingTime)
                 ShowBlackoutPage();
-            }
             else
-            {
-                ShowBusinessClosedPage(status.NextOpening);
-            }
+                ShowBusinessClosedPage(status.NextOpening, _settings.ShowClosedVideo);
             return;
         }
 
-        ResetBusinessClosedPeriod();
+        ResetBusinessClosedDisplay();
         SetBrowserInputEnabled(true);
         _webView.CoreWebView2.Navigate(_settings.StartUrl);
         UpdateAssistancePanelState();
@@ -1215,7 +1241,7 @@ internal sealed partial class KioskForm : Form
             if (status.Mode is BusinessHoursMode.Disabled or BusinessHoursMode.Open ||
                 preOpeningWasDismissed)
             {
-                ResetBusinessClosedPeriod();
+                ResetBusinessClosedDisplay();
                 if (status.Mode == BusinessHoursMode.Open)
                     _dismissedPreOpeningTicks = null;
 
@@ -1236,7 +1262,7 @@ internal sealed partial class KioskForm : Form
 
             if (status.Mode == BusinessHoursMode.PreOpening)
             {
-                ResetBusinessClosedPeriod();
+                ResetBusinessClosedDisplay();
                 if (_showingScreensaver)
                 {
                     _preOpeningScreensaverActive = true;
@@ -1249,33 +1275,26 @@ internal sealed partial class KioskForm : Form
                 return;
             }
 
-            var startedNewClosedPeriod = EnsureBusinessClosedPeriod(status, now);
+            var shouldBlackOut = status.Mode == BusinessHoursMode.Closed &&
+                _settings.BlackoutAtClosingTime;
+            var shouldPlayVideo = _settings.ShowClosedVideo;
             var displayedOpeningChanged = _showingBusinessClosedPage &&
                 _businessClosedDisplayedOpeningTicks != status.NextOpening?.Ticks;
-            if (displayedOpeningChanged)
-            {
-                ShowBusinessClosedPage(status.NextOpening);
-                KioskLog.Write("The Business Closed reopening time was refreshed after a schedule change.");
-                return;
-            }
+            var displayModeChanged = _showingBusinessClosedPage &&
+                _businessClosedVideoPlaying != shouldPlayVideo;
 
-            if (startedNewClosedPeriod && !_showingBusinessClosedPage && !_showingBlackout)
-            {
-                await ResetForNextGuestAsync(
-                    "business hours closed", showStatus: false);
-                return;
-            }
-
-            var closedFor = DateTime.UtcNow - _businessClosedPeriodStartedUtc!.Value;
-            if (closedFor >= TimeSpan.FromMinutes(_settings.BusinessClosedMessageMinutes))
+            if (shouldBlackOut)
             {
                 if (!_showingBlackout)
                     ShowBlackoutPage();
+                return;
             }
-            else if (!_showingBusinessClosedPage)
+
+            if (!_showingBusinessClosedPage || displayedOpeningChanged || displayModeChanged)
             {
-                await ResetForNextGuestAsync(
-                    "business closed page restored", showStatus: false);
+                ShowBusinessClosedPage(status.NextOpening, shouldPlayVideo);
+                if (displayedOpeningChanged)
+                    KioskLog.Write("The Business Closed reopening time was refreshed after a schedule change.");
             }
         }
         catch (Exception ex)
@@ -1289,27 +1308,10 @@ internal sealed partial class KioskForm : Form
         }
     }
 
-    private bool EnsureBusinessClosedPeriod(BusinessHoursStatus status, DateTime now)
+    private void ResetBusinessClosedDisplay()
     {
-        var key = status.NextOpening.HasValue
-            ? status.NextOpening.Value.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            : "no-scheduled-opening";
-        if (string.Equals(_businessClosedPeriodKey, key, StringComparison.Ordinal) &&
-            _businessClosedPeriodStartedUtc.HasValue)
-            return false;
-
-        _businessClosedPeriodKey = key;
-        _businessClosedPeriodStartedUtc = DateTime.UtcNow;
-        _dismissedPreOpeningTicks = null;
-        KioskLog.Write("Business hours closed at " + now.ToString("O") + ".");
-        return true;
-    }
-
-    private void ResetBusinessClosedPeriod()
-    {
-        _businessClosedPeriodKey = null;
-        _businessClosedPeriodStartedUtc = null;
         _businessClosedDisplayedOpeningTicks = null;
+        _businessClosedVideoPlaying = false;
     }
 
     private void SetBrowserInputEnabled(bool enabled)
@@ -1317,11 +1319,15 @@ internal sealed partial class KioskForm : Form
         _webView.Enabled = enabled;
     }
 
-    private void ShowBusinessClosedPage(DateTime? nextOpening)
+    private void ShowBusinessClosedPage(
+        DateTime? nextOpening,
+        bool playVideo = true,
+        bool manual = false)
     {
         if (!_browserReady)
             return;
 
+        _manualBusinessBlackout = manual || _manualBusinessBlackout;
         SetBrowserInputEnabled(true);
         _showingThankYouPage = false;
         _showingClosedPage = false;
@@ -1331,31 +1337,77 @@ internal sealed partial class KioskForm : Form
         _preOpeningScreensaverActive = false;
         _preOpeningScreensaverOpeningTime = null;
         _businessClosedDisplayedOpeningTicks = nextOpening?.Ticks;
+        _businessClosedVideoPlaying = playVideo;
         _completionTimer.Stop();
         _retryTimer.Stop();
         HideBanner();
         UpdateAssistancePanelState();
-        _webView.CoreWebView2.NavigateToString(BuildBusinessClosedHtml(nextOpening));
-        KioskLog.Write("The scheduled Business Closed page was displayed.");
+        _webView.CoreWebView2.NavigateToString(
+            BuildBusinessClosedHtml(nextOpening, playVideo));
+        KioskLog.Write(playVideo
+            ? "The Business Closed video was displayed."
+            : "The static Business Closed page was displayed.");
     }
 
     private async Task PreviewBusinessClosedOverlayAsync()
     {
-        const int previewSeconds = 10;
-        var nextOpening = BusinessHoursCalculator.FindNextOpening(
+        var nextOpening = BusinessHoursCalculator.FindNextBusinessDayOpening(
             _settings,
             GetEffectiveNow());
+        await ShowStaffPreviewOverlayAsync(
+            BuildBusinessClosedHtml(nextOpening, playVideo: true, preview: true),
+            "BUSINESS CLOSED VIDEO PREVIEW — Press ESC to return to Staff Settings",
+            waitForEscape: true);
+    }
+
+    private async Task PreviewStationClosureOverlayAsync()
+    {
+        await ShowStaffPreviewOverlayAsync(
+            BuildStationClosedHtml(connectionError: false),
+            "STAFF CLOSURE SCREEN PREVIEW — Returning to Staff Settings in 10 seconds",
+            waitForEscape: false);
+    }
+
+    private async Task ShowStaffPreviewOverlayAsync(
+        string html,
+        string bannerText,
+        bool waitForEscape)
+    {
         using var previewWebView = new WebView2
         {
             Dock = DockStyle.Fill,
             DefaultBackgroundColor = Color.White,
             TabStop = false
         };
+        using var previewLabel = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 64,
+            Text = bannerText,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font("Segoe UI", 15, FontStyle.Bold),
+            ForeColor = Color.White,
+            BackColor = Color.FromArgb(117, 68, 154),
+            Padding = new Padding(18, 8, 18, 8)
+        };
+        var exitRequested = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        KeyEventHandler escapeHandler = (_, e) =>
+        {
+            if (!waitForEscape || e.KeyCode != Keys.Escape)
+                return;
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            exitRequested.TrySetResult(true);
+        };
 
         Controls.Add(previewWebView);
+        Controls.Add(previewLabel);
         previewWebView.BringToFront();
+        previewLabel.BringToFront();
         TopMost = true;
         Activate();
+        KeyDown += escapeHandler;
 
         try
         {
@@ -1381,6 +1433,13 @@ internal sealed partial class KioskForm : Form
             core.DownloadStarting += (_, e) => e.Cancel = true;
             core.PermissionRequested += (_, e) =>
                 e.State = CoreWebView2PermissionState.Deny;
+            core.WebMessageReceived += (_, e) =>
+            {
+                if (waitForEscape &&
+                    string.Equals(e.TryGetWebMessageAsString(),
+                        "business-closed-preview-exit", StringComparison.Ordinal))
+                    exitRequested.TrySetResult(true);
+            };
 
             var navigationCompleted = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1392,18 +1451,20 @@ internal sealed partial class KioskForm : Form
                     navigationCompleted.TrySetException(new InvalidOperationException(
                         "The Business Closed preview page could not be displayed."));
             };
-            core.NavigateToString(
-                BuildBusinessClosedHtml(nextOpening, previewSeconds));
+            core.NavigateToString(html);
             await navigationCompleted.Task.WaitAsync(TimeSpan.FromSeconds(15));
 
-            KioskLog.Write(
-                "The staff Business Closed preview was displayed over the current kiosk page.");
-            await Task.Delay(TimeSpan.FromSeconds(previewSeconds));
-            KioskLog.Write(
-                "The staff Business Closed preview ended and the previous kiosk page was restored.");
+            KioskLog.Write("A staff preview was displayed over the current kiosk page.");
+            if (waitForEscape)
+                await exitRequested.Task;
+            else
+                await Task.Delay(TimeSpan.FromSeconds(10));
+            KioskLog.Write("The staff preview ended and Staff Settings was restored.");
         }
         finally
         {
+            KeyDown -= escapeHandler;
+            Controls.Remove(previewLabel);
             Controls.Remove(previewWebView);
             if (!_allowExit)
                 TopMost = false;
@@ -1595,7 +1656,8 @@ internal sealed partial class KioskForm : Form
 
     private string BuildBusinessClosedHtml(
         DateTime? nextOpening,
-        int? previewSeconds = null)
+        bool playVideo = true,
+        bool preview = false)
     {
         var backgroundUrl = $"https://{ScreensaverVirtualHost}/{KioskBackgroundFileName}";
         var videoUrl = $"https://{ScreensaverVirtualHost}/{BusinessClosedVideoFileName}";
@@ -1615,30 +1677,22 @@ internal sealed partial class KioskForm : Form
                 "</strong></section>"
             : "<section class=\"opening\"><span class=\"opening-label\">NEXT OPENING</span>" +
                 "<strong class=\"opening-day opening-unavailable\">Please check with the front desk.</strong></section>";
-        var previewMarkup = previewSeconds.HasValue
-            ? "<div class=\"business-preview-banner\" role=\"status\" aria-live=\"polite\">" +
-                "THIS IS A PREVIEW &mdash; Returning to Staff Settings in " +
-                "<strong id=\"business-preview-countdown\">" + previewSeconds.Value +
-                "</strong> seconds.</div>"
+        var videoMarkup = playVideo
+            ? "<video class=\"video-background\" autoplay loop muted playsinline preload=\"auto\" " +
+                "poster=\"" + backgroundUrl + "\" aria-hidden=\"true\" " +
+                "onerror=\"this.style.display='none'\">" +
+                "<source src=\"" + videoUrl + "\" type=\"video/mp4\"></video>"
             : string.Empty;
-        var previewBodyClass = string.Join(' ', new[]
-        {
-            previewSeconds.HasValue ? "business-preview-mode" : string.Empty,
-            _lastDarkTheme ? "dark-theme" : string.Empty
-        }.Where(value => value.Length > 0));
-        var previewScript = previewSeconds.HasValue
-            ? $$"""
+        var previewBodyClass = _lastDarkTheme ? "dark-theme" : string.Empty;
+        var previewScript = preview
+            ? """
               <script>
-                (() => {
-                  let remaining = {{previewSeconds.Value}};
-                  const countdown = document.getElementById('business-preview-countdown');
-                  const tick = () => {
-                    remaining = Math.max(0, remaining - 1);
-                    if (countdown) countdown.textContent = String(remaining);
-                    if (remaining > 0) window.setTimeout(tick, 1000);
-                  };
-                  window.setTimeout(tick, 1000);
-                })();
+                window.addEventListener('keydown', event => {
+                  if (event.key !== 'Escape') return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  window.chrome.webview.postMessage('business-closed-preview-exit');
+                }, true);
               </script>
               """
             : string.Empty;
@@ -1842,13 +1896,8 @@ internal sealed partial class KioskForm : Form
               </style>
             </head>
             <body class="{{previewBodyClass}}">
-              <video class="video-background" autoplay loop muted playsinline preload="auto"
-                     poster="{{backgroundUrl}}" aria-hidden="true"
-                     onerror="this.style.display='none'">
-                <source src="{{videoUrl}}" type="video/mp4">
-              </video>
+              {{videoMarkup}}
               <div class="video-shade" aria-hidden="true"></div>
-              {{previewMarkup}}
               <main class="card" aria-labelledby="business-closed-heading">
                 <div class="stripe"></div>
                 <div class="content">
@@ -2533,6 +2582,7 @@ internal sealed partial class KioskForm : Form
                             _settings,
                             _previewDateTime.HasValue ? GetEffectiveNow() : null,
                             progress => SyncAdvertisementsFromControllerAsync(progress),
+                            PreviewStationClosureOverlayAsync,
                             PreviewBusinessClosedOverlayAsync);
                         var settingsResult = settingsDialog.ShowDialog(this);
                         await ApplyKioskThemeIfChangedAsync(force: true);
@@ -2584,9 +2634,9 @@ internal sealed partial class KioskForm : Form
                                         "Staff Settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
                                 }
                                 continue;
-                            case StaffSettingsAction.StartBusinessBlackout:
+                            case StaffSettingsAction.StartBusinessClosure:
                                 await SetBusinessClosedAsync(true, "staff settings");
-                                KioskLog.Write("Staff started an immediate business-hours blackout.");
+                                KioskLog.Write("Staff started the Business Closed video.");
                                 return;
                         }
                     }
@@ -4010,6 +4060,7 @@ internal sealed class KioskBusinessDayHours
     public DayOfWeek Day { get; set; }
     public bool IsOpen { get; set; } = true;
     public TimeSpan OpenTime { get; set; } = TimeSpan.FromHours(10);
+    public TimeSpan LastJumpTimeSold { get; set; }
     public TimeSpan CloseTime { get; set; } = TimeSpan.FromHours(22);
 
     public static DayOfWeek[] OrderedDays { get; } =
@@ -4024,17 +4075,24 @@ internal sealed class KioskBusinessDayHours
     ];
 
     public static List<KioskBusinessDayHours> CreateDefaults() =>
-        OrderedDays.Select(day => new KioskBusinessDayHours { Day = day }).ToList();
+        OrderedDays.Select(day => new KioskBusinessDayHours
+        {
+            Day = day,
+            LastJumpTimeSold = TimeSpan.FromHours(21)
+        }).ToList();
 
     public void Normalize()
     {
         OpenTime = NormalizeTime(OpenTime);
+        LastJumpTimeSold = NormalizeTime(LastJumpTimeSold);
         CloseTime = NormalizeTime(CloseTime);
         if (CloseTime <= OpenTime)
         {
             OpenTime = TimeSpan.FromHours(10);
             CloseTime = TimeSpan.FromHours(22);
         }
+        if (LastJumpTimeSold <= OpenTime || LastJumpTimeSold > CloseTime)
+            LastJumpTimeSold = CloseTime;
     }
 
     private static TimeSpan NormalizeTime(TimeSpan value)
@@ -4059,6 +4117,9 @@ internal sealed class KioskSettings
     public bool StationClosed { get; set; }
     public bool ManualBusinessBlackout { get; set; }
     public bool BusinessHoursEnabled { get; set; }
+    public bool ShowClosedVideo { get; set; } = true;
+    public bool BlackoutAtClosingTime { get; set; } = true;
+    // Retained so older settings and controllers can still be read during upgrades.
     public int BusinessClosedMessageMinutes { get; set; } = 5;
     public int PreOpeningScreensaverMinutes { get; set; } = 30;
     public List<KioskBusinessDayHours> BusinessHours { get; set; } =
@@ -4196,7 +4257,11 @@ internal sealed class KioskSettings
         BusinessHours = KioskBusinessDayHours.OrderedDays
             .Select(day => savedBusinessHours.TryGetValue(day, out var schedule)
                 ? schedule
-                : new KioskBusinessDayHours { Day = day })
+                : new KioskBusinessDayHours
+                {
+                    Day = day,
+                    LastJumpTimeSold = TimeSpan.FromHours(21)
+                })
             .ToList();
         foreach (var schedule in BusinessHours)
             schedule.Normalize();
@@ -4341,7 +4406,7 @@ internal enum StaffSettingsAction
     UseLiveDateTime,
     PreviewThankYouPage,
     ToggleStationClosed,
-    StartBusinessBlackout
+    StartBusinessClosure
 }
 
 internal sealed class StaffSettingsDialog : Form
@@ -4352,6 +4417,7 @@ internal sealed class StaffSettingsDialog : Form
     private readonly string _connectionTestUrl;
     private readonly Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>>
         _syncAdvertisements;
+    private readonly Func<Task> _previewStaffClosure;
     private readonly Func<Task> _previewBusinessClosed;
     private readonly Button _connectionButton = new();
     private readonly Label _connectionResult = new();
@@ -4362,7 +4428,8 @@ internal sealed class StaffSettingsDialog : Form
     private readonly NumericUpDown _screensaverMinutes = new();
     private readonly Button _screensaverSaveButton = new();
     private readonly CheckBox _businessHoursEnabled = new();
-    private readonly NumericUpDown _businessClosedMinutes = new();
+    private readonly CheckBox _showClosedVideo = new();
+    private readonly CheckBox _blackoutAtClosingTime = new();
     private readonly NumericUpDown _preOpeningScreensaverMinutes = new();
     private readonly Button _businessHoursSaveButton = new();
     private readonly Label _businessHoursStatus = new();
@@ -4374,7 +4441,8 @@ internal sealed class StaffSettingsDialog : Form
     private readonly Dictionary<DayOfWeek, CheckBox> _scheduledDarkDays = [];
     private bool IsDarkTheme => KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
     private readonly Dictionary<DayOfWeek,
-        (CheckBox IsOpen, DateTimePicker Opens, DateTimePicker Closes)> _businessDayControls = [];
+        (CheckBox IsOpen, DateTimePicker Opens, DateTimePicker LastJump, DateTimePicker Closes)>
+        _businessDayControls = [];
 
     public StaffSettingsAction SelectedAction { get; private set; }
     public DateTime SelectedDateTime => _datePicker.Value.Date + _timePicker.Value.TimeOfDay;
@@ -4383,10 +4451,12 @@ internal sealed class StaffSettingsDialog : Form
         KioskSettings settings,
         DateTime? activePreview,
         Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>> syncAdvertisements,
+        Func<Task> previewStaffClosure,
         Func<Task> previewBusinessClosed)
     {
         _settings = settings;
         _syncAdvertisements = syncAdvertisements;
+        _previewStaffClosure = previewStaffClosure;
         _previewBusinessClosed = previewBusinessClosed;
         _connectionTestUrl = settings.StartUrl;
         Text = "Mullet Hop Staff Settings";
@@ -4441,13 +4511,24 @@ internal sealed class StaffSettingsDialog : Form
             BackColor = Color.White,
             Padding = new Padding(8)
         };
-        var staffToolsTab = new TabPage("Ads & Staff Tools")
+        var advertisementsTab = new TabPage("Advertisements")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
+        var remoteControlTab = new TabPage("Remote Control")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
+        var miscTab = new TabPage("Misc")
         {
             BackColor = Color.White,
             Padding = new Padding(8)
         };
         _settingsTabs.TabPages.AddRange([
-            connectionTab, dateTimeTab, appearanceTab, stationTab, businessHoursTab, staffToolsTab]);
+            connectionTab, dateTimeTab, appearanceTab, stationTab, businessHoursTab,
+            advertisementsTab, remoteControlTab, miscTab]);
         _settingsTabs.SelectedIndex = Math.Clamp(
             _lastSelectedTabIndex, 0, _settingsTabs.TabPages.Count - 1);
         _settingsTabs.SelectedIndexChanged += (_, _) =>
@@ -4714,27 +4795,10 @@ internal sealed class StaffSettingsDialog : Form
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
         };
         exitButton.Click += (_, _) => Complete(StaffSettingsAction.ExitToWindows);
-        var advertisementsButton = new Button
-        {
-            Text = "Manage Advertisements",
-            Bounds = new Rectangle(20, 45, 250, 48),
-            BackColor = Color.FromArgb(117, 68, 154),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 10, FontStyle.Bold)
-        };
-        advertisementsButton.Click += (_, _) =>
-        {
-            using var advertisementsDialog = new AdvertisementManagerDialog(
-                _settings,
-                activePreview.HasValue ? SelectedDateTime : null,
-                _syncAdvertisements);
-            advertisementsDialog.ShowDialog(this);
-        };
         var thankYouPreviewButton = new Button
         {
             Text = "Preview Thank-You Page",
-            Bounds = new Rectangle(290, 45, 250, 48),
+            Bounds = new Rectangle(20, 45, 250, 48),
             BackColor = Color.FromArgb(105, 210, 236),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
@@ -4752,19 +4816,6 @@ internal sealed class StaffSettingsDialog : Form
         {
             using var passwordDialog = new StaffPasswordChangeDialog(_settings);
             passwordDialog.ShowDialog(this);
-        };
-        var remoteManagementButton = new Button
-        {
-            Text = "Remote Control Options",
-            Bounds = new Rectangle(290, 115, 250, 48),
-            BackColor = Color.FromArgb(245, 130, 32),
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
-        };
-        remoteManagementButton.Click += (_, _) =>
-        {
-            using var remoteDialog = new RemoteManagementSettingsDialog(_settings);
-            remoteDialog.ShowDialog(this);
         };
         var closedPageStatus = new Label
         {
@@ -4891,24 +4942,30 @@ internal sealed class StaffSettingsDialog : Form
         weeklyHoursGroup.Controls.AddRange([
             new Label
             {
-                Text = "Day", AutoSize = false, Bounds = new Rectangle(18, 29, 92, 22),
+                Text = "Day", AutoSize = false, Bounds = new Rectangle(10, 29, 72, 22),
                 ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold)
             },
             new Label
             {
-                Text = "Open", AutoSize = false, Bounds = new Rectangle(112, 29, 58, 22),
+                Text = "Open", AutoSize = false, Bounds = new Rectangle(77, 29, 44, 22),
                 ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold),
                 TextAlign = ContentAlignment.TopCenter
             },
             new Label
             {
-                Text = "Opening time", AutoSize = false, Bounds = new Rectangle(184, 29, 142, 22),
+                Text = "Opening", AutoSize = false, Bounds = new Rectangle(120, 29, 120, 22),
                 ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold),
                 TextAlign = ContentAlignment.TopCenter
             },
             new Label
             {
-                Text = "Closing time", AutoSize = false, Bounds = new Rectangle(348, 29, 142, 22),
+                Text = "Last Jump Time Sold", AutoSize = false, Bounds = new Rectangle(250, 29, 145, 22),
+                ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                TextAlign = ContentAlignment.TopCenter
+            },
+            new Label
+            {
+                Text = "Closing", AutoSize = false, Bounds = new Rectangle(405, 29, 140, 22),
                 ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold),
                 TextAlign = ContentAlignment.TopCenter
             }
@@ -4922,26 +4979,28 @@ internal sealed class StaffSettingsDialog : Form
             var dayLabel = new Label
             {
                 Text = day.ToString(), AutoSize = false,
-                Bounds = new Rectangle(18, rowY + 3, 92, 25),
+                Bounds = new Rectangle(10, rowY + 3, 72, 25),
                 ForeColor = Color.FromArgb(16, 24, 32)
             };
             var isOpen = new CheckBox
             {
                 Checked = schedule.IsOpen,
                 AutoSize = false,
-                Bounds = new Rectangle(128, rowY + 3, 24, 24)
+                Bounds = new Rectangle(88, rowY + 3, 24, 24)
             };
-            var opens = CreateBusinessTimePicker(schedule.OpenTime, 184, rowY);
-            var closes = CreateBusinessTimePicker(schedule.CloseTime, 348, rowY);
-            _businessDayControls[day] = (isOpen, opens, closes);
+            var opens = CreateBusinessTimePicker(schedule.OpenTime, 120, rowY, 120);
+            var lastJump = CreateBusinessTimePicker(schedule.LastJumpTimeSold, 250, rowY, 145);
+            var closes = CreateBusinessTimePicker(schedule.CloseTime, 405, rowY, 140);
+            _businessDayControls[day] = (isOpen, opens, lastJump, closes);
             isOpen.CheckedChanged += (_, _) =>
             {
                 UpdateBusinessHoursControlState();
                 _businessHoursSaveButton.Text = "Save Business Hours";
             };
             opens.ValueChanged += (_, _) => _businessHoursSaveButton.Text = "Save Business Hours";
+            lastJump.ValueChanged += (_, _) => _businessHoursSaveButton.Text = "Save Business Hours";
             closes.ValueChanged += (_, _) => _businessHoursSaveButton.Text = "Save Business Hours";
-            weeklyHoursGroup.Controls.AddRange([dayLabel, isOpen, opens, closes]);
+            weeklyHoursGroup.Controls.AddRange([dayLabel, isOpen, opens, lastJump, closes]);
         }
 
         var automationGroup = new GroupBox
@@ -4951,28 +5010,23 @@ internal sealed class StaffSettingsDialog : Form
             ForeColor = Color.FromArgb(117, 68, 154),
             Bounds = new Rectangle(15, 353, 590, 118)
         };
-        var closedMinutesLabel = new Label
-        {
-            Text = "Show Business Closed screen for:", AutoSize = false,
-            Bounds = new Rectangle(18, 30, 225, 28),
-            ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
-        };
-        _businessClosedMinutes.Minimum = 1;
-        _businessClosedMinutes.Maximum = 240;
-        _businessClosedMinutes.Value = Math.Clamp(_settings.BusinessClosedMessageMinutes, 1, 240);
-        _businessClosedMinutes.TextAlign = HorizontalAlignment.Center;
-        _businessClosedMinutes.Bounds = new Rectangle(246, 29, 70, 30);
-        _businessClosedMinutes.ValueChanged += (_, _) =>
+        _showClosedVideo.Text = "Show Closed Video";
+        _showClosedVideo.Checked = _settings.ShowClosedVideo;
+        _showClosedVideo.AutoSize = true;
+        _showClosedVideo.ForeColor = Color.FromArgb(16, 24, 32);
+        _showClosedVideo.Location = new Point(18, 30);
+        _showClosedVideo.CheckedChanged += (_, _) =>
             _businessHoursSaveButton.Text = "Save Business Hours";
-        var closedMinutesSuffix = new Label
-        {
-            Text = "minutes, then black out", AutoSize = false,
-            Bounds = new Rectangle(324, 30, 200, 28),
-            ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
-        };
+        _blackoutAtClosingTime.Text = "Blackout at closing time";
+        _blackoutAtClosingTime.Checked = _settings.BlackoutAtClosingTime;
+        _blackoutAtClosingTime.AutoSize = true;
+        _blackoutAtClosingTime.ForeColor = Color.FromArgb(16, 24, 32);
+        _blackoutAtClosingTime.Location = new Point(300, 30);
+        _blackoutAtClosingTime.CheckedChanged += (_, _) =>
+            _businessHoursSaveButton.Text = "Save Business Hours";
         var preOpeningLabel = new Label
         {
-            Text = "Start the screensaver:", AutoSize = false,
+            Text = "Start the screensaver before opening:", AutoSize = false,
             Bounds = new Rectangle(18, 72, 225, 28),
             ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
         };
@@ -4991,11 +5045,11 @@ internal sealed class StaffSettingsDialog : Form
             ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
         };
         automationGroup.Controls.AddRange([
-            closedMinutesLabel, _businessClosedMinutes, closedMinutesSuffix,
+            _showClosedVideo, _blackoutAtClosingTime,
             preOpeningLabel, _preOpeningScreensaverMinutes, preOpeningSuffix]);
 
         _businessHoursSaveButton.Text = "Save Business Hours";
-        _businessHoursSaveButton.Bounds = new Rectangle(20, 478, 180, 38);
+        _businessHoursSaveButton.Bounds = new Rectangle(20, 478, 150, 34);
         _businessHoursSaveButton.BackColor = Color.FromArgb(118, 196, 66);
         _businessHoursSaveButton.FlatStyle = FlatStyle.Flat;
         _businessHoursSaveButton.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
@@ -5003,8 +5057,8 @@ internal sealed class StaffSettingsDialog : Form
 
         var previewClosedButton = new Button
         {
-            Text = "Preview Closed Screen",
-            Bounds = new Rectangle(210, 478, 180, 38),
+            Text = "Preview Staff Closure Screen",
+            Bounds = new Rectangle(180, 478, 195, 34),
             BackColor = Color.FromArgb(105, 210, 236),
             ForeColor = Color.FromArgb(16, 24, 32),
             FlatStyle = FlatStyle.Flat,
@@ -5019,16 +5073,16 @@ internal sealed class StaffSettingsDialog : Form
                 TopMost = false;
                 Opacity = 0;
                 await Task.Yield();
-                await _previewBusinessClosed();
+                await _previewStaffClosure();
             }
             catch (Exception ex)
             {
                 Opacity = previousOpacity;
                 TopMost = true;
-                KioskLog.Write("Business Closed preview error: " +
+                KioskLog.Write("Staff closure preview error: " +
                     ex.GetType().Name + " - " + ex.Message);
                 MessageBox.Show(this,
-                    "The Business Closed preview could not be displayed.\n\n" + ex.Message,
+                    "The Staff Closure preview could not be displayed.\n\n" + ex.Message,
                     "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally
@@ -5041,41 +5095,95 @@ internal sealed class StaffSettingsDialog : Form
             }
         };
 
-        var startBlackoutButton = new Button
+        var previewBusinessClosedButton = new Button
         {
-            Text = "Start Blackout Now",
-            Bounds = new Rectangle(400, 478, 185, 38),
+            Text = "Preview Business Closed Video",
+            Bounds = new Rectangle(385, 478, 200, 34),
+            BackColor = Color.FromArgb(117, 68, 154),
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 8.8f, FontStyle.Bold)
+        };
+        previewBusinessClosedButton.Click += async (_, _) =>
+        {
+            previewBusinessClosedButton.Enabled = false;
+            var previousOpacity = Opacity;
+            try
+            {
+                TopMost = false;
+                Opacity = 0;
+                await Task.Yield();
+                await _previewBusinessClosed();
+            }
+            catch (Exception ex)
+            {
+                Opacity = previousOpacity;
+                TopMost = true;
+                KioskLog.Write("Business Closed video preview error: " +
+                    ex.GetType().Name + " - " + ex.Message);
+                MessageBox.Show(this,
+                    "The Business Closed video preview could not be displayed.\n\n" + ex.Message,
+                    "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                Opacity = previousOpacity;
+                TopMost = true;
+                previewBusinessClosedButton.Enabled = true;
+                Activate();
+                BringToFront();
+            }
+        };
+
+        var startClosureButton = new Button
+        {
+            Text = "Start Business Closure Now",
+            Bounds = new Rectangle(20, 516, 210, 30),
             BackColor = Color.Black,
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
         };
-        startBlackoutButton.Click += (_, _) => Complete(StaffSettingsAction.StartBusinessBlackout);
+        startClosureButton.Click += (_, _) => Complete(StaffSettingsAction.StartBusinessClosure);
         businessHoursTab.Controls.AddRange([
             _businessHoursEnabled, _businessHoursStatus, weeklyHoursGroup,
             automationGroup, _businessHoursSaveButton, previewClosedButton,
-            startBlackoutButton]);
+            previewBusinessClosedButton, startClosureButton]);
         UpdateBusinessHoursControlState();
 
-        var staffToolsGroup = new GroupBox
+        var miscGroup = new GroupBox
         {
-            Text = "Advertisements and Staff Tools",
+            Text = "Miscellaneous Staff Tools",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
             Bounds = new Rectangle(20, 25, 580, 215)
         };
-        staffToolsGroup.Controls.AddRange([
-            advertisementsButton, thankYouPreviewButton, changePasswordButton,
-            remoteManagementButton]);
-        var staffToolsNote = new Label
+        changePasswordButton.Bounds = new Rectangle(290, 45, 250, 48);
+        miscGroup.Controls.AddRange([thankYouPreviewButton, changePasswordButton]);
+        var miscNote = new Label
         {
             AutoSize = false,
-            Text = "Advertisement schedules and the thank-you preview use the date and time selected on the Date & Time tab.",
+            Text = "The thank-you preview uses the date and time selected on the Date & Time tab.",
             Font = new Font("Segoe UI", 10),
             ForeColor = Color.FromArgb(16, 24, 32),
             Bounds = new Rectangle(30, 265, 560, 55)
         };
-        staffToolsTab.Controls.AddRange([staffToolsGroup, staffToolsNote]);
+        miscTab.Controls.AddRange([miscGroup, miscNote]);
+
+        var advertisementManager = new AdvertisementManagerControl(
+            _settings,
+            activePreview.HasValue ? SelectedDateTime : null,
+            _syncAdvertisements)
+        {
+            Dock = DockStyle.Fill
+        };
+        advertisementsTab.Controls.Add(advertisementManager);
+
+        var remoteManagement = new RemoteManagementSettingsControl(_settings)
+        {
+            Dock = DockStyle.Fill
+        };
+        remoteControlTab.Controls.Add(remoteManagement);
         var returnButton = new Button
         {
             Text = "Return to Kiosk",
@@ -5158,7 +5266,11 @@ internal sealed class StaffSettingsDialog : Form
                Environment.NewLine + status.Description;
     }
 
-    private static DateTimePicker CreateBusinessTimePicker(TimeSpan time, int x, int y)
+    private static DateTimePicker CreateBusinessTimePicker(
+        TimeSpan time,
+        int x,
+        int y,
+        int width)
     {
         return new DateTimePicker
         {
@@ -5166,7 +5278,7 @@ internal sealed class StaffSettingsDialog : Form
             CustomFormat = "h:mm tt",
             ShowUpDown = true,
             Value = DateTime.Today + time,
-            Bounds = new Rectangle(x, y, 142, 27),
+            Bounds = new Rectangle(x, y, width, 27),
             Font = new Font("Segoe UI", 9)
         };
     }
@@ -5177,17 +5289,20 @@ internal sealed class StaffSettingsDialog : Form
         {
             controls.IsOpen.Enabled = _businessHoursEnabled.Checked;
             controls.Opens.Enabled = _businessHoursEnabled.Checked && controls.IsOpen.Checked;
+            controls.LastJump.Enabled = _businessHoursEnabled.Checked && controls.IsOpen.Checked;
             controls.Closes.Enabled = _businessHoursEnabled.Checked && controls.IsOpen.Checked;
         }
 
-        _businessClosedMinutes.Enabled = _businessHoursEnabled.Checked;
+        _showClosedVideo.Enabled = _businessHoursEnabled.Checked;
+        _blackoutAtClosingTime.Enabled = _businessHoursEnabled.Checked;
         _preOpeningScreensaverMinutes.Enabled = _businessHoursEnabled.Checked;
     }
 
     private void SaveBusinessHours()
     {
         var previousEnabled = _settings.BusinessHoursEnabled;
-        var previousClosedMinutes = _settings.BusinessClosedMessageMinutes;
+        var previousShowClosedVideo = _settings.ShowClosedVideo;
+        var previousBlackoutAtClosingTime = _settings.BlackoutAtClosingTime;
         var previousPreOpeningMinutes = _settings.PreOpeningScreensaverMinutes;
         var previousSchedules = _settings.BusinessHours
             .Select(schedule => new KioskBusinessDayHours
@@ -5195,6 +5310,7 @@ internal sealed class StaffSettingsDialog : Form
                 Day = schedule.Day,
                 IsOpen = schedule.IsOpen,
                 OpenTime = schedule.OpenTime,
+                LastJumpTimeSold = schedule.LastJumpTimeSold,
                 CloseTime = schedule.CloseTime
             })
             .ToList();
@@ -5204,6 +5320,7 @@ internal sealed class StaffSettingsDialog : Form
         {
             var controls = _businessDayControls[day];
             var openTime = controls.Opens.Value.TimeOfDay;
+            var lastJumpTime = controls.LastJump.Value.TimeOfDay;
             var closeTime = controls.Closes.Value.TimeOfDay;
             if (controls.IsOpen.Checked && closeTime <= openTime)
             {
@@ -5213,12 +5330,22 @@ internal sealed class StaffSettingsDialog : Form
                 controls.Closes.Focus();
                 return;
             }
+            if (controls.IsOpen.Checked &&
+                (lastJumpTime <= openTime || lastJumpTime > closeTime))
+            {
+                MessageBox.Show(this,
+                    day + " Last Jump Time Sold must be later than opening and no later than closing.",
+                    "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                controls.LastJump.Focus();
+                return;
+            }
 
             schedules.Add(new KioskBusinessDayHours
             {
                 Day = day,
                 IsOpen = controls.IsOpen.Checked,
                 OpenTime = openTime,
+                LastJumpTimeSold = lastJumpTime,
                 CloseTime = closeTime
             });
         }
@@ -5226,7 +5353,8 @@ internal sealed class StaffSettingsDialog : Form
         try
         {
             _settings.BusinessHoursEnabled = _businessHoursEnabled.Checked;
-            _settings.BusinessClosedMessageMinutes = (int)_businessClosedMinutes.Value;
+            _settings.ShowClosedVideo = _showClosedVideo.Checked;
+            _settings.BlackoutAtClosingTime = _blackoutAtClosingTime.Checked;
             _settings.PreOpeningScreensaverMinutes = (int)_preOpeningScreensaverMinutes.Value;
             _settings.BusinessHours = schedules;
             _settings.Save();
@@ -5240,7 +5368,8 @@ internal sealed class StaffSettingsDialog : Form
         catch (Exception ex)
         {
             _settings.BusinessHoursEnabled = previousEnabled;
-            _settings.BusinessClosedMessageMinutes = previousClosedMinutes;
+            _settings.ShowClosedVideo = previousShowClosedVideo;
+            _settings.BlackoutAtClosingTime = previousBlackoutAtClosingTime;
             _settings.PreOpeningScreensaverMinutes = previousPreOpeningMinutes;
             _settings.BusinessHours = previousSchedules;
             _businessHoursSaveButton.Text = "Save Business Hours";
@@ -5260,8 +5389,10 @@ internal sealed class StaffSettingsDialog : Form
             BusinessHoursMode.Disabled =>
                 "Automatic business hours are OFF. The kiosk remains available.",
             BusinessHoursMode.Open =>
-                "OPEN NOW — scheduled to close at " +
-                status.CurrentClosing?.ToString("h:mm tt") + ".",
+                "OPEN NOW — waivers remain available until the last jump cutoff.",
+            BusinessHoursMode.LastJumpSold when status.NextOpening.HasValue =>
+                "LAST JUMP SOLD — next opening is " +
+                status.NextOpening.Value.ToString("dddd 'at' h:mm tt") + ".",
             BusinessHoursMode.PreOpening =>
                 "PRE-OPENING — screensaver window for " +
                 status.NextOpening?.ToString("dddd 'at' h:mm tt") + ".",
@@ -5371,7 +5502,7 @@ internal sealed class StaffSettingsDialog : Form
     }
 }
 
-internal sealed class RemoteManagementSettingsDialog : Form
+internal sealed class RemoteManagementSettingsControl : UserControl
 {
     private readonly KioskSettings _settings;
     private readonly CheckBox _enabled = new();
@@ -5385,17 +5516,10 @@ internal sealed class RemoteManagementSettingsDialog : Form
     private readonly Label _subnetValue = new();
     private readonly Label _gatewayValue = new();
 
-    public RemoteManagementSettingsDialog(KioskSettings settings)
+    public RemoteManagementSettingsControl(KioskSettings settings)
     {
         _settings = settings;
-        Text = "Remote Control Options";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        StartPosition = FormStartPosition.CenterParent;
-        MaximizeBox = false;
-        MinimizeBox = false;
-        ShowInTaskbar = false;
-        TopMost = true;
-        ClientSize = new Size(760, 720);
+        Size = new Size(590, 540);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.White;
 
@@ -5403,18 +5527,18 @@ internal sealed class RemoteManagementSettingsDialog : Form
         {
             AutoSize = false,
             Text = "REMOTE KIOSK CONTROL",
-            Font = new Font("Segoe UI", 20, FontStyle.Bold),
+            Font = new Font("Segoe UI", 15, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
             TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(25, 14, 710, 42)
+            Bounds = new Rectangle(10, 3, 560, 32)
         };
         var note = new Label
         {
             AutoSize = false,
             Text = "Turn on remote control and give this kiosk a name. Use automatic discovery normally. A controller can also send a secure request using the IPv4 address shown below; use the setup code only as a fallback.",
-            TextAlign = ContentAlignment.MiddleCenter,
+            TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.FromArgb(52, 65, 76),
-            Bounds = new Rectangle(48, 55, 664, 55)
+            Bounds = new Rectangle(15, 36, 550, 42)
         };
 
         _enabled.Text = "Enable remote control and network discovery for this kiosk";
@@ -5422,30 +5546,30 @@ internal sealed class RemoteManagementSettingsDialog : Form
         _enabled.AutoSize = true;
         _enabled.Font = new Font("Segoe UI", 10, FontStyle.Bold);
         _enabled.ForeColor = Color.FromArgb(8, 119, 189);
-        _enabled.Location = new Point(35, 117);
+        _enabled.Location = new Point(15, 82);
 
-        var stationLabel = MakeLabel("Kiosk Name:", 35, 164);
+        var stationLabel = MakeLabel("Kiosk Name:", 15, 121);
         _stationName.Text = settings.StationName;
         _stationName.MaxLength = 60;
-        _stationName.Bounds = new Rectangle(170, 158, 555, 32);
+        _stationName.Bounds = new Rectangle(130, 115, 435, 32);
 
         var networkGroup = new GroupBox
         {
             Text = "Current Device and Network Connection",
-            Bounds = new Rectangle(30, 202, 700, 190),
+            Bounds = new Rectangle(10, 150, 570, 168),
             Font = new Font("Segoe UI", 10, FontStyle.Bold),
             ForeColor = Color.FromArgb(8, 119, 189)
         };
-        ConfigureNetworkValue(_connectionValue, 168, 27, 500);
-        ConfigureNetworkValue(_adapterValue, 168, 55, 500);
-        ConfigureNetworkValue(_ipValue, 168, 83, 210);
-        ConfigureNetworkValue(_subnetValue, 510, 83, 158);
-        ConfigureNetworkValue(_gatewayValue, 168, 111, 210);
+        ConfigureNetworkValue(_connectionValue, 145, 23, 390);
+        ConfigureNetworkValue(_adapterValue, 145, 49, 390);
+        ConfigureNetworkValue(_ipValue, 145, 75, 155);
+        ConfigureNetworkValue(_subnetValue, 405, 75, 130);
+        ConfigureNetworkValue(_gatewayValue, 145, 101, 155);
         var deviceIdValue = new Label
         {
             AutoSize = false,
             Text = settings.StationId,
-            Bounds = new Rectangle(168, 139, 500, 24),
+            Bounds = new Rectangle(145, 127, 390, 24),
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Consolas", 9.2f, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft
@@ -5453,26 +5577,26 @@ internal sealed class RemoteManagementSettingsDialog : Form
         var refreshNetwork = new Button
         {
             Text = "Refresh",
-            Bounds = new Rectangle(585, 108, 83, 28),
+            Bounds = new Rectangle(450, 100, 85, 27),
             BackColor = Color.FromArgb(238, 250, 255),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
         };
         refreshNetwork.Click += (_, _) => RefreshNetworkDetails();
         networkGroup.Controls.AddRange([
-            MakeNetworkLabel("Connection:", 18, 29),
-            MakeNetworkLabel("Adapter:", 18, 57),
-            MakeNetworkLabel("IPv4 Address:", 18, 85),
-            MakeNetworkLabel("Subnet Mask:", 397, 85),
-            MakeNetworkLabel("Default Gateway:", 18, 113),
-            MakeNetworkLabel("Stable Device ID:", 18, 141),
+            MakeNetworkLabel("Connection:", 14, 25),
+            MakeNetworkLabel("Adapter:", 14, 51),
+            MakeNetworkLabel("IPv4 Address:", 14, 77),
+            MakeNetworkLabel("Subnet Mask:", 310, 77),
+            MakeNetworkLabel("Default Gateway:", 14, 103),
+            MakeNetworkLabel("Stable Device ID:", 14, 129),
             _connectionValue, _adapterValue, _ipValue, _subnetValue, _gatewayValue,
             deviceIdValue, refreshNetwork]);
 
         var manualGroup = new GroupBox
         {
             Text = "Manual Connection Fallback",
-            Bounds = new Rectangle(30, 402, 700, 228),
+            Bounds = new Rectangle(10, 325, 570, 155),
             Font = new Font("Segoe UI", 10, FontStyle.Bold),
             ForeColor = Color.FromArgb(245, 130, 32)
         };
@@ -5480,7 +5604,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
         {
             AutoSize = false,
             Text = "Fallback only: if automatic discovery and code-free IP pairing do not work, copy the setup code from Add Kiosk Manually on the controller and paste it below.",
-            Bounds = new Rectangle(18, 25, 664, 48),
+            Bounds = new Rectangle(14, 22, 540, 35),
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.2f),
             TextAlign = ContentAlignment.MiddleLeft
@@ -5489,18 +5613,18 @@ internal sealed class RemoteManagementSettingsDialog : Form
         _manualSetupCode.ScrollBars = ScrollBars.Vertical;
         _manualSetupCode.WordWrap = true;
         _manualSetupCode.MaxLength = 4096;
-        _manualSetupCode.Bounds = new Rectangle(18, 79, 664, 62);
+        _manualSetupCode.Bounds = new Rectangle(14, 60, 540, 38);
         _manualSetupCode.Font = new Font("Consolas", 8.5f);
         _manualSetupCode.PlaceholderText = "Paste the MHK1 setup code from the Kiosk Controller";
         _connectManual.Text = "Connect and Save";
-        _connectManual.Bounds = new Rectangle(18, 151, 175, 42);
+        _connectManual.Bounds = new Rectangle(14, 105, 150, 34);
         _connectManual.BackColor = Color.FromArgb(245, 130, 32);
         _connectManual.FlatStyle = FlatStyle.Flat;
         _connectManual.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         _connectManual.Click += async (_, _) => await ConnectManuallyAsync();
         _manualStatus.AutoSize = false;
         _manualStatus.Text = "The setup code is sensitive staff information. It is tested before anything is saved.";
-        _manualStatus.Bounds = new Rectangle(208, 149, 474, 49);
+        _manualStatus.Bounds = new Rectangle(175, 103, 379, 39);
         _manualStatus.ForeColor = Color.FromArgb(83, 97, 109);
         _manualStatus.TextAlign = ContentAlignment.MiddleLeft;
         _manualStatus.Font = new Font("Segoe UI", 8.8f, FontStyle.Bold);
@@ -5510,27 +5634,15 @@ internal sealed class RemoteManagementSettingsDialog : Form
         var save = new Button
         {
             Text = "Save Options",
-            Bounds = new Rectangle(30, 650, 190, 46),
+            Bounds = new Rectangle(10, 492, 180, 38),
             BackColor = Color.FromArgb(118, 196, 66),
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 10, FontStyle.Bold)
         };
         save.Click += (_, _) => SaveSettings();
-        var cancel = new Button
-        {
-            Text = "Cancel",
-            Bounds = new Rectangle(540, 650, 190, 46),
-            DialogResult = DialogResult.Cancel,
-            BackColor = Color.FromArgb(238, 250, 255),
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 10, FontStyle.Bold)
-        };
-
-        AcceptButton = save;
-        CancelButton = cancel;
         Controls.AddRange([
             heading, note, _enabled, stationLabel, _stationName,
-            networkGroup, manualGroup, save, cancel]);
+            networkGroup, manualGroup, save]);
         RefreshNetworkDetails();
         KioskTheme.Apply(this, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
     }
@@ -5639,8 +5751,10 @@ internal sealed class RemoteManagementSettingsDialog : Form
                 "Manual Connection Saved",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
-            DialogResult = DialogResult.OK;
-            Close();
+            _enabled.Checked = true;
+            _manualSetupCode.Clear();
+            _manualStatus.Text = "Connected securely to " + payload.ControllerName + ".";
+            _manualStatus.ForeColor = Color.FromArgb(54, 128, 27);
         }
         finally
         {
@@ -5657,7 +5771,7 @@ internal sealed class RemoteManagementSettingsDialog : Form
         var stationName = _stationName.Text.Trim();
         if (_enabled.Checked && string.IsNullOrWhiteSpace(stationName))
         {
-            MessageBox.Show(this, "Enter a name for this kiosk.", Text,
+            MessageBox.Show(this, "Enter a name for this kiosk.", "Remote Control",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             _stationName.Focus();
             return;
@@ -5672,8 +5786,10 @@ internal sealed class RemoteManagementSettingsDialog : Form
             ? "Remote kiosk control and network discovery were enabled for " +
               _settings.StationName + "."
             : "Remote kiosk control was disabled.");
-        DialogResult = DialogResult.OK;
-        Close();
+        _manualStatus.Text = _enabled.Checked
+            ? "Remote Control options saved for " + _settings.StationName + "."
+            : "Remote Control is disabled. Options saved.";
+        _manualStatus.ForeColor = Color.FromArgb(54, 128, 27);
     }
 }
 
@@ -6024,7 +6140,7 @@ internal static class AdvertisementFiles
     }
 }
 
-internal sealed class AdvertisementManagerDialog : Form
+internal sealed class AdvertisementManagerControl : UserControl
 {
     private readonly KioskSettings _settings;
     private readonly DateTime? _previewNow;
@@ -6039,7 +6155,7 @@ internal sealed class AdvertisementManagerDialog : Form
     private readonly Button _syncButton = new();
     private bool IsDarkTheme => KioskTheme.Evaluate(_settings, DateTime.Now).IsDark;
 
-    public AdvertisementManagerDialog(
+    public AdvertisementManagerControl(
         KioskSettings settings,
         DateTime? previewNow,
         Func<IProgress<AdvertisementSyncProgress>?, Task<AdvertisementSyncResult>> syncAdvertisements)
@@ -6047,14 +6163,7 @@ internal sealed class AdvertisementManagerDialog : Form
         _settings = settings;
         _previewNow = previewNow;
         _syncAdvertisements = syncAdvertisements;
-        Text = "Manage Thank-You Page Advertisements";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        StartPosition = FormStartPosition.CenterParent;
-        MaximizeBox = false;
-        MinimizeBox = false;
-        ShowInTaskbar = false;
-        TopMost = true;
-        ClientSize = new Size(960, 730);
+        Size = new Size(590, 540);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.White;
 
@@ -6062,10 +6171,10 @@ internal sealed class AdvertisementManagerDialog : Form
         {
             AutoSize = false,
             Text = "SCHEDULED ADVERTISEMENTS",
-            Font = new Font("Segoe UI", 19, FontStyle.Bold),
+            Font = new Font("Segoe UI", 15, FontStyle.Bold),
             ForeColor = Color.FromArgb(117, 68, 154),
             TextAlign = ContentAlignment.MiddleLeft,
-            Bounds = new Rectangle(25, 12, 650, 42)
+            Bounds = new Rectangle(10, 2, 555, 32)
         };
         var note = new Label
         {
@@ -6074,27 +6183,27 @@ internal sealed class AdvertisementManagerDialog : Form
                 ? "Status is shown for the staff preview time. Active JPG ads appear beside the thank-you message."
                 : "Active JPG advertisements appear beside the thank-you message. Multiple active ads rotate automatically.",
             ForeColor = Color.FromArgb(83, 97, 109),
-            Bounds = new Rectangle(25, 51, 890, 25)
+            Bounds = new Rectangle(10, 35, 555, 32)
         };
 
-        _list.Bounds = new Rectangle(25, 82, 620, 355);
+        _list.Bounds = new Rectangle(10, 72, 360, 220);
         _list.View = View.Details;
         _list.FullRowSelect = true;
         _list.MultiSelect = false;
         _list.GridLines = true;
         _list.HideSelection = false;
-        _list.Columns.Add("Advertisement", 180);
-        _list.Columns.Add("Schedule", 335);
-        _list.Columns.Add("Status", 95);
+        _list.Columns.Add("Advertisement", 120);
+        _list.Columns.Add("Schedule", 170);
+        _list.Columns.Add("Status", 70);
         _list.SelectedIndexChanged += (_, _) => ShowSelectedPreview();
         _list.DoubleClick += (_, _) => EditSelected();
 
-        _preview.Bounds = new Rectangle(675, 82, 250, 250);
+        _preview.Bounds = new Rectangle(385, 72, 180, 160);
         _preview.BorderStyle = BorderStyle.FixedSingle;
         _preview.SizeMode = PictureBoxSizeMode.Zoom;
         _preview.BackColor = Color.FromArgb(247, 251, 253);
         _details.AutoSize = false;
-        _details.Bounds = new Rectangle(675, 345, 250, 90);
+        _details.Bounds = new Rectangle(385, 240, 180, 52);
         _details.ForeColor = Color.FromArgb(16, 24, 32);
         _details.Font = new Font("Segoe UI", 9.5f);
 
@@ -6103,23 +6212,23 @@ internal sealed class AdvertisementManagerDialog : Form
             Text = "Kiosk Manager Advertisement Sync",
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             ForeColor = Color.FromArgb(8, 119, 189),
-            Bounds = new Rectangle(25, 455, 900, 165)
+            Bounds = new Rectangle(10, 345, 555, 165)
         };
         _syncStatus.AutoSize = false;
         _syncStatus.Text = _settings.AdvertisementLastSyncStatus;
         _syncStatus.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         _syncStatus.ForeColor = Color.FromArgb(52, 65, 76);
-        _syncStatus.Bounds = new Rectangle(18, 27, 640, 40);
+        _syncStatus.Bounds = new Rectangle(12, 25, 370, 36);
         _lastSync.AutoSize = false;
         _lastSync.Font = new Font("Segoe UI", 9.5f);
         _lastSync.ForeColor = Color.FromArgb(83, 97, 109);
-        _lastSync.Bounds = new Rectangle(18, 67, 640, 28);
+        _lastSync.Bounds = new Rectangle(12, 61, 370, 27);
         _syncProgress.Minimum = 0;
         _syncProgress.Maximum = 100;
         _syncProgress.Style = ProgressBarStyle.Continuous;
-        _syncProgress.Bounds = new Rectangle(18, 105, 640, 24);
+        _syncProgress.Bounds = new Rectangle(12, 96, 370, 22);
         _syncButton.Text = "Sync Ads Now";
-        _syncButton.Bounds = new Rectangle(680, 48, 195, 52);
+        _syncButton.Bounds = new Rectangle(395, 45, 145, 44);
         _syncButton.BackColor = Color.FromArgb(117, 68, 154);
         _syncButton.ForeColor = Color.White;
         _syncButton.FlatStyle = FlatStyle.Flat;
@@ -6131,46 +6240,33 @@ internal sealed class AdvertisementManagerDialog : Form
             Text = "Manager changes also sync automatically while this kiosk is connected.",
             Font = new Font("Segoe UI", 8.5f),
             ForeColor = Color.FromArgb(83, 97, 109),
-            Bounds = new Rectangle(680, 105, 195, 38),
+            Bounds = new Rectangle(395, 96, 145, 38),
             TextAlign = ContentAlignment.TopCenter
         };
         syncGroup.Controls.AddRange([
             _syncStatus, _lastSync, _syncProgress, _syncButton, syncNote]);
         RefreshSyncStatus();
 
-        var addButton = CreateButton("Add Advertisement", 25, Color.FromArgb(118, 196, 66));
+        var addButton = CreateButton("Add Advertisement", 10, 140, Color.FromArgb(118, 196, 66));
         addButton.Click += (_, _) => AddAdvertisement();
-        var editButton = CreateButton("Edit", 205, Color.FromArgb(105, 210, 236));
+        var editButton = CreateButton("Edit", 160, 85, Color.FromArgb(105, 210, 236));
         editButton.Click += (_, _) => EditSelected();
-        var toggleButton = CreateButton("Enable / Disable", 335, Color.FromArgb(255, 222, 89));
-        toggleButton.Width = 160;
+        var toggleButton = CreateButton("Enable / Disable", 255, 140, Color.FromArgb(255, 222, 89));
         toggleButton.Click += (_, _) => ToggleSelected();
-        var deleteButton = CreateButton("Delete", 505, Color.FromArgb(245, 130, 32));
+        var deleteButton = CreateButton("Delete", 405, 100, Color.FromArgb(245, 130, 32));
         deleteButton.Click += (_, _) => DeleteSelected();
-        var closeButton = new Button
-        {
-            Text = "Close",
-            Bounds = new Rectangle(805, 655, 120, 42),
-            DialogResult = DialogResult.OK,
-            BackColor = Color.FromArgb(238, 250, 255),
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 10, FontStyle.Bold)
-        };
-
-        AcceptButton = closeButton;
-        CancelButton = closeButton;
         Controls.AddRange([
             heading, note, _list, _preview, _details, syncGroup,
-            addButton, editButton, toggleButton, deleteButton, closeButton]);
-        FormClosed += (_, _) => _preview.Image?.Dispose();
+            addButton, editButton, toggleButton, deleteButton]);
+        Disposed += (_, _) => _preview.Image?.Dispose();
         KioskTheme.Apply(this, KioskTheme.Evaluate(_settings, DateTime.Now).IsDark);
         RefreshList();
     }
 
-    private static Button CreateButton(string text, int x, Color color) => new()
+    private static Button CreateButton(string text, int x, int width, Color color) => new()
     {
         Text = text,
-        Bounds = new Rectangle(x, 655, 120, 42),
+        Bounds = new Rectangle(x, 300, width, 36),
         BackColor = color,
         FlatStyle = FlatStyle.Flat,
         Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
