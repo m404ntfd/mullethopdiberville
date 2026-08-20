@@ -284,7 +284,9 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.14.2 also accepts incoming discovery, synchronization,
+Systems Controller version 1.14.3 adds a responsive windowed layout, preserves
+minimum button sizes, and prevents the header, status, and controller controls from
+overlapping when the application is restored from a maximized window. Version 1.14.2 also accepts incoming discovery, synchronization,
 and command requests from every usable address on the Windows adapter's directly
 connected subnet. This fixes the HTTP 403 response that version 1.14.1 could return
 after successfully scanning a non-RFC 1918 network. Version 1.14.1 enabled controller

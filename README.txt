@@ -96,8 +96,13 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.7, Systems Controller version 1.14.2, and Mullet Hop POS
-version 1.7.1 are the matching package releases. Systems Controller 1.14.2 applies
+Waiver Kiosk version 2.11.8, Systems Controller version 1.14.3, and Mullet Hop POS
+version 1.7.2 are the matching package releases. Systems Controller 1.14.3 uses
+a responsive windowed layout with protected button sizes, a larger restore size,
+and non-overlapping header and summary sections. Mullet Hop POS 1.7.2 requests
+LilyPad's POS/location choices after username input settles and no longer reapplies
+Firefox's window frame during routine health checks, preserving password focus and
+native dropdown behavior. Systems Controller 1.14.2 applies
 the directly connected IPv4-subnet rule to incoming controller requests as well
 as scans, preventing the master from returning HTTP 403 on installations such as
 128.0.0.0/25. Mullet Hop POS 1.7.1 adds a LilyPad login compatibility trigger so

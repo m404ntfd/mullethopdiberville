@@ -75,8 +75,8 @@ internal sealed class ControllerForm : Form
         }
         ConfigureTrayIcon();
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1180, 760);
-        ClientSize = new Size(1320, 820);
+        MinimumSize = new Size(1200, 820);
+        ClientSize = new Size(1400, 860);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(244, 248, 251);
 
@@ -236,9 +236,23 @@ internal sealed class ControllerForm : Form
             Height = 78,
             BackColor = Color.FromArgb(117, 68, 154)
         };
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = new Padding(14, 7, 14, 7),
+            BackColor = Color.Transparent
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 98));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var logo = new PictureBox
         {
-            Bounds = new Rectangle(18, 8, 94, 62),
+            Dock = DockStyle.Fill,
+            Margin = new Padding(2, 0, 8, 0),
             SizeMode = PictureBoxSizeMode.Zoom,
             BackColor = Color.Transparent,
             Image = LoadHeaderLogo()
@@ -248,10 +262,11 @@ internal sealed class ControllerForm : Form
             AutoSize = false,
             Text = "MULLET HOP SYSTEMS CONTROLLER",
             ForeColor = Color.White,
-            Font = new Font("Segoe UI", 23, FontStyle.Bold),
+            Font = new Font("Segoe UI", 22, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft,
-            Bounds = new Rectangle(120, 8, 690, 58),
-            Anchor = AnchorStyles.Left | AnchorStyles.Top
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
+            Margin = new Padding(0, 0, 10, 0)
         };
         _serviceStatus.AutoSize = false;
         _serviceStatus.Text = "Starting local network service…";
@@ -259,9 +274,13 @@ internal sealed class ControllerForm : Form
         _serviceStatus.BackColor = Color.FromArgb(82, 49, 108);
         _serviceStatus.Font = new Font("Segoe UI", 10, FontStyle.Bold);
         _serviceStatus.TextAlign = ContentAlignment.MiddleCenter;
-        _serviceStatus.Bounds = new Rectangle(850, 18, 320, 42);
-        _serviceStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        panel.Controls.AddRange([logo, title, _serviceStatus]);
+        _serviceStatus.Dock = DockStyle.Fill;
+        _serviceStatus.Margin = new Padding(5, 6, 0, 6);
+        _serviceStatus.AutoEllipsis = true;
+        layout.Controls.Add(logo, 0, 0);
+        layout.Controls.Add(title, 1, 0);
+        layout.Controls.Add(_serviceStatus, 2, 0);
+        panel.Controls.Add(layout);
         return panel;
     }
 
@@ -467,10 +486,25 @@ internal sealed class ControllerForm : Form
             Padding = new Padding(18, 8, 18, 8),
             BackColor = Color.FromArgb(244, 248, 251)
         };
-        ConfigureSummaryLabel(_onlineSummary, "0 ONLINE", 18, Color.FromArgb(54, 128, 27));
-        ConfigureSummaryLabel(_closedSummary, "0 CLOSED", 258, Color.FromArgb(245, 130, 32));
-        ConfigureSummaryLabel(_totalSummary, "0 KNOWN KIOSKS", 498, Color.FromArgb(8, 119, 189));
-        panel.Controls.AddRange([_onlineSummary, _closedSummary, _totalSummary]);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = Color.Transparent
+        };
+        for (var index = 0; index < 3; index++)
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        ConfigureSummaryLabel(_onlineSummary, "0 ONLINE", Color.FromArgb(54, 128, 27));
+        ConfigureSummaryLabel(_closedSummary, "0 CLOSED", Color.FromArgb(245, 130, 32));
+        ConfigureSummaryLabel(_totalSummary, "0 KNOWN KIOSKS", Color.FromArgb(8, 119, 189));
+        layout.Controls.Add(_onlineSummary, 0, 0);
+        layout.Controls.Add(_closedSummary, 1, 0);
+        layout.Controls.Add(_totalSummary, 2, 0);
+        panel.Controls.Add(layout);
         return panel;
     }
 
@@ -479,7 +513,7 @@ internal sealed class ControllerForm : Form
         var panel = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 320,
+            Height = 330,
             Padding = new Padding(12, 8, 12, 8),
             BackColor = Color.White
         };
@@ -493,8 +527,8 @@ internal sealed class ControllerForm : Form
             Padding = Padding.Empty,
             BackColor = Color.White
         };
-        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
-        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+        sections.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
         sections.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var kioskGroup = new GroupBox
@@ -566,10 +600,10 @@ internal sealed class ControllerForm : Form
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
         controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        controllerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
         controllerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         _controllerUpdateStatus.Text = $"Version {ControllerUpdater.CurrentVersion} — checking for updates…";
@@ -686,9 +720,10 @@ internal sealed class ControllerForm : Form
                      _closeControllerButton
                  })
         {
-            button.MinimumSize = new Size(110, 42);
-            button.Margin = new Padding(4);
-            button.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+            button.MinimumSize = new Size(105, 40);
+            button.Margin = new Padding(3);
+            button.Font = new Font("Segoe UI", 9.2f, FontStyle.Bold);
+            button.AutoEllipsis = true;
         }
         _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync(showUpToDateMessage: true);
         _systemsUpdatesButton.Click += (_, _) =>
@@ -1680,11 +1715,12 @@ internal sealed class ControllerForm : Form
         Font = new Font("Segoe UI", 9, FontStyle.Bold)
     };
 
-    private static void ConfigureSummaryLabel(Label label, string text, int x, Color color)
+    private static void ConfigureSummaryLabel(Label label, string text, Color color)
     {
         label.Text = text;
         label.AutoSize = false;
-        label.Bounds = new Rectangle(x, 9, 220, 50);
+        label.Dock = DockStyle.Fill;
+        label.Margin = new Padding(5, 1, 5, 1);
         label.BackColor = Color.White;
         label.ForeColor = color;
         label.BorderStyle = BorderStyle.FixedSingle;
