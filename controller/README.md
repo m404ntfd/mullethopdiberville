@@ -4,7 +4,7 @@ The controller is installed on a Windows 10 or Windows 11 office computer on
 the same private network as the waiver kiosks. Additional local controller
 computers discover each other, and one can be designated as the master. It provides:
 
-* Online/offline, version, open/closed, last-seen, and IP status per kiosk.
+* Online/offline, version, open/closed, assistance, last-seen, and IP status per kiosk.
 * Open Selected and Close Selected controls.
 * Open All and Close All controls.
 * A non-installing update check per selected kiosk.
@@ -156,6 +156,11 @@ Select one kiosk in the list, then choose:
 
 Double-clicking a kiosk row also toggles that kiosk between open and closed.
 
+When a guest selects Call for Assistance at a kiosk, that kiosk's Assistance
+column flashes yellow with HELP. The POS Controller can acknowledge the call;
+the controller row then displays On the way. The call remains active and keeps
+flashing on the kiosk itself until it is cleared at the kiosk.
+
 Open All and Close All apply to every known station. Close All asks for
 confirmation. Offline stations retain the latest queued command and carry it out
 when they reconnect.
@@ -166,9 +171,10 @@ plus Check Updates, Manage Ads, Business Hours, Remote Access, Restart Controlle
 and Exit Program buttons in a larger three-column, two-row grid. If a downloaded
 update is waiting, Restart Controller offers to install it. Minimizing the window
 or selecting X sends the controller to the Windows system tray while its network
-service continues running. Double-click the fish-and-springs tray icon, or select
-Open Kiosk Controller from its tray menu, to restore the dashboard. Only the
-in-app Exit Program button ends the controller service during normal use.
+service continues running. Single-click or double-click the fish-and-springs tray
+icon, select Open Kiosk Controller from its tray menu, or select its notification
+to restore the dashboard. Only the in-app Exit Program button ends the controller
+service during normal use.
 
 
 MANAGE AND SYNC ADVERTISEMENTS
@@ -220,10 +226,12 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.10.2 adds system-tray operation so minimizing or
-closing the dashboard does not stop remote kiosk service. Version 1.10.1 enlarges
+Kiosk Controller version 1.11.0 fixes dashboard restoration from the tray icon
+and adds guest-assistance status to every kiosk row. Version 1.10.2 adds
+system-tray operation so minimizing or closing the dashboard does not stop remote
+kiosk service. Version 1.10.1 enlarges
 the Controller Program buttons and adds code-free manual pairing by kiosk IPv4
-address. Waiver Kiosk version 2.9.3 uses
+address. Waiver Kiosk version 2.10.0 uses
 the existing outbound discovery and encrypted approval exchange for the IP
 workflow. The long self-contained setup code remains available as a fallback.
 Controller version 1.7.0 adds the separate POS Controller connection. Waiver
