@@ -29,6 +29,7 @@ internal sealed class FirefoxHost : IDisposable
 
     private readonly Control _host;
     private readonly System.Windows.Forms.Timer _windowTimer = new() { Interval = 500 };
+    private readonly System.Windows.Forms.Timer _browserInputTimer = new() { Interval = 30 };
     private Process? _process;
     private Process? _windowProcess;
     private LilyPadCompatibilityBridge? _compatibilityBridge;
@@ -42,16 +43,25 @@ internal sealed class FirefoxHost : IDisposable
     private bool _recoveryQueued;
     private bool _restarting;
     private bool _initialSessionPrepared;
+    private bool _pointerWasDown;
+    private bool _keyboardWasDown;
+    private bool _browserInteractionPending;
+    private bool _browserFocusPreferred = true;
+    private DateTime _nextFocusGuardUtc = DateTime.MinValue;
+    private DateTime _lastFocusFailureLoggedUtc = DateTime.MinValue;
     private bool _disposed;
 
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<string>? CrashDetected;
+    public event EventHandler? BrowserInteractionStarted;
+    public event EventHandler? BrowserInteractionCompleted;
 
     public FirefoxHost(Control host)
     {
         _host = host;
         _host.Resize += (_, _) => ResizeEmbeddedWindow();
         _windowTimer.Tick += (_, _) => FindAndAttachWindow();
+        _browserInputTimer.Tick += (_, _) => ObserveBrowserPointerActivity();
     }
 
     public void Start()
@@ -134,6 +144,10 @@ internal sealed class FirefoxHost : IDisposable
 
         _restarting = true;
         _windowTimer.Stop();
+        _browserInputTimer.Stop();
+        _pointerWasDown = false;
+        _keyboardWasDown = false;
+        _browserInteractionPending = false;
         _crashReported = false;
         Exception? restartError = null;
         try
@@ -164,7 +178,18 @@ internal sealed class FirefoxHost : IDisposable
 
     public void ResizeToHost() => ResizeEmbeddedWindow();
 
-    public void FocusBrowser() => FocusEmbeddedWindow();
+    public bool FocusBrowser(string reason = "POS window activation") =>
+        FocusEmbeddedWindow(reason);
+
+    internal static uint WindowThreadIdForSmokeTest(IntPtr window) =>
+        GetWindowThreadProcessId(window, out _);
+
+    public void SetBrowserFocusPreferred(bool preferred)
+    {
+        _browserFocusPreferred = preferred;
+        if (preferred)
+            FocusEmbeddedWindow("browser mode enabled");
+    }
 
     private void FindAndAttachWindow()
     {
@@ -277,10 +302,11 @@ internal sealed class FirefoxHost : IDisposable
         _lastEmbeddedSize = Size.Empty;
         _attachedUtc = DateTime.UtcNow;
         ResizeEmbeddedWindow();
-        FocusEmbeddedWindow();
+        FocusEmbeddedWindow("Firefox attached");
+        _browserInputTimer.Start();
         try
         {
-            _host.BeginInvoke(new Action(FocusEmbeddedWindow));
+            _host.BeginInvoke(new Action(() => FocusEmbeddedWindow("Firefox attach follow-up")));
         }
         catch (InvalidOperationException)
         {
@@ -320,6 +346,7 @@ internal sealed class FirefoxHost : IDisposable
             {
                 _firefoxWindow = IntPtr.Zero;
                 _windowTimer.Stop();
+                _browserInputTimer.Stop();
                 HandleFailure(
                     "Firefox has crashed. Select Refresh Lilypad to restart Firefox and reopen the LilyPad POS home page.");
             }));
@@ -395,14 +422,93 @@ internal sealed class FirefoxHost : IDisposable
         CrashDetected?.Invoke(this, message);
     }
 
-    private void FocusEmbeddedWindow()
+    private void ObserveBrowserPointerActivity()
+    {
+        if (_disposed || _firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow) ||
+            !_host.IsHandleCreated)
+        {
+            _pointerWasDown = false;
+            _keyboardWasDown = false;
+            _browserInteractionPending = false;
+            return;
+        }
+
+        var pointerDown = IsPointerButtonDown();
+        var keyboardDown = IsKeyboardKeyDown();
+        if (pointerDown && !_pointerWasDown && IsPointerInsideBrowser())
+        {
+            _browserInteractionPending = true;
+            FocusEmbeddedWindow("browser pointer input");
+            BrowserInteractionStarted?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (!pointerDown && _pointerWasDown && _browserInteractionPending)
+        {
+            _browserInteractionPending = false;
+            BrowserInteractionCompleted?.Invoke(this, EventArgs.Empty);
+            FocusEmbeddedWindow("browser pointer release");
+        }
+
+        _pointerWasDown = pointerDown;
+
+        if (keyboardDown && !_keyboardWasDown &&
+            FocusEmbeddedWindow("browser keyboard input probe", focusIfNeeded: false))
+        {
+            BrowserInteractionStarted?.Invoke(this, EventArgs.Empty);
+            BrowserInteractionCompleted?.Invoke(this, EventArgs.Empty);
+        }
+        _keyboardWasDown = keyboardDown;
+
+        var now = DateTime.UtcNow;
+        if (_browserFocusPreferred && !pointerDown && now >= _nextFocusGuardUtc)
+        {
+            _nextFocusGuardUtc = now.AddMilliseconds(250);
+            FocusEmbeddedWindow("background browser focus guard");
+        }
+    }
+
+    private bool IsPointerInsideBrowser()
+    {
+        if (!GetCursorPos(out var cursor))
+            return false;
+        try
+        {
+            return _host.RectangleToScreen(_host.ClientRectangle).Contains(cursor);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPointerButtonDown() =>
+        IsKeyDown(VkLeftButton) ||
+        IsKeyDown(VkRightButton) ||
+        IsKeyDown(VkMiddleButton) ||
+        IsKeyDown(VkXButton1) ||
+        IsKeyDown(VkXButton2);
+
+    private static bool IsKeyDown(int virtualKey) =>
+        (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+
+    private static bool IsKeyboardKeyDown()
+    {
+        for (var virtualKey = 0x08; virtualKey <= 0xFE; virtualKey++)
+        {
+            if (IsKeyDown(virtualKey))
+                return true;
+        }
+        return false;
+    }
+
+    private bool FocusEmbeddedWindow(string reason, bool focusIfNeeded = true)
     {
         if (_firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow))
-            return;
+            return false;
 
         var form = _host.FindForm();
         if (form is null || form.WindowState == FormWindowState.Minimized)
-            return;
+            return false;
 
         var foreground = GetForegroundWindow();
         var foregroundRoot = foreground == IntPtr.Zero
@@ -411,29 +517,72 @@ internal sealed class FirefoxHost : IDisposable
         if (Form.ActiveForm != form &&
             foreground != form.Handle &&
             foregroundRoot != form.Handle)
-            return;
+            return false;
 
         try
         {
             var browserThread = GetWindowThreadProcessId(_firefoxWindow, out _);
-            var currentThread = GetCurrentThreadId();
-            var attached = browserThread != 0 && browserThread != currentThread &&
-                           AttachThreadInput(currentThread, browserThread, true);
+            var formThread = GetWindowThreadProcessId(form.Handle, out _);
+            if (browserThread == 0 || formThread == 0)
+            {
+                LogFocusFailure(reason, "Windows did not return a browser or POS UI thread ID.");
+                return false;
+            }
+
+            var attached = browserThread == formThread ||
+                           AttachThreadInput(formThread, browserThread, true);
+            if (!attached)
+            {
+                LogFocusFailure(
+                    reason,
+                    $"Windows could not join POS thread {formThread} to Firefox thread {browserThread}; " +
+                    $"error {Marshal.GetLastWin32Error()}.");
+                return false;
+            }
             try
             {
+                var focusedWindow = GetFocus();
+                if (focusedWindow == _firefoxWindow ||
+                    (focusedWindow != IntPtr.Zero && IsChild(_firefoxWindow, focusedWindow)))
+                {
+                    return true;
+                }
+                if (!focusIfNeeded)
+                    return false;
+
                 _ = SetForegroundWindow(form.Handle);
                 _ = SetFocus(_firefoxWindow);
+                focusedWindow = GetFocus();
+                var succeeded = focusedWindow == _firefoxWindow ||
+                                (focusedWindow != IntPtr.Zero && IsChild(_firefoxWindow, focusedWindow));
+                if (!succeeded)
+                {
+                    LogFocusFailure(
+                        reason,
+                        $"Firefox did not accept keyboard focus; error {Marshal.GetLastWin32Error()}.");
+                }
+                return succeeded;
             }
             finally
             {
-                if (attached)
-                    _ = AttachThreadInput(currentThread, browserThread, false);
+                if (browserThread != formThread)
+                    _ = AttachThreadInput(formThread, browserThread, false);
             }
         }
         catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
         {
-            PosLog.Write("Windows Firefox focus support is unavailable: " + ex.Message);
+            LogFocusFailure(reason, "Windows Firefox focus support is unavailable: " + ex.Message);
+            return false;
         }
+    }
+
+    private void LogFocusFailure(string reason, string detail)
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastFocusFailureLoggedUtc < TimeSpan.FromSeconds(15))
+            return;
+        _lastFocusFailureLoggedUtc = now;
+        PosLog.Write($"Firefox keyboard focus recovery failed during {reason}: {detail}");
     }
 
     private static string PrepareFirefoxProfile()
@@ -579,7 +728,7 @@ internal sealed class FirefoxHost : IDisposable
             return;
         _disposed = true;
         _windowTimer.Stop();
-        _windowTimer.Dispose();
+        _browserInputTimer.Stop();
 
         try { StopFirefoxProcesses(); }
         catch (Exception ex)
@@ -591,11 +740,17 @@ internal sealed class FirefoxHost : IDisposable
             _windowProcess?.Dispose();
             if (_process is not null && !ReferenceEquals(_process, _windowProcess))
                 _process.Dispose();
+            _windowTimer.Dispose();
+            _browserInputTimer.Dispose();
         }
     }
 
     private void StopFirefoxProcesses()
     {
+        _browserInputTimer.Stop();
+        _pointerWasDown = false;
+        _keyboardWasDown = false;
+        _browserInteractionPending = false;
         _compatibilityBridge?.Dispose();
         _compatibilityBridge = null;
         var processes = new[] { _windowProcess, _process }
@@ -653,17 +808,32 @@ internal sealed class FirefoxHost : IDisposable
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetFocus(IntPtr window);
 
-    [DllImport("kernel32.dll")]
-    private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetFocus();
 
     [DllImport("user32.dll")]
+    private static extern bool IsChild(IntPtr parent, IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    private const int VkLeftButton = 0x01;
+    private const int VkRightButton = 0x02;
+    private const int VkMiddleButton = 0x04;
+    private const int VkXButton1 = 0x05;
+    private const int VkXButton2 = 0x06;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out Point point);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr window, StringBuilder text, int maxCount);

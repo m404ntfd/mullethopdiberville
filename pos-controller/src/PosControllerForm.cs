@@ -13,6 +13,7 @@ internal sealed class PosControllerForm : Form
     private readonly Label _browserStatus = new();
     private readonly Button _checkUpdateButton = new();
     private readonly Button _toggleSidebarButton = new();
+    private readonly Button _restoreKeyboardButton = new();
     private readonly Button _reloadBrowserButton = new();
     private readonly Button _staffMenuButton = new();
     private readonly Button _minimizeButton = new();
@@ -27,8 +28,10 @@ internal sealed class PosControllerForm : Form
     private readonly PictureBox _brandLogo = new();
     private readonly TableLayoutPanel _brandLayout = new();
     private readonly KioskControlCard[] _cards = new KioskControlCard[4];
+    private readonly System.Windows.Forms.Timer _sidebarFocusReturnTimer = new() { Interval = 750 };
     private FirefoxHost? _firefoxHost;
     private bool _sidebarExpanded = true;
+    private bool _browserModeActive = true;
     private bool _refreshInProgress;
     private bool _updateCheckInProgress;
     private bool _remoteUpdateRequested;
@@ -59,6 +62,10 @@ internal sealed class PosControllerForm : Form
         _firefoxHost = new FirefoxHost(_browserHostPanel);
         _firefoxHost.StatusChanged += (_, status) => SetBrowserStatus(status);
         _firefoxHost.CrashDetected += (_, message) => ShowFirefoxCrash(message);
+        _firefoxHost.BrowserInteractionStarted += (_, _) => BeginBrowserInteraction();
+        _firefoxHost.BrowserInteractionCompleted += (_, _) => CompleteBrowserInteraction();
+        TrackSidebarInteraction(_sidebar);
+        _sidebarFocusReturnTimer.Tick += (_, _) => ReturnFocusAfterSidebarInteraction();
         _refreshTimer.Tick += async (_, _) => await RefreshStatusesAsync();
         Shown += async (_, _) =>
         {
@@ -72,8 +79,62 @@ internal sealed class PosControllerForm : Form
             await RefreshStatusesAsync();
             _refreshTimer.Start();
         };
-        Activated += (_, _) => _firefoxHost?.FocusBrowser();
+        Activated += (_, _) =>
+        {
+            if (_browserModeActive)
+                _firefoxHost?.FocusBrowser("POS window activation");
+        };
         FormClosing += HandleFormClosing;
+    }
+
+    internal static void RunFocusRegressionSmokeTest()
+    {
+        using var form = new PosControllerForm(new PosSettings());
+        form.CreateControl();
+        if (FirefoxHost.WindowThreadIdForSmokeTest(form.Handle) == 0)
+            throw new InvalidOperationException("Windows did not return the POS window thread ID.");
+
+        if (Descendants(form._sidebar).OfType<Button>().Any(button => button.TabStop))
+            throw new InvalidOperationException("A sidebar button can still capture keyboard tab focus.");
+
+        form.SetSidebarExpanded(expanded: true);
+        form.BeginBrowserInteraction();
+        form.CompleteBrowserInteraction();
+        if (form._sidebarExpanded || !form._browserModeActive)
+            throw new InvalidOperationException("Browser input did not activate browser mode and collapse the sidebar.");
+
+        using var card = new KioskControlCard(1);
+        card.SetExpanded(expanded: false);
+        var status = new PosKioskStatus
+        {
+            StationId = "smoke-kiosk",
+            StationName = "Smoke Kiosk",
+            IsOnline = true,
+            AvailableForGuests = true,
+            StatusMessage = "Ready"
+        };
+        card.ShowStatus(status);
+        var unchangedCount = card.VisualUpdateCount;
+        card.ShowStatus(status);
+        if (card.VisualUpdateCount != unchangedCount)
+            throw new InvalidOperationException("An unchanged kiosk status rewrote the collapsed sidebar.");
+
+        status.AssistanceRequested = true;
+        card.ShowStatus(status);
+        if (card.VisualUpdateCount != unchangedCount + 1 || !card.AssistanceButtonEnabled)
+            throw new InvalidOperationException("An assistance status change did not enable acknowledgment.");
+
+        Application.DoEvents();
+    }
+
+    private static IEnumerable<Control> Descendants(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            yield return child;
+            foreach (var descendant in Descendants(child))
+                yield return descendant;
+        }
     }
 
     private Control BuildBrowserArea()
@@ -140,11 +201,16 @@ internal sealed class PosControllerForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 184));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 224));
 
         ConfigureSidebarButton(_toggleSidebarButton, "◀  COLLAPSE CONTROLS",
             Color.FromArgb(255, 217, 188), Color.FromArgb(30, 20, 36));
-        _toggleSidebarButton.Click += (_, _) => SetSidebarExpanded(!_sidebarExpanded);
+        _toggleSidebarButton.Click += (_, _) =>
+        {
+            SetSidebarExpanded(!_sidebarExpanded);
+            if (!_sidebarExpanded)
+                QueueBrowserFocusReturn();
+        };
         root.Controls.Add(_toggleSidebarButton, 0, 0);
 
         _brandLayout.Dock = DockStyle.Fill;
@@ -205,7 +271,7 @@ internal sealed class PosControllerForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 5,
+            RowCount = 6,
             Margin = Padding.Empty,
             Padding = new Padding(0, 6, 0, 0),
             BackColor = Color.Transparent
@@ -213,10 +279,11 @@ internal sealed class PosControllerForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
 
         _connectionStatus.Dock = DockStyle.Fill;
         _connectionStatus.Text = "Starting…";
@@ -228,33 +295,39 @@ internal sealed class PosControllerForm : Form
         panel.Controls.Add(_connectionStatus, 0, 0);
         panel.SetColumnSpan(_connectionStatus, 2);
 
+        ConfigureSidebarButton(_restoreKeyboardButton, "RESTORE KEYBOARD",
+            Color.FromArgb(36, 152, 125), Color.White);
+        _restoreKeyboardButton.Click += (_, _) => RestoreBrowserKeyboard();
+        panel.Controls.Add(_restoreKeyboardButton, 0, 1);
+        panel.SetColumnSpan(_restoreKeyboardButton, 2);
+
         ConfigureSidebarButton(_reloadBrowserButton, "REFRESH LILYPAD",
             Color.FromArgb(8, 119, 189), Color.White);
         _reloadBrowserButton.Click += (_, _) => RefreshLilypad();
-        panel.Controls.Add(_reloadBrowserButton, 0, 1);
+        panel.Controls.Add(_reloadBrowserButton, 0, 2);
         panel.SetColumnSpan(_reloadBrowserButton, 2);
 
         ConfigureSidebarButton(_staffMenuButton, "SETTINGS",
             Color.FromArgb(255, 217, 188), Color.FromArgb(30, 20, 36));
         _staffMenuButton.Click += (_, _) => OpenSettings();
-        panel.Controls.Add(_staffMenuButton, 0, 2);
+        panel.Controls.Add(_staffMenuButton, 0, 3);
         panel.SetColumnSpan(_staffMenuButton, 2);
 
         ConfigureSidebarButton(_checkUpdateButton, "CHECK FOR UPDATES",
             Color.FromArgb(117, 68, 154), Color.White);
         _checkUpdateButton.Click += async (_, _) => await CheckForPosUpdateAsync();
-        panel.Controls.Add(_checkUpdateButton, 0, 3);
+        panel.Controls.Add(_checkUpdateButton, 0, 4);
         panel.SetColumnSpan(_checkUpdateButton, 2);
 
         ConfigureSidebarButton(_minimizeButton, "MINIMIZE",
             Color.FromArgb(66, 75, 86), Color.White);
         _minimizeButton.Click += (_, _) => MinimizeToTaskbar();
-        panel.Controls.Add(_minimizeButton, 0, 4);
+        panel.Controls.Add(_minimizeButton, 0, 5);
 
         ConfigureSidebarButton(_exitButton, "EXIT APP",
             Color.FromArgb(187, 34, 46), Color.White);
         _exitButton.Click += (_, _) => RequestApplicationExit();
-        panel.Controls.Add(_exitButton, 1, 4);
+        panel.Controls.Add(_exitButton, 1, 5);
         return panel;
     }
 
@@ -267,6 +340,7 @@ internal sealed class PosControllerForm : Form
         _brandLayout.ColumnStyles[0].Width = expanded ? 66 : Math.Max(1, CollapsedSidebarWidth - 16);
         _brandLayout.ColumnStyles[1].Width = expanded ? 100 : 0;
         _connectionStatus.Visible = expanded;
+        _restoreKeyboardButton.Text = expanded ? "RESTORE KEYBOARD" : "KEYBOARD";
         _reloadBrowserButton.Text = expanded ? "REFRESH LILYPAD" : "REFRESH";
         _staffMenuButton.Text = "SETTINGS";
         _checkUpdateButton.Text = expanded
@@ -277,6 +351,95 @@ internal sealed class PosControllerForm : Form
         foreach (var card in _cards)
             card?.SetExpanded(expanded);
         _firefoxHost?.ResizeToHost();
+    }
+
+    private void BeginBrowserInteraction()
+    {
+        if (_cleanupComplete || IsDisposed)
+            return;
+
+        _sidebarFocusReturnTimer.Stop();
+        _browserModeActive = true;
+        ActiveControl = null;
+        _firefoxHost?.SetBrowserFocusPreferred(true);
+    }
+
+    private void CompleteBrowserInteraction()
+    {
+        if (_cleanupComplete || IsDisposed)
+            return;
+
+        if (_sidebarExpanded)
+            SetSidebarExpanded(expanded: false);
+        BeginInvoke(new Action(() => _firefoxHost?.FocusBrowser("browser interaction completed")));
+    }
+
+    private void BeginSidebarInteraction()
+    {
+        if (_cleanupComplete || IsDisposed)
+            return;
+
+        _sidebarFocusReturnTimer.Stop();
+        _browserModeActive = false;
+        _firefoxHost?.SetBrowserFocusPreferred(false);
+    }
+
+    private void CompleteSidebarInteraction()
+    {
+        if (!_sidebarExpanded)
+            QueueBrowserFocusReturn();
+    }
+
+    private void QueueBrowserFocusReturn()
+    {
+        _sidebarFocusReturnTimer.Stop();
+        _sidebarFocusReturnTimer.Start();
+    }
+
+    private void ReturnFocusAfterSidebarInteraction()
+    {
+        _sidebarFocusReturnTimer.Stop();
+        if (_sidebarExpanded || _staffMenuOpen || _cleanupComplete || IsDisposed)
+            return;
+        RestoreBrowserKeyboard(showStatus: false);
+    }
+
+    private void RestoreBrowserKeyboard(bool showStatus = true)
+    {
+        if (_cleanupComplete || IsDisposed)
+            return;
+
+        _sidebarFocusReturnTimer.Stop();
+        _browserModeActive = true;
+        if (_sidebarExpanded)
+            SetSidebarExpanded(expanded: false);
+        ActiveControl = null;
+        _firefoxHost?.SetBrowserFocusPreferred(true);
+        BeginInvoke(new Action(() =>
+        {
+            var restored = _firefoxHost?.FocusBrowser("Restore Keyboard command") == true;
+            if (showStatus)
+            {
+                SetConnectionStatus(
+                    restored
+                        ? "Firefox keyboard focus restored."
+                        : "Click inside LilyPad once to restore keyboard focus.",
+                    restored);
+            }
+        }));
+    }
+
+    private void TrackSidebarInteraction(Control control)
+    {
+        control.MouseDown += (_, _) => BeginSidebarInteraction();
+        control.MouseUp += (_, _) => CompleteSidebarInteraction();
+        control.ControlAdded += (_, args) =>
+        {
+            if (args.Control is not null)
+                TrackSidebarInteraction(args.Control);
+        };
+        foreach (Control child in control.Controls)
+            TrackSidebarInteraction(child);
     }
 
     private async Task CheckForPosUpdateAsync()
@@ -443,7 +606,7 @@ internal sealed class PosControllerForm : Form
             SetConnectionStatus(
                 added > 0
                     ? $"Connected • {added} kiosk{(added == 1 ? "" : "s")} added"
-                    : $"Controller connected • {DateTime.Now:h:mm:ss tt}",
+                    : "Controller connected",
                 true);
             await ProcessRemoteUpdateRequestAsync();
         }
@@ -651,6 +814,8 @@ internal sealed class PosControllerForm : Form
             return;
         _cleanupComplete = true;
         _refreshTimer.Stop();
+        _sidebarFocusReturnTimer.Stop();
+        _sidebarFocusReturnTimer.Dispose();
         _firefoxHost?.Dispose();
     }
 
@@ -667,10 +832,16 @@ internal sealed class PosControllerForm : Form
 
     private void SetConnectionStatus(string text, bool connected)
     {
-        _connectionStatus.Text = text;
-        _connectionStatus.ForeColor = connected
+        var color = connected
             ? Color.FromArgb(177, 231, 151)
             : Color.FromArgb(255, 170, 176);
+        if (string.Equals(_connectionStatus.Text, text, StringComparison.Ordinal) &&
+            _connectionStatus.ForeColor == color)
+        {
+            return;
+        }
+        _connectionStatus.Text = text;
+        _connectionStatus.ForeColor = color;
     }
 
     private void RefreshLilypad()
@@ -728,6 +899,7 @@ internal sealed class PosControllerForm : Form
         button.FlatAppearance.BorderSize = 0;
         button.Font = new Font("Segoe UI", 9, FontStyle.Bold);
         button.Cursor = Cursors.Hand;
+        button.TabStop = false;
         button.UseVisualStyleBackColor = false;
     }
 
@@ -862,12 +1034,16 @@ internal sealed class KioskControlCard : Panel
     private bool _assistanceAcknowledged;
     private bool _assistanceFlashYellow;
     private bool _buttonsEnabled;
+    private string _visualStateKey = string.Empty;
+    private int _visualUpdateCount;
 
     public event EventHandler? CloseRequested;
     public event EventHandler? OpenRequested;
     public event EventHandler? ResetRequested;
     public event EventHandler? AssistanceAcknowledgedRequested;
     public bool IsLinked { get; set; }
+    internal int VisualUpdateCount => _visualUpdateCount;
+    internal bool AssistanceButtonEnabled => _assistance.Enabled;
 
     public KioskControlCard(int kioskNumber)
     {
@@ -968,6 +1144,21 @@ internal sealed class KioskControlCard : Panel
     public void ShowStatus(PosKioskStatus kiosk)
     {
         IsLinked = true;
+        var visualStateKey = string.Join('\u001f',
+            "status",
+            kiosk.StationId,
+            kiosk.StationName,
+            kiosk.IsOnline,
+            kiosk.StationClosed,
+            kiosk.BusinessHoursClosed,
+            kiosk.AvailableForGuests,
+            kiosk.HasError,
+            kiosk.AssistanceRequested,
+            kiosk.AssistanceAcknowledged,
+            kiosk.StatusMessage);
+        if (!BeginVisualUpdate(visualStateKey))
+            return;
+
         var open = kiosk.IsOnline && kiosk.AvailableForGuests && !kiosk.HasError;
         var businessClosed = kiosk.IsOnline && kiosk.BusinessHoursClosed &&
                              !kiosk.StationClosed && !kiosk.HasError;
@@ -995,6 +1186,8 @@ internal sealed class KioskControlCard : Panel
     public void ShowUnlinked()
     {
         IsLinked = false;
+        if (!BeginVisualUpdate("unlinked"))
+            return;
         SetBaseStatusColor(UnlinkedColor);
         SetAssistanceState(false, false);
         _status.Text = "Not linked\nOpen Settings to assign a kiosk";
@@ -1006,6 +1199,8 @@ internal sealed class KioskControlCard : Panel
     public void ShowMissing()
     {
         IsLinked = true;
+        if (!BeginVisualUpdate("missing"))
+            return;
         SetBaseStatusColor(ErrorColor);
         SetAssistanceState(false, false);
         _status.Text = "Linked kiosk not found by controller";
@@ -1016,6 +1211,8 @@ internal sealed class KioskControlCard : Panel
 
     public void ShowControllerUnavailable()
     {
+        if (!BeginVisualUpdate("controller-unavailable"))
+            return;
         SetBaseStatusColor(ErrorColor);
         SetAssistanceState(false, false);
         _status.Text = "Kiosk status unavailable";
@@ -1024,18 +1221,29 @@ internal sealed class KioskControlCard : Panel
 
     public void ShowPendingState(bool open, string message)
     {
+        if (!BeginVisualUpdate($"pending:{open}:{message}"))
+            return;
         SetBaseStatusColor(open ? OnlineColor : ErrorColor);
-        ShowPendingMessage(message);
+        ApplyPendingMessage(message);
     }
 
     public void ShowPendingBusinessClosure(string message)
     {
+        if (!BeginVisualUpdate($"pending-business:{message}"))
+            return;
         SetBaseStatusColor(BusinessClosedColor);
-        ShowPendingMessage(message);
+        ApplyPendingMessage(message);
         _status.ForeColor = Color.FromArgb(10, 91, 160);
     }
 
     public void ShowPendingMessage(string message)
+    {
+        if (!BeginVisualUpdate($"pending-message:{message}"))
+            return;
+        ApplyPendingMessage(message);
+    }
+
+    private void ApplyPendingMessage(string message)
     {
         _status.Text = message;
         _status.ForeColor = Color.FromArgb(125, 77, 9);
@@ -1043,18 +1251,31 @@ internal sealed class KioskControlCard : Panel
 
     public void ShowAssistanceAcknowledgedPending()
     {
+        if (!BeginVisualUpdate("assistance-acknowledged-pending"))
+            return;
         SetAssistanceState(requested: true, acknowledged: true);
-        ShowPendingMessage("The guest was told assistance is on the way.");
+        ApplyPendingMessage("The guest was told assistance is on the way.");
     }
 
     public void ShowCommandError(string message)
     {
+        if (!BeginVisualUpdate($"command-error:{message}"))
+            return;
         SetBaseStatusColor(ErrorColor);
         _status.Text = "Command failed\n" + message;
         _status.ForeColor = Color.FromArgb(187, 34, 46);
     }
 
     public void SetBusy(bool busy) => SetButtonsEnabled(IsLinked && !busy);
+
+    private bool BeginVisualUpdate(string key)
+    {
+        if (string.Equals(_visualStateKey, key, StringComparison.Ordinal))
+            return false;
+        _visualStateKey = key;
+        _visualUpdateCount++;
+        return true;
+    }
 
     private void SetBaseStatusColor(Color color)
     {
@@ -1132,6 +1353,7 @@ internal sealed class KioskControlCard : Panel
         button.FlatAppearance.BorderSize = 0;
         button.Font = new Font("Segoe UI", 7.5f, FontStyle.Bold);
         button.Cursor = Cursors.Hand;
+        button.TabStop = false;
         button.UseVisualStyleBackColor = false;
     }
 }

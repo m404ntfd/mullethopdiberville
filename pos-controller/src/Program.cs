@@ -28,6 +28,12 @@ internal static class Program
             return;
         }
 
+        if (args.Contains("--focus-regression-smoke-test", StringComparer.OrdinalIgnoreCase))
+        {
+            PosControllerForm.RunFocusRegressionSmokeTest();
+            return;
+        }
+
         using var mutex = new Mutex(true, MutexName, out var ownsMutex);
         if (!ownsMutex)
         {

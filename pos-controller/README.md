@@ -5,8 +5,9 @@ It uses Mozilla Firefox installed on the computer to load:
 
 `https://mullet.lilypadpos.app/public/Login.php`
 
-LilyPad POS fills the main area. A permanent right sidebar shows the four assigned
-waiver kiosks and keeps their controls available without covering the POS page.
+LilyPad POS fills the main area. A right sidebar shows the four assigned waiver
+kiosks and keeps their status available without covering the POS page. Firefox
+keeps keyboard focus unless the user deliberately interacts with the sidebar.
 
 ## Sidebar behavior
 
@@ -14,6 +15,10 @@ waiver kiosks and keeps their controls available without covering the POS page.
   status dot per kiosk, and a compact assistance acknowledgement button.
 * Select the arrow again to expand kiosk names, status messages, and the Close,
   Open, and Reset controls.
+* Clicking or touching LilyPad immediately returns keyboard focus to Firefox.
+  After that input completes, the sidebar collapses automatically. Its status
+  lights keep updating in the background, but unchanged status responses do not
+  rewrite the controls or take focus from Firefox.
 * A green dot means the kiosk is online and open to guests.
 * A blue dot means the kiosk is showing the scheduled Business Closed screen or
   its business-hours blackout screen.
@@ -33,16 +38,19 @@ waiver kiosks and keeps their controls available without covering the POS page.
   schedule still applies.
 * **Reset** returns the kiosk to the beginning of the waiver.
 
-The bottom of the sidebar contains Refresh Lilypad, Settings, Check for Updates,
-Minimize, and Exit Application. **Minimize** sends Mullet Hop POS and its Firefox
-window to the Windows taskbar. Select the Mullet Hop POS taskbar icon to restore
-the full-screen window. Only the passcode-protected **Exit Application** command
-closes Firefox and stops the application. Press **Ctrl + Alt + M** while Mullet
-Hop POS is active to open the protected Settings window.
+The bottom of the sidebar contains Restore Keyboard, Refresh Lilypad, Settings,
+Check for Updates, Minimize, and Exit Application. **Restore Keyboard** returns
+focus to Firefox without closing the browser, changing pages, or losing the
+current sale. **Minimize** sends Mullet Hop POS and its Firefox window to the
+Windows taskbar. Select the Mullet Hop POS taskbar icon to restore the full-screen
+window. Only the passcode-protected **Exit Application** command closes Firefox
+and stops the application. Press **Ctrl + Alt + M** while Mullet Hop POS is active
+to open the protected Settings window.
 
 Firefox is embedded with its normal browser controls instead of kiosk mode. The
-application restores Firefox input focus when the POS window activates and checks
-for a hung browser, a failed startup, a Firefox process exit, and a tab-crash title.
+application restores Firefox input focus when the POS window activates, continuously
+protects Firefox focus while the sidebar is idle, and checks for a hung browser, a
+failed startup, a Firefox process exit, and a tab-crash title.
 It terminates and reopens the complete embedded Firefox session once automatically.
 Only if the recovery also fails does a red banner ask staff to use **Refresh
 Lilypad**. Refresh Lilypad forcibly terminates the Firefox process tree, clears
@@ -86,7 +94,11 @@ The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
 restarts without changing the user's normal Firefox profile.
 
-Version 1.7.2 requests LilyPad's POS/location list after username input settles,
+Version 1.7.3 keeps keyboard focus on Firefox while the status sidebar works in the
+background, immediately restores focus when browser input is detected, auto-collapses
+the sidebar after that input completes, adds a non-destructive Restore Keyboard
+command, and only redraws kiosk cards when their status changes. Assistance changes
+still flash the light and enable acknowledgment immediately. Version 1.7.2 requests LilyPad's POS/location list after username input settles,
 before the Password field must receive focus. It also stops routine Firefox health
 checks from recalculating the embedded window frame, which preserves password focus
 and native dropdown popups. Version 1.7.1 adds a loopback-only Firefox compatibility bridge for LilyPad's

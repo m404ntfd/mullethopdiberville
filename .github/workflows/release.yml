@@ -178,6 +178,14 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "The Mullet Hop POS startup smoke test failed with exit code $($process.ExitCode)."
           }
+          $focusProcess = Start-Process `
+            -FilePath "pos-publish/MulletHopPosController.exe" `
+            -ArgumentList "--focus-regression-smoke-test" `
+            -Wait `
+            -PassThru
+          if ($focusProcess.ExitCode -ne 0) {
+            throw "The Mullet Hop POS focus regression test failed with exit code $($focusProcess.ExitCode)."
+          }
 
       - name: Verify kiosk schedule and installer startup
         shell: pwsh

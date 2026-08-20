@@ -1217,9 +1217,9 @@ internal sealed class ControllerForm : Form
         }
 
         var answer = MessageBox.Show(this,
-            "Make this computer the master Systems Controller?\n\n" +
-            "Only one controller on the local network can be master. The program will scan for another master before saving this change.",
-            "Make This the Master Controller?",
+            "Would you like to switch this PC to be the master Systems Controller?\n\n" +
+            "Only one controller on the local network can be master. Select Yes to scan for another master before changing this PC's role. Select No to leave the current master settings unchanged.",
+            "Switch This PC to Master?",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question,
             MessageBoxDefaultButton.Button2);

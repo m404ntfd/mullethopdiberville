@@ -101,16 +101,21 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.9, Systems Controller version 1.15.0, and Mullet Hop POS
-version 1.7.2 are the matching package releases. Kiosk 2.11.9 treats a 12:00 AM
+Waiver Kiosk version 2.11.10, Systems Controller version 1.15.1, and Mullet Hop POS
+version 1.7.3 are the matching package releases. Kiosk 2.11.10 retains the 2.11.9
+schedule behavior that treats a 12:00 AM
 closing as next-day midnight, plays the closure video at Last Jump Time Sold,
 blacks out one minute after closing, supports a separate Dark-mode switch time
-for every day, and defaults new installations to Light. Systems Controller 1.15.0
+for every day, and defaults new installations to Light. Systems Controller 1.15.1
+asks for confirmation before a user switches the local PC to master. Version 1.15.0
 adds an ordered Device-ID master list, confirmed automatic failover, and complete
 replication of kiosk connections, advertisements, Business Hours, and appearance
 settings to every controller. Systems Controller 1.14.3 uses
 a responsive windowed layout with protected button sizes, a larger restore size,
-and non-overlapping header and summary sections. Mullet Hop POS 1.7.2 requests
+and non-overlapping header and summary sections. Mullet Hop POS 1.7.3 keeps Firefox
+focused while the sidebar runs in the background, auto-collapses after browser
+input, adds Restore Keyboard without reloading the sale, and redraws kiosk controls
+only when their status changes. Version 1.7.2 requests
 LilyPad's POS/location choices after username input settles and no longer reapplies
 Firefox's window frame during routine health checks, preserving password focus and
 native dropdown behavior. Systems Controller 1.14.2 applies

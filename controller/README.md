@@ -303,7 +303,9 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.15.0 adds Device-ID master priorities, confirmed
+Systems Controller version 1.15.1 asks for an explicit Yes/No confirmation before
+the user switches the local PC to the master role; automatic priority failover remains
+unattended. Version 1.15.0 adds Device-ID master priorities, confirmed
 automatic failover, and complete controller replication of kiosk connections,
 advertisements, Business Hours, and Kiosk Appearance settings. Version 1.14.3 adds a responsive windowed layout, preserves
 minimum button sizes, and prevents the header, status, and controller controls from
