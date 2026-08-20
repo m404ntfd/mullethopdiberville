@@ -85,7 +85,7 @@ controller, restart the controller, or close it. Red and green lenses show the
 saved master role, and local controllers discover each other when they launch.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.10.2 is the matching package release for the application
+Waiver Kiosk version 2.10.3 is the matching package release for the application
 formerly named POS Controller version 1.3.0. Waiver Kiosk version 2.10.1 places
 guest assistance in a compact highlighted card
 with the other right-side waiver controls and moves that card stack near the top
