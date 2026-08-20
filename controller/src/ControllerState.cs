@@ -156,6 +156,26 @@ internal sealed class StoredControllerConnections
 
 internal sealed record StoredConnectionsResult(bool Success, string Message, int ConnectionCount);
 
+internal sealed class StoredMasterControllerConnection
+{
+    public string ControllerId { get; set; } = string.Empty;
+    public string MachineName { get; set; } = string.Empty;
+    public string LastKnownAddress { get; set; } = string.Empty;
+    public string PairingKey { get; set; } = string.Empty;
+    public string PeerAccessKey { get; set; } = string.Empty;
+    public DateTime LastVerifiedUtc { get; set; }
+
+    public StoredMasterControllerConnection Clone() => new()
+    {
+        ControllerId = ControllerId,
+        MachineName = MachineName,
+        LastKnownAddress = LastKnownAddress,
+        PairingKey = PairingKey,
+        PeerAccessKey = PeerAccessKey,
+        LastVerifiedUtc = LastVerifiedUtc
+    };
+}
+
 internal sealed class PosMachinePresence
 {
     public string MachineName { get; set; } = string.Empty;
@@ -170,6 +190,7 @@ internal sealed class ControllerData
     public string ControllerId { get; set; } = string.Empty;
     public bool IsMaster { get; set; }
     public DateTime? MasterSinceUtc { get; set; }
+    public StoredMasterControllerConnection? MasterController { get; set; }
     public List<ManagedKiosk> Kiosks { get; set; } = [];
     public List<ControllerAdvertisement> Advertisements { get; set; } = [];
     public string AdvertisementRevision { get; set; } = string.Empty;
@@ -224,6 +245,11 @@ internal sealed class ControllerState
             _data.MasterSinceUtc = DateTime.UtcNow;
             changed = true;
         }
+        if (_data.IsMaster && _data.MasterController is not null)
+        {
+            _data.MasterController = null;
+            changed = true;
+        }
         if (changed || (_data.IsMaster && !File.Exists(_masterConnectionsPath)))
             SaveLocked();
     }
@@ -257,6 +283,59 @@ internal sealed class ControllerState
         get { lock (_gate) return _data.MasterSinceUtc; }
     }
 
+    public StoredMasterControllerConnection? MasterControllerSnapshot()
+    {
+        lock (_gate) return _data.MasterController?.Clone();
+    }
+
+    public void RememberMasterController(
+        string controllerId,
+        string machineName,
+        string controllerAddress,
+        string pairingKey,
+        string peerAccessKey)
+    {
+        if (!Guid.TryParseExact(controllerId, "N", out _) ||
+            string.IsNullOrWhiteSpace(machineName) ||
+            string.IsNullOrWhiteSpace(controllerAddress) ||
+            string.IsNullOrWhiteSpace(pairingKey) ||
+            pairingKey.Length is < 16 or > 1_000 ||
+            string.IsNullOrWhiteSpace(peerAccessKey) ||
+            peerAccessKey.Length is < 16 or > 1_000)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (_data.IsMaster)
+                return;
+            var normalized = new StoredMasterControllerConnection
+            {
+                ControllerId = controllerId,
+                MachineName = Clean(machineName, "Master Controller", 200),
+                LastKnownAddress = Clean(controllerAddress, string.Empty, 300),
+                PairingKey = pairingKey.Trim(),
+                PeerAccessKey = peerAccessKey.Trim(),
+                LastVerifiedUtc = DateTime.UtcNow
+            };
+            var existing = _data.MasterController;
+            var changed = existing is null ||
+                          !string.Equals(existing.ControllerId, normalized.ControllerId, StringComparison.Ordinal) ||
+                          !string.Equals(existing.MachineName, normalized.MachineName, StringComparison.Ordinal) ||
+                          !string.Equals(existing.LastKnownAddress, normalized.LastKnownAddress, StringComparison.OrdinalIgnoreCase) ||
+                          !string.Equals(existing.PairingKey, normalized.PairingKey, StringComparison.Ordinal) ||
+                          !string.Equals(existing.PeerAccessKey, normalized.PeerAccessKey, StringComparison.Ordinal);
+            _data.MasterController = normalized;
+            if (changed)
+            {
+                SaveLocked();
+                ControllerLog.Write(
+                    $"Saved master controller {normalized.MachineName} at {normalized.LastKnownAddress}.");
+            }
+        }
+    }
+
     public void SetMaster(bool isMaster, string reason)
     {
         lock (_gate)
@@ -265,6 +344,8 @@ internal sealed class ControllerState
                 return;
             _data.IsMaster = isMaster;
             _data.MasterSinceUtc = isMaster ? DateTime.UtcNow : null;
+            if (isMaster)
+                _data.MasterController = null;
             SaveLocked();
             ControllerLog.Write(
                 $"Controller master role changed to {(isMaster ? "MASTER" : "NOT MASTER")}: {reason}");
@@ -872,6 +953,7 @@ internal sealed class ControllerState
             var data = JsonSerializer.Deserialize<ControllerData>(File.ReadAllText(_dataPath), JsonOptions)
                        ?? new ControllerData();
             data.ControllerId ??= string.Empty;
+            data.MasterController = NormalizeStoredMasterController(data.MasterController);
             data.Kiosks ??= [];
             data.Advertisements ??= [];
             data.AdvertisementRevision ??= string.Empty;
@@ -942,6 +1024,31 @@ internal sealed class ControllerState
         {
             _posMachines.Remove(key);
         }
+    }
+
+    private static StoredMasterControllerConnection? NormalizeStoredMasterController(
+        StoredMasterControllerConnection? stored)
+    {
+        if (stored is null ||
+            !Guid.TryParseExact(stored.ControllerId, "N", out _) ||
+            string.IsNullOrWhiteSpace(stored.MachineName) ||
+            stored.MachineName.Length > 200 ||
+            string.IsNullOrWhiteSpace(stored.LastKnownAddress) ||
+            stored.LastKnownAddress.Length > 300 ||
+            string.IsNullOrWhiteSpace(stored.PairingKey) ||
+            stored.PairingKey.Length is < 16 or > 1_000 ||
+            string.IsNullOrWhiteSpace(stored.PeerAccessKey) ||
+            stored.PeerAccessKey.Length is < 16 or > 1_000)
+        {
+            return null;
+        }
+
+        stored.ControllerId = stored.ControllerId.Trim();
+        stored.MachineName = stored.MachineName.Trim();
+        stored.LastKnownAddress = stored.LastKnownAddress.Trim();
+        stored.PairingKey = stored.PairingKey.Trim();
+        stored.PeerAccessKey = stored.PeerAccessKey.Trim();
+        return stored;
     }
 
     private static string DescribeQueuedCommand(string type, bool? closed) => type switch

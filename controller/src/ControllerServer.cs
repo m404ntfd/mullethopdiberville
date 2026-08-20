@@ -238,7 +238,7 @@ internal sealed class ControllerServer : IDisposable
                     !Guid.TryParseExact(peerCommand.ControllerId, "N", out _) ||
                     !Peers.IsKnownController(peerCommand.ControllerId) ||
                     !Guid.TryParseExact(peerCommand.StationId, "N", out _) ||
-                    !IsValidPosCommand(peerCommand.Type, peerCommand.Closed))
+                    !IsValidPeerCommand(peerCommand.Type, peerCommand.Closed))
                 {
                     await WritePlainResponseAsync(
                         context,
@@ -470,6 +470,17 @@ internal sealed class ControllerServer : IDisposable
         ((type != CommandTypes.SetClosed && type != CommandTypes.SetBusinessClosed) ||
          closed.HasValue);
 
+    private static bool IsValidPeerCommand(string type, bool? closed) =>
+        (type == CommandTypes.SetClosed ||
+         type == CommandTypes.SetBusinessClosed ||
+         type == CommandTypes.ResetStart ||
+         type == CommandTypes.CheckUpdate ||
+         type == CommandTypes.InstallUpdate ||
+         type == CommandTypes.SyncBusinessHours ||
+         type == CommandTypes.AcknowledgeAssistance) &&
+        ((type != CommandTypes.SetClosed && type != CommandTypes.SetBusinessClosed) ||
+         closed.HasValue);
+
     private static async Task WriteJsonResponseAsync(HttpListenerContext context, object payload)
     {
         var body = JsonSerializer.Serialize(payload, JsonOptions);
@@ -531,6 +542,9 @@ internal sealed class ControllerServer : IDisposable
 
 internal static class ControllerSecurity
 {
+    public static string Fingerprint(string pairingKey) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(pairingKey.Trim())));
+
     public static string Sign(string pairingKey, string timestamp, string body)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(pairingKey));
