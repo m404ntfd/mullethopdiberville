@@ -13,6 +13,7 @@ internal sealed class ControllerServer : IDisposable
     private const string TimestampHeader = "X-MulletHop-Timestamp";
     private const string SignatureHeader = "X-MulletHop-Signature";
     private const string PosMachineHeader = "X-MulletHop-POS-Machine";
+    private const string PosVersionHeader = "X-MulletHop-POS-Version";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ControllerState _state;
     private readonly HttpListener _listener = new();
@@ -60,6 +61,62 @@ internal sealed class ControllerServer : IDisposable
             type,
             closed,
             cancellationToken);
+    }
+
+    public async Task<ControllerPeerCommandResult> QueueSoftwareUpdateAsync(
+        string targetType,
+        string targetId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.Equals(targetType, "controller", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(targetId, _state.ControllerId, StringComparison.Ordinal))
+        {
+            Peers.RequestLocalSoftwareUpdate();
+            return new ControllerPeerCommandResult(true, "Update requested on this Systems Controller.");
+        }
+
+        if (_state.IsMaster)
+            return QueueSoftwareUpdateOnMaster(targetType, targetId);
+
+        return await Peers.QueueSoftwareUpdateOnMasterAsync(
+            targetType,
+            targetId,
+            cancellationToken);
+    }
+
+    private ControllerPeerCommandResult QueueSoftwareUpdateOnMaster(
+        string targetType,
+        string targetId)
+    {
+        if (string.Equals(targetType, "controller", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Guid.TryParseExact(targetId, "N", out _) ||
+                (!string.Equals(targetId, _state.ControllerId, StringComparison.Ordinal) &&
+                 !Peers.IsKnownController(targetId)))
+            {
+                return new ControllerPeerCommandResult(false, "Systems Controller not found.");
+            }
+
+            if (string.Equals(targetId, _state.ControllerId, StringComparison.Ordinal))
+                Peers.RequestLocalSoftwareUpdate();
+            else
+                _state.QueueControllerUpdate(targetId);
+            return new ControllerPeerCommandResult(
+                true,
+                "Systems Controller update requested. The target will install it after its next check-in.");
+        }
+
+        if (string.Equals(targetType, "pos", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(targetId) || !Peers.IsKnownPosMachine(targetId))
+                return new ControllerPeerCommandResult(false, "Mullet Hop POS workstation not found.");
+            _state.QueuePosUpdate(targetId);
+            return new ControllerPeerCommandResult(
+                true,
+                "Mullet Hop POS update requested. The workstation will install it after its next check-in.");
+        }
+
+        return new ControllerPeerCommandResult(false, "Unknown software update target.");
     }
 
     private async Task ListenAsync()
@@ -181,6 +238,10 @@ internal sealed class ControllerServer : IDisposable
                 string.Equals(
                     path,
                     BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.CommandPath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    path,
+                    BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.SoftwareUpdatePath,
                     StringComparison.OrdinalIgnoreCase))
             {
                 var remoteAddress = context.Request.RemoteEndPoint?.Address;
@@ -229,6 +290,38 @@ internal sealed class ControllerServer : IDisposable
                     await WriteSignedResponseAsync(
                         context,
                         _state.CreateReplicaSnapshot(),
+                        _state.PeerAccessKey);
+                    return;
+                }
+
+                if (string.Equals(
+                        path,
+                        BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.SoftwareUpdatePath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var updateRequest = JsonSerializer.Deserialize<ControllerSoftwareUpdateRequest>(
+                        body, JsonOptions);
+                    if (updateRequest is null ||
+                        !Guid.TryParseExact(updateRequest.ControllerId, "N", out _) ||
+                        !Peers.IsKnownController(updateRequest.ControllerId))
+                    {
+                        await WritePlainResponseAsync(
+                            context,
+                            HttpStatusCode.BadRequest,
+                            "Invalid Systems Controller update relay request.");
+                        return;
+                    }
+
+                    var updateResult = QueueSoftwareUpdateOnMaster(
+                        updateRequest.TargetType,
+                        updateRequest.TargetId);
+                    await WriteSignedResponseAsync(
+                        context,
+                        new ControllerPeerCommandResponse
+                        {
+                            Accepted = updateResult.Accepted,
+                            Message = updateResult.Message
+                        },
                         _state.PeerAccessKey);
                     return;
                 }
@@ -292,10 +385,11 @@ internal sealed class ControllerServer : IDisposable
 
             if (string.Equals(path, BasePath.TrimEnd('/') + "/api/pos/status", StringComparison.OrdinalIgnoreCase))
             {
-                RecordPosMachine(context.Request);
+                var posMachine = RecordPosMachine(context.Request);
                 await WriteSignedResponseAsync(context, new
                 {
                     serverTimeUtc = DateTime.UtcNow,
+                    installUpdate = _state.TakePosUpdate(posMachine),
                     kiosks = _state.PosStatusSnapshot()
                 });
                 return;
@@ -455,11 +549,14 @@ internal sealed class ControllerServer : IDisposable
         await WriteBodyAsync(context, body);
     }
 
-    private void RecordPosMachine(HttpListenerRequest request)
+    private string RecordPosMachine(HttpListenerRequest request)
     {
+        var machineName = request.Headers[PosMachineHeader] ?? string.Empty;
         _state.RecordPosMachine(
-            request.Headers[PosMachineHeader],
-            request.RemoteEndPoint?.Address.ToString());
+            machineName,
+            request.RemoteEndPoint?.Address.ToString(),
+            request.Headers[PosVersionHeader]);
+        return machineName;
     }
 
     private static bool IsValidPosCommand(string type, bool? closed) =>

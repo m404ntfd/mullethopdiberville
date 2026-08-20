@@ -82,11 +82,11 @@ internal sealed class PosSettingsDialog : Form
 
     private GroupBox BuildConnectionGroup()
     {
-        var group = MakeGroup("Kiosk Controller Connection", 188);
+        var group = MakeGroup("Systems Controller Connection", 188);
         group.Dock = DockStyle.Top;
         var note = new Label
         {
-            Text = "Use the same controller address and pairing key shown in the Mullet Hop Kiosk Controller. Mullet Hop POS remains a separate program.",
+            Text = "Use the same controller address and pairing key shown in the Mullet Hop Systems Controller. Mullet Hop POS remains a separate program.",
             Bounds = new Rectangle(18, 30, 710, 42),
             ForeColor = Color.FromArgb(52, 65, 76)
         };
@@ -181,7 +181,7 @@ internal sealed class PosSettingsDialog : Form
             return;
         }
 
-        SetConnectionStatus("Connecting to the Kiosk Controller…", true);
+        SetConnectionStatus("Connecting to the Systems Controller…", true);
         try
         {
             var client = new PosControllerClient(_controllerUrl.Text, _pairingKey.Text);

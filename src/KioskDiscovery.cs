@@ -262,7 +262,7 @@ internal sealed class KioskDiscoveryClient : IDisposable
             }
 
             KioskLog.Write(
-                $"Securely reconnected to the saved kiosk controller at {discoveredAddress}.");
+                $"Securely reconnected to the saved Systems Controller at {discoveredAddress}.");
             _pairingApplied();
         }
         catch (Exception ex)
@@ -353,7 +353,7 @@ internal sealed class KioskDiscoveryClient : IDisposable
                     true,
                     $"Connection approved and saved on {Environment.MachineName}.");
                 KioskLog.Write(
-                    $"Approved and saved kiosk controller connection to {payload.ControllerAddress}.");
+                    $"Approved and saved Systems Controller connection to {payload.ControllerAddress}.");
                 _pairingApplied();
                 return;
             }

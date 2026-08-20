@@ -4486,7 +4486,7 @@ internal sealed class StaffSettingsDialog : Form
         _settingsTabs.SizeMode = TabSizeMode.Fixed;
         _settingsTabs.ItemSize = new Size(42, 185);
         _settingsTabs.Padding = new Point(12, 7);
-        var connectionTab = new TabPage("Connection & Updates")
+        var connectionTab = new TabPage("Connections & Updates")
         {
             BackColor = Color.White,
             Padding = new Padding(8)
@@ -4551,7 +4551,8 @@ internal sealed class StaffSettingsDialog : Form
                     ? (dark ? Color.FromArgb(205, 153, 235) : Color.FromArgb(117, 68, 154))
                     : KioskTheme.PrimaryText(dark),
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding |
+                TextFormatFlags.NoPrefix);
         };
 
         var currentStatus = new Label
@@ -5615,7 +5616,7 @@ internal sealed class RemoteManagementSettingsControl : UserControl
         _manualSetupCode.MaxLength = 4096;
         _manualSetupCode.Bounds = new Rectangle(14, 60, 540, 38);
         _manualSetupCode.Font = new Font("Consolas", 8.5f);
-        _manualSetupCode.PlaceholderText = "Paste the MHK1 setup code from the Kiosk Controller";
+        _manualSetupCode.PlaceholderText = "Paste the MHK1 setup code from the Systems Controller";
         _connectManual.Text = "Connect and Save";
         _connectManual.Bounds = new Rectangle(14, 105, 150, 34);
         _connectManual.BackColor = Color.FromArgb(245, 130, 32);

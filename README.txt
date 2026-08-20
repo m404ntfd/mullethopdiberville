@@ -18,7 +18,7 @@ SOURCE FOLDER LAYOUT
 --------------------
 
 * src\ contains the full-screen Mullet Hop Waiver Kiosk application.
-* controller\src\ contains the office Kiosk Controller application.
+* controller\src\ contains the office Mullet Hop Systems Controller application.
 * controller\install\ contains the controller installer and uninstaller.
 * controller\README.md contains controller setup and network instructions.
 * pos-controller\src\ contains the full-screen front-desk Mullet Hop POS.
@@ -96,8 +96,8 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.3, Kiosk Controller version 1.12.3, and Mullet Hop POS
-version 1.5.1 are the matching package releases. Waiver Kiosk version 2.11.0 adds
+Waiver Kiosk version 2.11.4, Systems Controller version 1.13.0, and Mullet Hop POS
+version 1.6.0 are the matching package releases. Waiver Kiosk version 2.11.0 adds
 Last Jump Time Sold schedules, the editable looping closed video and next-opening
 time, closing-time blackout, and the reorganized staff settings navigation.
 Waiver Kiosk version 2.11.3 is the matching kiosk package for the controller and
@@ -108,7 +108,7 @@ guest assistance in a compact highlighted card
 with the other right-side waiver controls and moves that card stack near the top
 so it does not cover waiver information. Version 2.10.0 adds the guest-assistance
 request itself. A guest can call for help, which produces a flashing yellow alert
-in the Kiosk Controller and in the kiosk's assigned Mullet Hop POS panel.
+in the Systems Controller and in the kiosk's assigned Mullet Hop POS panel.
 Selecting Acknowledge in Mullet Hop POS acknowledges the call and changes the kiosk
 message to tell the guest that assistance is coming. The kiosk continues flashing
 until the guest or assisting staff member selects Clear Assistance Call.
@@ -169,7 +169,11 @@ connections, so only the controller PC needs the TCP 47832 private-network
 firewall rule created by its installer. See README.md in the controller download
 for complete installation and network instructions.
 
-Kiosk Controller version 1.12.3 improves tray restoration, adds a tray Exit
+Systems Controller version 1.13.0 is the renamed controller release. It preserves
+the existing update identity and stored connections, fixes master pairing across
+clock differences, lists other controllers and POS workstations, and can update
+selected or all Systems Controller and POS applications from any controller.
+Version 1.12.3 improves tray restoration, adds a tray Exit
 command, enables checked multi-kiosk actions, and prompts for Staff or Business
 Closure. Version 1.12.2 adds manual master connection by private IPv4
 address or pairing key, remembers the master by stable controller identity, and
@@ -228,11 +232,12 @@ automatically before showing a red problem message. Refresh Lilypad forcibly clo
 the dedicated Firefox process tree, clears its saved tabs and session state, and
 opens one fresh window at the LilyPad home page. Ctrl + Alt + M opens Settings. Settings
 requires the application's 4-8 digit passcode. The Settings window finds
-kiosks already paired with the on-site Kiosk Controller, remembers the controller
+kiosks already paired with the on-site Systems Controller, remembers the controller
 address and pairing key, and saves each kiosk's identity and Kiosk 1-4 position.
 Selecting a machine already assigned elsewhere moves or swaps it automatically.
 
-Version 1.5.1 minimizes to the Windows taskbar, renames the controls to Settings
+Version 1.6.0 fixes the embedded Firefox native focus crash and accepts software
+update requests relayed by any Systems Controller. Version 1.5.1 minimizes to the Windows taskbar, renames the controls to Settings
 and Refresh Lilypad, restores Firefox input focus, and performs one automatic
 full-session recovery before reporting a Firefox failure. Version 1.5.0 keeps
 Firefox controls visible, detects Firefox crashes, and makes
@@ -345,7 +350,7 @@ screen guests will see. Advertisement schedules are evaluated using the date and
 time currently shown in Staff Settings, including a future preview time. The
 normal thank-you countdown returns the kiosk to a fresh waiver automatically.
 
-When the kiosk is paired with version 1.3.0 or newer of the Kiosk Controller,
+When the kiosk is paired with version 1.3.0 or newer of the Systems Controller,
 the controller's Manage Ads window becomes the shared advertisement source.
 Adding, editing, enabling, disabling, or deleting a manager ad publishes a new
 catalog. Connected kiosks automatically download the changed catalog. Staff can

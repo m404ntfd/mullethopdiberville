@@ -7,6 +7,22 @@ using System.Text.Json;
 
 namespace MulletHopKioskController;
 
+internal sealed class ControllerPosPresence
+{
+    public string MachineName { get; set; } = string.Empty;
+    public string IpAddress { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public DateTime LastSeenUtc { get; set; }
+
+    public ControllerPosPresence Clone() => new()
+    {
+        MachineName = MachineName,
+        IpAddress = IpAddress,
+        Version = Version,
+        LastSeenUtc = LastSeenUtc
+    };
+}
+
 internal sealed class ControllerPeerPresence
 {
     public int ProtocolVersion { get; set; } = 1;
@@ -18,7 +34,11 @@ internal sealed class ControllerPeerPresence
     public string ControllerAddress { get; set; } = string.Empty;
     public string PeerAccessKey { get; set; } = string.Empty;
     public string PairingKeyFingerprint { get; set; } = string.Empty;
+    public long ServerUnixTimeSeconds { get; set; }
     public List<string> ActivePosMachines { get; set; } = [];
+    public List<ControllerPosPresence> PosMachines { get; set; } = [];
+    public bool InstallControllerUpdate { get; set; }
+    public List<string> PosUpdateRequests { get; set; } = [];
 }
 
 internal sealed class DiscoveredControllerPeer
@@ -31,7 +51,9 @@ internal sealed class DiscoveredControllerPeer
     public string ControllerAddress { get; set; } = string.Empty;
     public string PeerAccessKey { get; set; } = string.Empty;
     public string PairingKeyFingerprint { get; set; } = string.Empty;
+    public long ClockOffsetSeconds { get; set; }
     public List<string> ActivePosMachines { get; set; } = [];
+    public List<ControllerPosPresence> PosMachines { get; set; } = [];
     public DateTime LastSeenUtc { get; set; }
 
     public DiscoveredControllerPeer Clone() => new()
@@ -44,7 +66,9 @@ internal sealed class DiscoveredControllerPeer
         ControllerAddress = ControllerAddress,
         PeerAccessKey = PeerAccessKey,
         PairingKeyFingerprint = PairingKeyFingerprint,
+        ClockOffsetSeconds = ClockOffsetSeconds,
         ActivePosMachines = [.. ActivePosMachines],
+        PosMachines = PosMachines.Select(machine => machine.Clone()).ToList(),
         LastSeenUtc = LastSeenUtc
     };
 }
@@ -59,6 +83,12 @@ internal sealed class ControllerPeerCommandRequest : ControllerPeerRequest
     public string StationId { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
     public bool? Closed { get; set; }
+}
+
+internal sealed class ControllerSoftwareUpdateRequest : ControllerPeerRequest
+{
+    public string TargetType { get; set; } = string.Empty;
+    public string TargetId { get; set; } = string.Empty;
 }
 
 internal sealed class ControllerPeerCommandResponse
@@ -78,6 +108,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
     public const string PresencePath = "api/controller/presence";
     public const string ReplicaPath = "api/controller/replica";
     public const string CommandPath = "api/controller/command";
+    public const string SoftwareUpdatePath = "api/controller/software-update";
     private const string TimestampHeader = "X-MulletHop-Timestamp";
     private const string SignatureHeader = "X-MulletHop-Signature";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -92,6 +123,9 @@ internal sealed class ControllerPeerCoordinator : IDisposable
     private bool _disposed;
 
     public event Action? PeersChanged;
+    public event Action? SoftwareUpdateRequested;
+
+    public void RequestLocalSoftwareUpdate() => RaiseSoftwareUpdateRequested();
 
     public ControllerPeerCoordinator(ControllerState state)
     {
@@ -99,11 +133,11 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         var handler = new SocketsHttpHandler
         {
             UseProxy = false,
-            ConnectTimeout = TimeSpan.FromMilliseconds(450),
+            ConnectTimeout = TimeSpan.FromMilliseconds(1_500),
             PooledConnectionLifetime = TimeSpan.FromMinutes(2),
             PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30)
         };
-        _client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(1_500) };
+        _client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
     }
 
     public void Start()
@@ -133,6 +167,11 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             return _peers.ContainsKey(controllerId);
         }
     }
+
+    public bool IsKnownPosMachine(string machineName) =>
+        _state.ActivePosMachineNames().Contains(machineName, StringComparer.OrdinalIgnoreCase) ||
+        Snapshot().Any(peer =>
+            peer.ActivePosMachines.Contains(machineName, StringComparer.OrdinalIgnoreCase));
 
     private void RemovePeer(string controllerId)
     {
@@ -202,7 +241,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             Closed = closed
         }, JsonOptions);
         var endpoint = new Uri(new Uri(master.ControllerAddress), CommandPath);
-        using var request = CreateSignedRequest(endpoint, master.PeerAccessKey, body);
+        using var request = CreateSignedRequest(
+            endpoint, master.PeerAccessKey, body, master.ClockOffsetSeconds);
         using var response = await _client.SendAsync(request, cancellationToken);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
@@ -213,11 +253,76 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                     : responseBody.Trim());
         }
 
-        VerifySignedResponse(response, master.PeerAccessKey, responseBody);
+        VerifySignedResponse(
+            response, master.PeerAccessKey, responseBody, master.ClockOffsetSeconds);
         var result = JsonSerializer.Deserialize<ControllerPeerCommandResponse>(responseBody, JsonOptions);
         return result is null
             ? new ControllerPeerCommandResult(false, "The master controller returned an empty response.")
             : new ControllerPeerCommandResult(result.Accepted, result.Message);
+    }
+
+    public async Task<ControllerPeerCommandResult> QueueSoftwareUpdateOnMasterAsync(
+        string targetType,
+        string targetId,
+        CancellationToken cancellationToken = default)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var master = await ResolveMasterAsync(cancellationToken);
+            if (master is null)
+            {
+                return new ControllerPeerCommandResult(
+                    false,
+                    "No active or saved master Systems Controller is available.");
+            }
+
+            try
+            {
+                var body = JsonSerializer.Serialize(new ControllerSoftwareUpdateRequest
+                {
+                    ControllerId = _state.ControllerId,
+                    TargetType = targetType,
+                    TargetId = targetId
+                }, JsonOptions);
+                var endpoint = new Uri(new Uri(master.ControllerAddress), SoftwareUpdatePath);
+                using var request = CreateSignedRequest(
+                    endpoint, master.PeerAccessKey, body, master.ClockOffsetSeconds);
+                using var response = await _client.SendAsync(request, cancellationToken);
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new InvalidDataException(
+                        string.IsNullOrWhiteSpace(responseBody)
+                            ? $"The master Systems Controller returned HTTP {(int)response.StatusCode}."
+                            : responseBody.Trim());
+                }
+
+                VerifySignedResponse(
+                    response, master.PeerAccessKey, responseBody, master.ClockOffsetSeconds);
+                var result = JsonSerializer.Deserialize<ControllerPeerCommandResponse>(
+                    responseBody, JsonOptions);
+                return result is null
+                    ? new ControllerPeerCommandResult(
+                        false, "The master Systems Controller returned an empty response.")
+                    : new ControllerPeerCommandResult(result.Accepted, result.Message);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return new ControllerPeerCommandResult(false, "The update request was canceled.");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or
+                                       JsonException or InvalidDataException or IOException)
+            {
+                ControllerLog.Write("Master software update relay error: " + ex.Message);
+                RemovePeer(master.ControllerId);
+                if (attempt == 0)
+                    continue;
+            }
+        }
+
+        return new ControllerPeerCommandResult(
+            false,
+            "The update request could not be sent to the saved master Systems Controller.");
     }
 
     public async Task<ControllerConnectionPullResult> PullMasterConnectionsAsync(
@@ -260,12 +365,19 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         connectionValue = connectionValue?.Trim() ?? string.Empty;
         if (TryBuildManualControllerAddress(connectionValue, out var address))
         {
-            var presence = await AnnounceAsync(address, cancellationToken);
+            var diagnostic = string.Empty;
+            var presence = await AnnounceAsync(
+                address,
+                cancellationToken,
+                failure => diagnostic = failure);
             if (presence is null)
             {
                 return new ControllerMasterConnectionResult(
                     false,
-                    "No Kiosk Controller answered at that private-network IP address.");
+                    "No Systems Controller answered at that private-network IP address." +
+                    (string.IsNullOrWhiteSpace(diagnostic)
+                        ? " Confirm that the master is running and that TCP 47832 is allowed on its Private-network firewall."
+                        : "\n\n" + diagnostic));
             }
             if (!presence.IsMaster)
             {
@@ -370,7 +482,17 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             presence.ControllerAddress = BuildControllerAddress(remoteAddress);
             UpdatePeer(presence);
         }
-        return CreateLocalPresence(BuildControllerAddress(localAddress));
+        var response = CreateLocalPresence(BuildControllerAddress(localAddress));
+        if (_state.IsMaster &&
+            !string.Equals(presence.ControllerId, _state.ControllerId, StringComparison.Ordinal))
+        {
+            response.InstallControllerUpdate =
+                _state.TakeControllerUpdate(presence.ControllerId);
+            response.PosUpdateRequests = _state
+                .TakePosUpdates(presence.ActivePosMachines)
+                .ToList();
+        }
+        return response;
     }
 
     public async Task ScanNowAsync(CancellationToken cancellationToken = default)
@@ -470,26 +592,42 @@ internal sealed class ControllerPeerCoordinator : IDisposable
     private async ValueTask<ControllerPeerPresence?> AnnounceAsync(
         string address,
         CancellationToken cancellationToken,
+        Action<string>? reportFailure = null,
         string? expectedControllerId = null,
         string? expectedPairingKey = null)
     {
         try
         {
             if (!TryNormalizeControllerAddress(address, out var normalized))
+            {
+                reportFailure?.Invoke("The controller address format was not valid.");
                 return null;
+            }
             var body = JsonSerializer.Serialize(CreateLocalPresence(string.Empty), JsonOptions);
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             var endpoint = new Uri(new Uri(normalized), PresencePath);
             using var response = await _client.PostAsync(endpoint, content, cancellationToken);
             if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                reportFailure?.Invoke(
+                    $"The controller returned HTTP {(int)response.StatusCode}" +
+                    (string.IsNullOrWhiteSpace(errorBody) ? "." : ": " + errorBody.Trim()));
                 return null;
+            }
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             var presence = JsonSerializer.Deserialize<ControllerPeerPresence>(responseBody, JsonOptions);
             if (presence is null)
+            {
+                reportFailure?.Invoke("The computer answered, but its controller response was empty.");
                 return null;
+            }
             ValidatePresence(presence);
             if (string.Equals(presence.ControllerId, _state.ControllerId, StringComparison.Ordinal))
+            {
+                reportFailure?.Invoke("That address belongs to this controller, not the master PC.");
                 return null;
+            }
             if (!string.IsNullOrWhiteSpace(expectedControllerId) &&
                 !string.Equals(presence.ControllerId, expectedControllerId, StringComparison.Ordinal))
             {
@@ -507,6 +645,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             if (string.IsNullOrWhiteSpace(expectedControllerId) &&
                 !ControllerResponseMatchesEndpoint(normalized, presence.ControllerAddress))
             {
+                reportFailure?.Invoke(
+                    "The controller answered from a different address than the one entered.");
                 return null;
             }
             UpdatePeer(presence);
@@ -517,6 +657,10 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                     cancellationToken,
                     expectedPairingKey: expectedPairingKey);
             }
+            foreach (var machineName in presence.PosUpdateRequests)
+                _state.QueuePosUpdate(machineName);
+            if (presence.InstallControllerUpdate)
+                RaiseSoftwareUpdateRequested();
             return presence;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -529,6 +673,14 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                                    ObjectDisposedException)
         {
             // Most addresses are not controller computers. Failed probes are expected.
+            if (reportFailure is not null)
+            {
+                var message = ex is TaskCanceledException
+                    ? "The connection timed out. Verify that the master controller is open and TCP 47832 is allowed through Windows Firewall."
+                    : $"The controller connection failed: {ex.Message}";
+                ControllerLog.Write($"Manual master probe failed for {address}: {ex.Message}");
+                reportFailure(message);
+            }
             return null;
         }
     }
@@ -545,7 +697,17 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         PairingKeyFingerprint = _state.IsMaster
             ? ControllerSecurity.Fingerprint(_state.PairingKey)
             : string.Empty,
-        ActivePosMachines = _state.ActivePosMachineNames().ToList()
+        ServerUnixTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+        ActivePosMachines = _state.ActivePosMachineNames().ToList(),
+        PosMachines = _state.ActivePosMachinesSnapshot()
+            .Select(machine => new ControllerPosPresence
+            {
+                MachineName = machine.MachineName,
+                IpAddress = machine.IpAddress,
+                Version = machine.Version,
+                LastSeenUtc = machine.LastSeenUtc
+            })
+            .ToList()
     };
 
     private void UpdatePeer(ControllerPeerPresence presence)
@@ -560,7 +722,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 _peers[presence.ControllerId] = peer;
                 changed = true;
                 ControllerLog.Write(
-                    $"Discovered Kiosk Controller {presence.MachineName} at {presence.ControllerAddress}.");
+                    $"Discovered Systems Controller {presence.MachineName} at {presence.ControllerAddress}.");
             }
 
             if (!string.Equals(peer.MachineName, presence.MachineName, StringComparison.Ordinal) ||
@@ -575,6 +737,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 !peer.ActivePosMachines.SequenceEqual(
                     presence.ActivePosMachines,
                     StringComparer.OrdinalIgnoreCase) ||
+                !PosMachinesEqual(peer.PosMachines, presence.PosMachines) ||
                 !string.Equals(
                     peer.ControllerAddress,
                     presence.ControllerAddress,
@@ -589,7 +752,12 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             peer.ControllerAddress = presence.ControllerAddress;
             peer.PeerAccessKey = presence.PeerAccessKey;
             peer.PairingKeyFingerprint = presence.PairingKeyFingerprint;
+            peer.ClockOffsetSeconds = CalculateClockOffsetSeconds(
+                presence.ServerUnixTimeSeconds);
             peer.ActivePosMachines = [.. presence.ActivePosMachines];
+            peer.PosMachines = presence.PosMachines
+                .Select(machine => machine.Clone())
+                .ToList();
             peer.LastSeenUtc = DateTime.UtcNow;
         }
 
@@ -631,6 +799,24 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         catch (Exception ex) { ControllerLog.Write("Controller peer status update error: " + ex.Message); }
     }
 
+    private void RaiseSoftwareUpdateRequested()
+    {
+        try { SoftwareUpdateRequested?.Invoke(); }
+        catch (Exception ex) { ControllerLog.Write("Remote controller update notification error: " + ex.Message); }
+    }
+
+    private static bool PosMachinesEqual(
+        IReadOnlyList<ControllerPosPresence> first,
+        IReadOnlyList<ControllerPosPresence> second) =>
+        first.OrderBy(machine => machine.MachineName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(machine => machine.IpAddress, StringComparer.OrdinalIgnoreCase)
+            .Select(machine => $"{machine.MachineName}|{machine.IpAddress}|{machine.Version}")
+            .SequenceEqual(
+                second.OrderBy(machine => machine.MachineName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(machine => machine.IpAddress, StringComparer.OrdinalIgnoreCase)
+                    .Select(machine => $"{machine.MachineName}|{machine.IpAddress}|{machine.Version}"),
+                StringComparer.OrdinalIgnoreCase);
+
     private static void ValidatePresence(ControllerPeerPresence presence)
     {
         if (presence.ProtocolVersion != 1 ||
@@ -641,6 +827,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             presence.ControllerAddress?.Length > 300 ||
             presence.PeerAccessKey?.Length > 200 ||
             (presence.PairingKeyFingerprint?.Length is not 0 and not 64) ||
+            presence.ServerUnixTimeSeconds is < 0 or > 253_402_300_799 ||
             (presence.IsMaster != presence.MasterSinceUtc.HasValue))
         {
             throw new InvalidDataException("The controller presence announcement is invalid.");
@@ -652,6 +839,44 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         presence.PeerAccessKey = presence.PeerAccessKey?.Trim() ?? string.Empty;
         presence.PairingKeyFingerprint = presence.PairingKeyFingerprint?.Trim() ?? string.Empty;
         presence.ActivePosMachines = (presence.ActivePosMachines ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim().Length <= 80 ? name.Trim() : name.Trim()[..80])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        presence.PosMachines = (presence.PosMachines ?? [])
+            .Where(machine => machine is not null && !string.IsNullOrWhiteSpace(machine.MachineName))
+            .Select(machine =>
+            {
+                var machineName = machine.MachineName.Trim();
+                var ipAddress = machine.IpAddress?.Trim() ?? string.Empty;
+                var version = machine.Version?.Trim() ?? string.Empty;
+                return new ControllerPosPresence
+                {
+                    MachineName = machineName.Length <= 80 ? machineName : machineName[..80],
+                    IpAddress = ipAddress.Length <= 80 ? ipAddress : ipAddress[..80],
+                    Version = string.IsNullOrWhiteSpace(version)
+                        ? "Unknown"
+                        : version.Length <= 40 ? version : version[..40],
+                    LastSeenUtc = machine.LastSeenUtc
+                };
+            })
+            .GroupBy(machine => machine.MachineName + "|" + machine.IpAddress,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .Take(10)
+            .ToList();
+        if (presence.PosMachines.Count == 0)
+        {
+            presence.PosMachines = presence.ActivePosMachines
+                .Select(name => new ControllerPosPresence
+                {
+                    MachineName = name,
+                    Version = "Unknown"
+                })
+                .ToList();
+        }
+        presence.PosUpdateRequests = (presence.PosUpdateRequests ?? [])
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Select(name => name.Trim().Length <= 80 ? name.Trim() : name.Trim()[..80])
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -699,18 +924,25 @@ internal sealed class ControllerPeerCoordinator : IDisposable
                 ControllerId = _state.ControllerId
             }, JsonOptions);
             var endpoint = new Uri(new Uri(master.ControllerAddress), ReplicaPath);
-            using var request = CreateSignedRequest(endpoint, master.PeerAccessKey, body);
+            var clockOffsetSeconds = CalculateClockOffsetSeconds(
+                master.ServerUnixTimeSeconds);
+            using var request = CreateSignedRequest(
+                endpoint, master.PeerAccessKey, body, clockOffsetSeconds);
             using var response = await _client.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 return new ControllerConnectionPullResult(
                     false,
-                    $"The master controller returned HTTP {(int)response.StatusCode}.",
+                    $"The master controller returned HTTP {(int)response.StatusCode}" +
+                    (string.IsNullOrWhiteSpace(responseBody)
+                        ? "."
+                        : ": " + responseBody.Trim()),
                     0);
             }
 
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            VerifySignedResponse(response, master.PeerAccessKey, responseBody);
+            VerifySignedResponse(
+                response, master.PeerAccessKey, responseBody, clockOffsetSeconds);
             var replica = JsonSerializer.Deserialize<ControllerReplicaSnapshot>(responseBody, JsonOptions);
             if (replica is null ||
                 !string.Equals(
@@ -772,7 +1004,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             ControllerLog.Write("Master controller synchronization error: " + ex.Message);
             return new ControllerConnectionPullResult(
                 false,
-                "The stored connections could not be pulled from the master controller.",
+                "The stored connections could not be pulled from the master controller.\n\n" +
+                ex.Message,
                 0);
         }
         finally
@@ -781,9 +1014,14 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         }
     }
 
-    private static HttpRequestMessage CreateSignedRequest(Uri uri, string accessKey, string body)
+    private static HttpRequestMessage CreateSignedRequest(
+        Uri uri,
+        string accessKey,
+        string body,
+        long clockOffsetSeconds = 0)
     {
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        var timestamp = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() + clockOffsetSeconds)
+            .ToString();
         var request = new HttpRequestMessage(HttpMethod.Post, uri)
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json")
@@ -798,7 +1036,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
     private static void VerifySignedResponse(
         HttpResponseMessage response,
         string accessKey,
-        string body)
+        string body,
+        long clockOffsetSeconds = 0)
     {
         if (!response.Headers.TryGetValues(TimestampHeader, out var timestamps) ||
             !response.Headers.TryGetValues(SignatureHeader, out var signatures))
@@ -808,8 +1047,9 @@ internal sealed class ControllerPeerCoordinator : IDisposable
 
         var timestamp = timestamps.FirstOrDefault() ?? string.Empty;
         var signature = signatures.FirstOrDefault() ?? string.Empty;
+        var expectedRemoteTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + clockOffsetSeconds;
         if (!long.TryParse(timestamp, out var unixTime) ||
-            Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - unixTime) > 300 ||
+            Math.Abs(expectedRemoteTime - unixTime) > 300 ||
             !ControllerSecurity.FixedTimeEquals(
                 ControllerSecurity.Sign(accessKey, timestamp, body),
                 signature))
@@ -922,8 +1162,8 @@ internal sealed class ControllerPeerCoordinator : IDisposable
             var presence = await AnnounceAsync(
                 target,
                 cancellationToken,
-                stored.ControllerId,
-                stored.PairingKey);
+                expectedControllerId: stored.ControllerId,
+                expectedPairingKey: stored.PairingKey);
             if (presence?.IsMaster == true)
                 return;
         }
@@ -939,8 +1179,18 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         ControllerAddress = peer.ControllerAddress,
         PeerAccessKey = peer.PeerAccessKey,
         PairingKeyFingerprint = peer.PairingKeyFingerprint,
-        ActivePosMachines = [.. peer.ActivePosMachines]
+        ServerUnixTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds() +
+                                peer.ClockOffsetSeconds,
+        ActivePosMachines = [.. peer.ActivePosMachines],
+        PosMachines = peer.PosMachines.Select(machine => machine.Clone()).ToList()
     };
+
+    private static long CalculateClockOffsetSeconds(long serverUnixTimeSeconds)
+    {
+        if (serverUnixTimeSeconds <= 0)
+            return 0;
+        return serverUnixTimeSeconds - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    }
 
     private static bool TryBuildManualControllerAddress(string value, out string address)
     {

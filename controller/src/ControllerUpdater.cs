@@ -69,7 +69,7 @@ internal static class ControllerUpdater
                 _stagedUpdate = null;
                 return new ControllerUpdateResult(
                     ControllerUpdateStatus.UpToDate,
-                    $"Controller version {CurrentVersion} is up to date.");
+                    $"Systems Controller version {CurrentVersion} is up to date.");
             }
 
             await manager.DownloadUpdatesAsync(update);
@@ -79,7 +79,7 @@ internal static class ControllerUpdater
                 $"Controller update {update.TargetFullRelease.Version} is downloaded and ready to install.");
             return new ControllerUpdateResult(
                 ControllerUpdateStatus.ReadyToInstall,
-                $"Controller version {update.TargetFullRelease.Version} has been downloaded. " +
+                $"Systems Controller version {update.TargetFullRelease.Version} has been downloaded. " +
                 $"This computer currently has version {CurrentVersion}.");
         }
         catch (Exception ex) when (
