@@ -561,7 +561,7 @@ internal sealed partial class KioskForm
                     {
                         _settings.AssistanceAcknowledged = true;
                         _settings.Save();
-                        UpdateAssistancePanelState();
+                        UpdateAssistanceStateAfterChange();
                         SaveRemoteCommandResult(
                             command.Id,
                             true,
