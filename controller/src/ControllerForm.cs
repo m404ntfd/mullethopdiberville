@@ -27,6 +27,7 @@ internal sealed class ControllerForm : Form
     private readonly Button _businessHoursButton = new();
     private readonly Button _softwareDownloadsButton = new();
     private readonly Button _remoteAccessButton = new();
+    private readonly Button _pullConnectionsButton = new();
     private readonly Button _restartControllerButton = new();
     private readonly Button _closeControllerButton = new();
     private readonly ComboBox _themeSelector = new();
@@ -624,6 +625,7 @@ internal sealed class ControllerForm : Form
         ConfigureTableActionButton(_businessHoursButton, "Business Hours", Color.FromArgb(118, 196, 66));
         ConfigureTableActionButton(_softwareDownloadsButton, "Download Apps", Color.FromArgb(8, 119, 189), Color.White);
         ConfigureTableActionButton(_remoteAccessButton, "Remote Access", Color.FromArgb(105, 210, 236));
+        ConfigureTableActionButton(_pullConnectionsButton, "Pull Connections", Color.FromArgb(52, 152, 143), Color.White);
         ConfigureTableActionButton(_restartControllerButton, "Restart Controller", Color.FromArgb(245, 130, 32));
         ConfigureTableActionButton(_closeControllerButton, "Exit Program", Color.FromArgb(180, 35, 24), Color.White);
         foreach (var button in new[]
@@ -633,6 +635,7 @@ internal sealed class ControllerForm : Form
                      _businessHoursButton,
                      _softwareDownloadsButton,
                      _remoteAccessButton,
+                     _pullConnectionsButton,
                      _restartControllerButton,
                      _closeControllerButton
                  })
@@ -670,6 +673,7 @@ internal sealed class ControllerForm : Form
             downloads.ShowDialog(this);
         };
         _remoteAccessButton.Click += (_, _) => OpenRemoteAccessSettings();
+        _pullConnectionsButton.Click += async (_, _) => await PullStoredConnectionsAsync();
         _restartControllerButton.Click += (_, _) => RestartController();
         _closeControllerButton.Click += (_, _) => CloseController();
         controllerButtons.Controls.Add(_controllerUpdateButton, 0, 0);
@@ -679,6 +683,7 @@ internal sealed class ControllerForm : Form
         controllerButtons.Controls.Add(_remoteAccessButton, 0, 1);
         controllerButtons.Controls.Add(_restartControllerButton, 1, 1);
         controllerButtons.Controls.Add(_closeControllerButton, 2, 1);
+        controllerButtons.Controls.Add(_pullConnectionsButton, 3, 1);
 
         controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
         controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);
@@ -789,6 +794,54 @@ internal sealed class ControllerForm : Form
             "Remote access settings were saved. Restart the controller now to apply them?",
             "Remote Access", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
         if (answer == DialogResult.Yes) RestartControllerApplication();
+    }
+
+    private async Task PullStoredConnectionsAsync()
+    {
+        if (_remoteSettings.IsRemoteMachine)
+        {
+            MessageBox.Show(this,
+                "Stored kiosk connections can be pulled only from a controller computer on the same local network as the master controller.",
+                "Pull Connections", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        _pullConnectionsButton.Enabled = false;
+        _pullConnectionsButton.Text = "Pulling...";
+        try
+        {
+            string message;
+            bool success;
+            if (_state.IsMaster)
+            {
+                var result = _state.ReloadStoredMasterConnections();
+                message = result.Message;
+                success = result.Success;
+            }
+            else
+            {
+                var result = await _server.Peers.PullMasterConnectionsAsync();
+                message = result.Message;
+                success = result.Success;
+            }
+
+            RefreshKioskList();
+            UpdateMasterStatus();
+            MessageBox.Show(this, message, "Pull Connections", MessageBoxButtons.OK,
+                success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        catch (Exception ex)
+        {
+            ControllerLog.Write("Stored connection pull error: " + ex.Message);
+            MessageBox.Show(this,
+                "The stored connections could not be pulled. Check the controller log for details.",
+                "Pull Connections", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _pullConnectionsButton.Text = "Pull Connections";
+            _pullConnectionsButton.Enabled = true;
+        }
     }
 
     private void ShowMasterOnlyMessage(string action)

@@ -11,7 +11,7 @@ computers discover each other, and one can be designated as the master. It provi
 * An install-update command per selected kiosk.
 * A central scheduled-advertisement catalog with automatic kiosk synchronization.
 * A lower-right Controller Program section with update, ad-management, software
-  download, restart, and close controls.
+  download, stored-connection recovery, restart, and close controls.
 * Queued commands: if a kiosk is temporarily offline, the newest command waits
   until that kiosk reconnects.
 * Optional secure Cloudflare synchronization for a controller installed away
@@ -178,7 +178,7 @@ when they reconnect.
 The lower-right Controller Program section includes the controller's own
 Auto/Light/Dark appearance selector, master-controller indicator and toggle,
 plus Check Updates, Manage Ads, Business Hours, Download Apps, Remote Access,
-Restart Controller, and Exit Program buttons. Download Apps opens a Software
+Restart Controller, Exit Program, and Pull Connections buttons. Download Apps opens a Software
 Downloads window that finds the latest published Waiver Kiosk installer or Mullet
 Hop POS package, asks where to save it, and shows progress. If a downloaded
 update is waiting, Restart Controller offers to install it. Minimizing the window
@@ -187,6 +187,13 @@ service continues running. Single-click or double-click the fish-and-springs tra
 icon, select Open Kiosk Controller from its tray menu, or select its notification
 to restore the dashboard. Only the in-app Exit Program button ends the controller
 service during normal use.
+
+The master controller keeps a dedicated recovery catalog at
+`%LOCALAPPDATA%\MulletHopKioskController\master-connections.json` whenever its
+saved kiosk connections change. Select **Pull Connections** on the master to
+reload that local catalog. On a non-master controller, the same button finds the
+active master on the local network, pulls its saved kiosk connections, and saves
+the mirrored list on the current PC.
 
 
 MANAGE AND SYNC ADVERTISEMENTS
@@ -240,7 +247,8 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.12.0 shows the active master PC and network-wide POS
+Kiosk Controller version 1.12.1 adds a dedicated master connection recovery
+catalog and the manual Pull Connections control. Version 1.12.0 shows the active master PC and network-wide POS
 count beside the master lights. Non-master controller installations automatically
 mirror the master's saved kiosk connections and relay kiosk and POS commands to
 it. Three POS workstations can simultaneously use the same four kiosk assignments.
