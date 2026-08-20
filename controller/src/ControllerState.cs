@@ -180,7 +180,16 @@ internal sealed class PosMachinePresence
 {
     public string MachineName { get; set; } = string.Empty;
     public string IpAddress { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
     public DateTime LastSeenUtc { get; set; }
+
+    public PosMachinePresence Clone() => new()
+    {
+        MachineName = MachineName,
+        IpAddress = IpAddress,
+        Version = Version,
+        LastSeenUtc = LastSeenUtc
+    };
 }
 
 internal sealed class ControllerData
@@ -212,6 +221,10 @@ internal sealed class ControllerState
         ControllerLog.DataDirectory,
         "master-connections.json");
     private readonly Dictionary<string, PosMachinePresence> _posMachines =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pendingControllerUpdates =
+        new(StringComparer.Ordinal);
+    private readonly HashSet<string> _pendingPosUpdates =
         new(StringComparer.OrdinalIgnoreCase);
     private ControllerData _data;
     private string _lastMasterReplicaRevision = string.Empty;
@@ -569,7 +582,7 @@ internal sealed class ControllerState
         }
     }
 
-    public void RecordPosMachine(string? machineName, string? ipAddress)
+    public void RecordPosMachine(string? machineName, string? ipAddress, string? version)
     {
         lock (_gate)
         {
@@ -584,8 +597,22 @@ internal sealed class ControllerState
             {
                 MachineName = cleanedName,
                 IpAddress = cleanedIp,
+                Version = Clean(version, "Unknown", 40),
                 LastSeenUtc = DateTime.UtcNow
             };
+        }
+    }
+
+    public IReadOnlyList<PosMachinePresence> ActivePosMachinesSnapshot()
+    {
+        lock (_gate)
+        {
+            RemoveStalePosMachinesLocked();
+            return _posMachines.Values
+                .Select(machine => machine.Clone())
+                .OrderBy(machine => machine.MachineName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(machine => machine.IpAddress, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
     }
 
@@ -599,6 +626,52 @@ internal sealed class ControllerState
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
+        }
+    }
+
+    public void QueueControllerUpdate(string controllerId)
+    {
+        if (!Guid.TryParseExact(controllerId, "N", out _))
+            return;
+        lock (_gate)
+            _pendingControllerUpdates.Add(controllerId);
+    }
+
+    public bool TakeControllerUpdate(string controllerId)
+    {
+        lock (_gate)
+            return _pendingControllerUpdates.Remove(controllerId);
+    }
+
+    public void QueuePosUpdate(string machineName)
+    {
+        var cleanedName = Clean(machineName, string.Empty, 80);
+        if (string.IsNullOrWhiteSpace(cleanedName))
+            return;
+        lock (_gate)
+            _pendingPosUpdates.Add(cleanedName);
+    }
+
+    public bool TakePosUpdate(string? machineName)
+    {
+        var cleanedName = Clean(machineName, string.Empty, 80);
+        if (string.IsNullOrWhiteSpace(cleanedName))
+            return false;
+        lock (_gate)
+            return _pendingPosUpdates.Remove(cleanedName);
+    }
+
+    public IReadOnlyList<string> TakePosUpdates(IEnumerable<string> machineNames)
+    {
+        lock (_gate)
+        {
+            var matches = machineNames
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(name => _pendingPosUpdates.Remove(name))
+                .ToList();
+            return matches;
         }
     }
 

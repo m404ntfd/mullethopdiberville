@@ -123,7 +123,7 @@ jobs:
 
           Write-Host "Kiosk background included: $($background.Length) bytes."
 
-      - name: Publish kiosk controller
+      - name: Publish Systems Controller
         shell: pwsh
         run: |
           dotnet publish controller/src/MulletHopKioskController.csproj `
@@ -317,7 +317,7 @@ jobs:
             --packVersion ${{ steps.controller_version.outputs.value }} `
             --packDir controller-publish `
             --mainExe MulletHopKioskController.exe `
-            --packTitle "Mullet Hop Kiosk Controller" `
+            --packTitle "Mullet Hop Systems Controller" `
             --packAuthors "Mullet Hop" `
             --icon assets/MulletHopFish.ico `
             --runtime win-x64 `
@@ -340,7 +340,7 @@ jobs:
             --channel pos `
             --outputDir PosReleases
 
-      - name: Package kiosk controller
+      - name: Package Systems Controller
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path ControllerPackage -Force | Out-Null
@@ -360,7 +360,7 @@ jobs:
           Copy-Item cloudflare ControllerPackage/Cloudflare-Setup -Recurse
           Compress-Archive `
             -Path ControllerPackage/* `
-            -DestinationPath "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
+            -DestinationPath "Mullet-Hop-Systems-Controller-${{ steps.controller_version.outputs.value }}.zip" `
             -Force
 
       - name: Package Mullet Hop POS
@@ -404,7 +404,7 @@ jobs:
         run: |
           gh release upload `
             "v${{ steps.version.outputs.value }}" `
-            "Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip" `
+            "Mullet-Hop-Systems-Controller-${{ steps.controller_version.outputs.value }}.zip" `
             "Mullet-Hop-POS-${{ steps.pos_version.outputs.value }}.zip" `
             'ControllerReleases/*' `
             'PosReleases/*' `
@@ -422,6 +422,6 @@ jobs:
             ControllerReleases/releases.*.json
             PosReleases/*-Setup.exe
             PosReleases/releases.*.json
-            Mullet-Hop-Kiosk-Controller-${{ steps.controller_version.outputs.value }}.zip
+            Mullet-Hop-Systems-Controller-${{ steps.controller_version.outputs.value }}.zip
             Mullet-Hop-POS-${{ steps.pos_version.outputs.value }}.zip
           if-no-files-found: error

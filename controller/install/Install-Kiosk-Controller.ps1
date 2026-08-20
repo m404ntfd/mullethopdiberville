@@ -17,8 +17,8 @@ if (-not (Test-Administrator)) {
 }
 
 Write-Host ''
-Write-Host 'Mullet Hop Kiosk Controller Installer' -ForegroundColor Cyan
-Write-Host '--------------------------------------' -ForegroundColor Cyan
+Write-Host 'Mullet Hop Systems Controller Installer' -ForegroundColor Cyan
+Write-Host '----------------------------------------' -ForegroundColor Cyan
 Write-Host ''
 
 $setupExe = Join-Path $PSScriptRoot 'MulletHop.KioskController-Setup.exe'
@@ -30,7 +30,8 @@ $installFolder = Join-Path $env:LOCALAPPDATA 'MulletHop.KioskController'
 $installedExe = Join-Path $installFolder 'MulletHopKioskController.exe'
 $legacyInstallFolder = Join-Path $env:ProgramFiles 'Mullet Hop Kiosk Controller'
 $urlPrefix = 'http://+:47832/mullethop/'
-$firewallName = 'Mullet Hop Kiosk Controller (TCP 47832)'
+$firewallName = 'Mullet Hop Systems Controller (TCP 47832)'
+$legacyFirewallName = 'Mullet Hop Kiosk Controller (TCP 47832)'
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
 
 Get-Process -Name 'MulletHopKioskController' -ErrorAction SilentlyContinue |
@@ -55,8 +56,10 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Windows could not reserve the controller network address.'
 }
 
-Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue |
-    Remove-NetFirewallRule
+@($firewallName, $legacyFirewallName) | ForEach-Object {
+    Get-NetFirewallRule -DisplayName $_ -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule
+}
 New-NetFirewallRule `
     -DisplayName $firewallName `
     -Direction Inbound `
@@ -66,11 +69,15 @@ New-NetFirewallRule `
     -Profile Private | Out-Null
 
 $shell = New-Object -ComObject WScript.Shell
-$startupShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Kiosk Controller.lnk'
+$legacyStartupShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Kiosk Controller.lnk'
+if (Test-Path -LiteralPath $legacyStartupShortcut) {
+    Remove-Item -LiteralPath $legacyStartupShortcut -Force
+}
+$startupShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Systems Controller.lnk'
 $shortcut = $shell.CreateShortcut($startupShortcut)
 $shortcut.TargetPath = $installedExe
 $shortcut.WorkingDirectory = $installFolder
-$shortcut.Description = 'Manage Mullet Hop waiver kiosks on the local network'
+$shortcut.Description = 'Manage Mullet Hop waiver kiosks, Systems Controllers, and POS workstations'
 $shortcut.Save()
 
 Write-Host 'Installation complete.' -ForegroundColor Green

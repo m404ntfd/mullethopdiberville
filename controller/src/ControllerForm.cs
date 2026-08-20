@@ -27,6 +27,7 @@ internal sealed class ControllerForm : Form
     private readonly Button _manageAdsButton = new();
     private readonly Button _businessHoursButton = new();
     private readonly Button _softwareDownloadsButton = new();
+    private readonly Button _systemsUpdatesButton = new();
     private readonly Button _remoteAccessButton = new();
     private readonly Button _pullConnectionsButton = new();
     private readonly Button _restartControllerButton = new();
@@ -48,6 +49,7 @@ internal sealed class ControllerForm : Form
     private bool _lastResolvedDarkMode;
     private bool _masterChangeInProgress;
     private bool _masterConnectionInProgress;
+    private bool _remoteControllerUpdateInProgress;
     private bool _allowApplicationExit;
     private bool _trayNoticeShown;
     private bool _assistanceFlashOn;
@@ -59,7 +61,8 @@ internal sealed class ControllerForm : Form
             _state.SetMaster(false, "remote-mode controllers cannot be the local master");
         _server = new ControllerServer(_state);
         _server.Peers.PeersChanged += ControllerPeersChanged;
-        Text = "Mullet Hop Kiosk Controller";
+        _server.Peers.SoftwareUpdateRequested += ControllerSoftwareUpdateRequested;
+        Text = "Mullet Hop Systems Controller";
         var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         if (appIcon is not null)
         {
@@ -128,19 +131,19 @@ internal sealed class ControllerForm : Form
 
     private void ConfigureTrayIcon()
     {
-        var open = new ToolStripMenuItem("Open Kiosk Controller");
+        var open = new ToolStripMenuItem("Open Systems Controller");
         open.Font = new Font(open.Font, FontStyle.Bold);
         open.Click += (_, _) => RestoreControllerFromTray();
         _trayMenu.Items.Add(open);
         _trayMenu.Items.Add(new ToolStripSeparator());
-        var exit = new ToolStripMenuItem("Exit Kiosk Controller…");
+        var exit = new ToolStripMenuItem("Exit Systems Controller…");
         exit.Click += (_, _) =>
         {
             RestoreControllerFromTray();
             BeginInvoke(new Action(CloseController));
         };
         _trayMenu.Items.Add(exit);
-        _trayIcon.Text = "Mullet Hop Kiosk Controller";
+        _trayIcon.Text = "Mullet Hop Systems Controller";
         _trayIcon.ContextMenuStrip = _trayMenu;
         _trayIcon.Visible = true;
         _trayIcon.MouseClick += (_, e) =>
@@ -181,7 +184,7 @@ internal sealed class ControllerForm : Form
             return;
 
         _trayNoticeShown = true;
-        _trayIcon.BalloonTipTitle = "Kiosk Controller is still running";
+        _trayIcon.BalloonTipTitle = "Systems Controller is still running";
         _trayIcon.BalloonTipText =
             "The controller service remains active. Double-click the fish icon to reopen it.";
         _trayIcon.BalloonTipIcon = ToolTipIcon.Info;
@@ -243,7 +246,7 @@ internal sealed class ControllerForm : Form
         var title = new Label
         {
             AutoSize = false,
-            Text = "MULLET HOP KIOSK CONTROLLER",
+            Text = "MULLET HOP SYSTEMS CONTROLLER",
             ForeColor = Color.White,
             Font = new Font("Segoe UI", 23, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -537,7 +540,7 @@ internal sealed class ControllerForm : Form
         var controllerGroup = new GroupBox
         {
             Dock = DockStyle.Fill,
-            Text = "Controller Program",
+            Text = "Systems Controller Program",
             Font = new Font("Segoe UI", 10, FontStyle.Bold),
             ForeColor = Color.FromArgb(8, 119, 189),
             Padding = new Padding(10, 22, 10, 8),
@@ -639,16 +642,18 @@ internal sealed class ControllerForm : Form
         var controllerButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 4,
-            RowCount = 2,
+            ColumnCount = 3,
+            RowCount = 3,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
-        for (var index = 0; index < 4; index++)
-            controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        for (var index = 0; index < 3; index++)
+            controllerButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
+        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
+        controllerButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 33.334f));
         ConfigureTableActionButton(_controllerUpdateButton, "Check Updates", Color.FromArgb(8, 119, 189), Color.White);
+        ConfigureTableActionButton(_systemsUpdatesButton, "Systems & POS Updates", Color.FromArgb(52, 152, 143), Color.White);
         ConfigureTableActionButton(_manageAdsButton, "Manage Ads", Color.FromArgb(117, 68, 154), Color.White);
         ConfigureTableActionButton(_businessHoursButton, "Business Hours", Color.FromArgb(118, 196, 66));
         ConfigureTableActionButton(_softwareDownloadsButton, "Download Apps", Color.FromArgb(8, 119, 189), Color.White);
@@ -659,6 +664,7 @@ internal sealed class ControllerForm : Form
         foreach (var button in new[]
                  {
                      _controllerUpdateButton,
+                     _systemsUpdatesButton,
                      _manageAdsButton,
                      _businessHoursButton,
                      _softwareDownloadsButton,
@@ -668,11 +674,16 @@ internal sealed class ControllerForm : Form
                      _closeControllerButton
                  })
         {
-            button.MinimumSize = new Size(120, 48);
+            button.MinimumSize = new Size(110, 42);
             button.Margin = new Padding(4);
             button.Font = new Font("Segoe UI", 10, FontStyle.Bold);
         }
         _controllerUpdateButton.Click += async (_, _) => await CheckControllerUpdateAsync(showUpToDateMessage: true);
+        _systemsUpdatesButton.Click += (_, _) =>
+        {
+            using var updates = new SystemsUpdatesDialog(_state, _server);
+            updates.ShowDialog(this);
+        };
         _manageAdsButton.Click += (_, _) =>
         {
             if (!_state.IsMaster && !_remoteSettings.IsRemoteMachine)
@@ -705,13 +716,14 @@ internal sealed class ControllerForm : Form
         _restartControllerButton.Click += (_, _) => RestartController();
         _closeControllerButton.Click += (_, _) => CloseController();
         controllerButtons.Controls.Add(_controllerUpdateButton, 0, 0);
-        controllerButtons.Controls.Add(_manageAdsButton, 1, 0);
-        controllerButtons.Controls.Add(_businessHoursButton, 2, 0);
-        controllerButtons.Controls.Add(_softwareDownloadsButton, 3, 0);
-        controllerButtons.Controls.Add(_remoteAccessButton, 0, 1);
-        controllerButtons.Controls.Add(_restartControllerButton, 1, 1);
-        controllerButtons.Controls.Add(_closeControllerButton, 2, 1);
-        controllerButtons.Controls.Add(_pullConnectionsButton, 3, 1);
+        controllerButtons.Controls.Add(_systemsUpdatesButton, 1, 0);
+        controllerButtons.Controls.Add(_softwareDownloadsButton, 2, 0);
+        controllerButtons.Controls.Add(_manageAdsButton, 0, 1);
+        controllerButtons.Controls.Add(_businessHoursButton, 1, 1);
+        controllerButtons.Controls.Add(_remoteAccessButton, 2, 1);
+        controllerButtons.Controls.Add(_pullConnectionsButton, 0, 2);
+        controllerButtons.Controls.Add(_restartControllerButton, 1, 2);
+        controllerButtons.Controls.Add(_closeControllerButton, 2, 2);
 
         controllerLayout.Controls.Add(_controllerUpdateStatus, 0, 0);
         controllerLayout.Controls.Add(_controllerUpdateReady, 0, 1);
@@ -937,9 +949,9 @@ internal sealed class ControllerForm : Form
         MessageBox.Show(
             this,
             master is null
-                ? $"{action} must be performed on the master Kiosk Controller. " +
+                ? $"{action} must be performed on the master Systems Controller. " +
                   "No master controller is currently detected."
-                : $"{action} must be performed on the master Kiosk Controller: " +
+                : $"{action} must be performed on the master Systems Controller: " +
                   master.MachineName + ".\n\nThis controller automatically mirrors that " +
                   "master's saved kiosk connections.",
             "Use the Master Controller",
@@ -1138,7 +1150,7 @@ internal sealed class ControllerForm : Form
         }
 
         var answer = MessageBox.Show(this,
-            "Make this computer the master Kiosk Controller?\n\n" +
+            "Make this computer the master Systems Controller?\n\n" +
             "Only one controller on the local network can be master. The program will scan for another master before saving this change.",
             "Make This the Master Controller?",
             MessageBoxButtons.YesNo,
@@ -1170,7 +1182,7 @@ internal sealed class ControllerForm : Form
             if (_state.IsMaster)
             {
                 MessageBox.Show(this,
-                    "This computer is now the master Kiosk Controller.",
+                    "This computer is now the master Systems Controller.",
                     "Master Controller Saved",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -1333,6 +1345,61 @@ internal sealed class ControllerForm : Form
         }
     }
 
+    private void ControllerSoftwareUpdateRequested()
+    {
+        if (IsDisposed)
+            return;
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(ControllerSoftwareUpdateRequested));
+            return;
+        }
+        _ = InstallRemotelyRequestedControllerUpdateAsync();
+    }
+
+    private async Task InstallRemotelyRequestedControllerUpdateAsync()
+    {
+        if (_remoteControllerUpdateInProgress || IsDisposed)
+            return;
+
+        _remoteControllerUpdateInProgress = true;
+        _controllerUpdateButton.Enabled = false;
+        _systemsUpdatesButton.Enabled = false;
+        _controllerUpdateButton.Text = "Remote Update…";
+        _controllerUpdateStatus.Text =
+            "Another Systems Controller requested a software update on this PC…";
+        try
+        {
+            var result = await ControllerUpdater.CheckAndStageUpdateAsync();
+            ControllerLog.Write("Remote Systems Controller update request: " + result.Message);
+            if (IsDisposed)
+                return;
+
+            _controllerUpdateStatus.Text = result.Message;
+            if (result.Status != ControllerUpdateStatus.ReadyToInstall)
+            {
+                _controllerUpdateReady.Visible = false;
+                return;
+            }
+
+            _controllerUpdateButton.Text = "Installing…";
+            var installResult = ApplyControllerUpdateAndRestart();
+            ControllerLog.Write("Remote Systems Controller update install: " + installResult.Message);
+            if (!IsDisposed && installResult.Status != ControllerUpdateStatus.Applying)
+                _controllerUpdateStatus.Text = installResult.Message;
+        }
+        finally
+        {
+            _remoteControllerUpdateInProgress = false;
+            if (!IsDisposed)
+            {
+                _controllerUpdateButton.Text = "Check Updates";
+                _controllerUpdateButton.Enabled = true;
+                _systemsUpdatesButton.Enabled = true;
+            }
+        }
+    }
+
     private void RestartController()
     {
         if (ControllerUpdater.HasStagedUpdate)
@@ -1355,8 +1422,8 @@ internal sealed class ControllerForm : Form
         }
 
         var restart = MessageBox.Show(this,
-            "Restart the kiosk controller now?",
-            "Restart Kiosk Controller",
+            "Restart the Systems Controller now?",
+            "Restart Systems Controller",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
         if (restart == DialogResult.Yes)
@@ -1366,8 +1433,8 @@ internal sealed class ControllerForm : Form
     private void CloseController()
     {
         var answer = MessageBox.Show(this,
-            "Exit the kiosk controller program?\n\nKiosks will keep their current state, but remote commands will be unavailable until the controller starts again. Closing the window with X only sends it to the system tray.",
-            "Exit Kiosk Controller",
+            "Exit the Systems Controller program?\n\nKiosks will keep their current state, but remote commands will be unavailable until the controller starts again. Closing the window with X only sends it to the system tray.",
+            "Exit Systems Controller",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
         if (answer == DialogResult.Yes)

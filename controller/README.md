@@ -1,4 +1,4 @@
-# Mullet Hop Kiosk Controller
+# Mullet Hop Systems Controller
 
 The controller is installed on a Windows 10 or Windows 11 office computer on
 the same private network as the waiver kiosks. Additional local controller
@@ -10,8 +10,11 @@ computers discover each other, and one can be designated as the master. It provi
 * A non-installing update check per selected kiosk.
 * An install-update command per selected kiosk.
 * A central scheduled-advertisement catalog with automatic kiosk synchronization.
-* A lower-right Controller Program section with update, ad-management, software
+* A lower-right Systems Controller Program section with update, ad-management, software
   download, stored-connection recovery, restart, and close controls.
+* A Systems & POS Updates window that discovers peer controllers and active POS
+  workstations, shows their versions and connection locations, and can update
+  selected or all computers from any Systems Controller.
 * Queued commands: if a kiosk is temporarily offline, the newest command waits
   until that kiosk reconnects.
 * Optional secure Cloudflare synchronization for a controller installed away
@@ -29,7 +32,7 @@ Download the latest Windows package from:
 
 https://github.com/m404ntfd/mullethopdiberville/releases/latest
 
-1. Extract the complete Mullet-Hop-Kiosk-Controller zip file.
+1. Extract the complete Mullet-Hop-Systems-Controller zip file.
 2. Right-click Install-Kiosk-Controller.cmd and choose Run as administrator.
 3. Allow the Windows prompt. The installer adds the required private-network
    firewall rule and starts the controller.
@@ -40,8 +43,8 @@ The controller starts automatically when that Windows account signs in. It also
 checks GitHub for controller updates whenever it opens. When an update is found,
 the controller downloads it and offers Restart and Install Now or Install Later.
 Choosing Install Later displays a red "! Update Ready to Install" notice until
-the controller is restarted. Use Check Updates in the lower-right Controller
-Program section to check manually.
+the controller is restarted. Use Check Updates in the lower-right Systems
+Controller Program section to check manually.
 
 Version 1.1.0 must be installed once with the new package to establish the
 automatic updater. After that one-time installation, later controller versions
@@ -55,7 +58,7 @@ access to check GitHub and install a kiosk update.
 REMOTE ACCESS (OPTIONAL)
 ------------------------
 
-Select **Remote Access** in the Controller Program section. The on-site
+Select **Remote Access** in the Systems Controller Program section. The on-site
 controller should enable secure cloud synchronization and leave **This is a
 remote machine** unchecked. On the off-site controller, paste the setup code,
 check **This is a remote machine**, then select **Save and Restart**.
@@ -75,7 +78,7 @@ setup code as staff credentials.
 DISCOVER AND ADD EACH WAIVER KIOSK ONCE
 ---------------------------------------
 
-Install the current Waiver Kiosk app and Kiosk Controller app before using
+Install the current Waiver Kiosk app and Systems Controller app before using
 network discovery.
 
 1. Make sure the controller computer and waiver kiosk are on the same private
@@ -184,7 +187,7 @@ The call remains active until it is cleared at the kiosk.
 An online kiosk that is showing its scheduled Business Closed video/page or the
 business-hours blackout screen is reported with a blue Business Closed indicator
 and row. Staff-closed, offline, and error states remain separate.
-Mullet Hop POS and the Kiosk Controller both ask staff to choose Staff Closure or
+Mullet Hop POS and the Systems Controller both ask staff to choose Staff Closure or
 Business Closure before they queue a Close command, ensuring the kiosk reports the
 intended red or blue state.
 Business Hours profiles include opening, Last Jump Time Sold, and closing times
@@ -195,19 +198,19 @@ Open All and Close All apply to every known station. Close All asks for the clos
 reason before applying it. Offline stations retain the latest queued command and carry it out
 when they reconnect.
 
-The lower-right Controller Program section includes the controller's own
+The lower-right Systems Controller Program section includes the controller's own
 Auto/Light/Dark appearance selector, master-controller indicator and toggle,
-plus Check Updates, Manage Ads, Business Hours, Download Apps, Remote Access,
+plus Check Updates, Systems & POS Updates, Manage Ads, Business Hours, Download Apps, Remote Access,
 Restart Controller, Exit Program, and Pull Connections buttons. Download Apps opens a Software
 Downloads window that finds the latest published Waiver Kiosk installer or Mullet
 Hop POS package, asks where to save it, and shows progress. If a downloaded
 update is waiting, Restart Controller offers to install it. Minimizing the window
 or selecting X sends the controller to the Windows system tray while its network
 service continues running. Single-click or double-click the fish-and-springs tray
-icon, select Open Kiosk Controller from its tray menu, or select its notification
+icon, select Open Systems Controller from its tray menu, or select its notification
 to restore the dashboard. The restore path also brings an off-screen or minimized
 window back to the active desktop. Right-click the tray icon and select **Exit Kiosk
-Controller** to close the program and terminate its Windows process; the in-app Exit
+Systems Controller** to close the program and terminate its Windows process; the in-app Exit
 Program button performs the same shutdown.
 
 The master controller keeps a dedicated recovery catalog at
@@ -222,7 +225,7 @@ connection window described above.
 MANAGE AND SYNC ADVERTISEMENTS
 ------------------------------
 
-Select Manage Ads in the lower-right Controller Program section. The manager
+Select Manage Ads in the lower-right Systems Controller Program section. The manager
 uses the same JPG, one-time date range, weekly schedule, and enable/disable
 options as the kiosk. Every saved change publishes a new catalog. Connected
 kiosks running version 2.2.0 or newer automatically download it on their next
@@ -244,7 +247,7 @@ using the saved JPG files and schedules until a later sync succeeds.
 MANAGE HOURS AND KIOSK APPEARANCE
 ---------------------------------
 
-Select Business Hours in the Controller Program section. The Business Hours tab
+Select Business Hours in the Systems Controller Program section. The Business Hours tab
 sets each day's opening, Last Jump Time Sold, and closing time; whether to show
 the Business Closed video at the cutoff; whether to black out at closing; and
 the pre-opening screensaver time. The Business Closed video displays the next
@@ -270,7 +273,10 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Kiosk Controller version 1.12.3 improves tray restoration, adds a tray Exit
+Systems Controller version 1.13.0 renames the application while preserving its
+package identity and saved data, fixes master connections when controller clocks
+differ, shows peer controllers and active POS versions, and securely relays
+selected/all controller and POS update requests through the master. Version 1.12.3 improves tray restoration, adds a tray Exit
 command, enables checked multi-kiosk actions, and prompts for Staff or Business
 Closure. Version 1.12.2 adds manual master connection by private IPv4
 address or pairing key, remembers the master by stable controller identity, and

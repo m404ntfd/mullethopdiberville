@@ -20,8 +20,8 @@ internal static class Program
         if (!ownsMutex)
         {
             MessageBox.Show(
-                "The Mullet Hop Kiosk Controller is already running.",
-                "Mullet Hop Kiosk Controller",
+                "The Mullet Hop Systems Controller is already running.",
+                "Mullet Hop Systems Controller",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
             return;
@@ -30,6 +30,7 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        MigrateShortcuts();
 
         try
         {
@@ -39,8 +40,8 @@ internal static class Program
         {
             ControllerLog.Write("Fatal controller error: " + ex);
             MessageBox.Show(
-                "The kiosk controller could not start.\n\n" + ex.Message,
-                "Mullet Hop Kiosk Controller",
+                "The Systems Controller could not start.\n\n" + ex.Message,
+                "Mullet Hop Systems Controller",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -56,6 +57,41 @@ internal static class Program
             UseShellExecute = true
         });
         Application.Exit();
+    }
+
+    private static void MigrateShortcuts()
+    {
+        try
+        {
+            var applicationData = Environment.GetFolderPath(
+                Environment.SpecialFolder.ApplicationData);
+            var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            var programData = Environment.GetFolderPath(
+                Environment.SpecialFolder.CommonApplicationData);
+            var folders = new[]
+            {
+                Path.Combine(applicationData, "Microsoft", "Windows", "Start Menu", "Programs", "Mullet Hop"),
+                Path.Combine(applicationData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"),
+                Path.Combine(programData, "Microsoft", "Windows", "Start Menu", "Programs"),
+                desktop
+            };
+            foreach (var folder in folders.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var oldPath = Path.Combine(folder, "Mullet Hop Kiosk Controller.lnk");
+                if (!File.Exists(oldPath))
+                    continue;
+                var newPath = Path.Combine(folder, "Mullet Hop Systems Controller.lnk");
+                if (File.Exists(newPath))
+                    File.Delete(oldPath);
+                else
+                    File.Move(oldPath, newPath);
+                ControllerLog.Write("Renamed the Kiosk Controller shortcut to Systems Controller.");
+            }
+        }
+        catch (Exception ex)
+        {
+            ControllerLog.Write("Systems Controller shortcut rename error: " + ex.Message);
+        }
     }
 
     private static void WaitForPreviousInstance(string[] args)

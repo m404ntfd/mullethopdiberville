@@ -74,12 +74,12 @@ internal sealed partial class KioskForm
                     : string.Empty;
                 var answer = MessageBox.Show(
                     Form.ActiveForm ?? this,
-                    $"The Kiosk Controller on {payload.ControllerName} is requesting permission to add this waiver kiosk.\n\n" +
+                    $"The Systems Controller on {payload.ControllerName} is requesting permission to add this waiver kiosk.\n\n" +
                     $"Controller address: {payload.ControllerAddress}\n\n" +
                     "If allowed, the controller and linked Mullet Hop POS can view this kiosk's status and send Open, Close, and Reset commands." +
                     replacing +
                     "\n\nOnly allow this request if you recognize the controller computer.",
-                    "Allow Kiosk Controller?",
+                    "Allow Systems Controller?",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question,
                     MessageBoxDefaultButton.Button2);
@@ -144,7 +144,7 @@ internal sealed partial class KioskForm
                 request);
 
             if (!string.IsNullOrEmpty(_lastRemoteConnectionError))
-                KioskLog.Write("Connection to the kiosk controller was restored.");
+                KioskLog.Write("Connection to the Systems Controller was restored.");
             _lastRemoteConnectionError = string.Empty;
 
             if (response.Command is not null &&
@@ -887,7 +887,7 @@ internal static class RemoteManagementProtocol
             }
 
             VerifySignedResponse(response, pairingKey, responseBody);
-            return new ControllerTestResult(true, "Connected securely to the Mullet Hop Kiosk Controller.");
+            return new ControllerTestResult(true, "Connected securely to the Mullet Hop Systems Controller.");
         }
         catch (Exception ex)
         {

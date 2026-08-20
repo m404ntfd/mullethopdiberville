@@ -7,12 +7,12 @@
     <Nullable>enable</Nullable>
     <AssemblyName>MulletHopKioskController</AssemblyName>
     <RootNamespace>MulletHopKioskController</RootNamespace>
-    <AssemblyTitle>Mullet Hop Kiosk Controller</AssemblyTitle>
+    <AssemblyTitle>Mullet Hop Systems Controller</AssemblyTitle>
     <ApplicationIcon>..\..\assets\MulletHopFish.ico</ApplicationIcon>
-    <Version>1.12.3</Version>
+    <Version>1.13.0</Version>
     <Authors>Mullet Hop</Authors>
-    <Product>Mullet Hop Kiosk Controller</Product>
-    <Description>Local-network dashboard for Mullet Hop waiver kiosks.</Description>
+    <Product>Mullet Hop Systems Controller</Product>
+    <Description>Local-network dashboard for Mullet Hop waiver kiosks and POS workstations.</Description>
   </PropertyGroup>
 
   <ItemGroup>

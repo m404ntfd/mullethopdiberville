@@ -17,7 +17,7 @@ if (-not (Test-Administrator)) {
 }
 
 Write-Host ''
-Write-Host 'Mullet Hop Kiosk Controller - Uninstall' -ForegroundColor Cyan
+Write-Host 'Mullet Hop Systems Controller - Uninstall' -ForegroundColor Cyan
 Write-Host ''
 $answer = Read-Host 'Remove the controller, shortcuts, pairing information, and kiosk history? (Y/N)'
 if ($answer -notmatch '^[Yy]') {
@@ -28,15 +28,22 @@ if ($answer -notmatch '^[Yy]') {
 Get-Process -Name 'MulletHopKioskController' -ErrorAction SilentlyContinue |
     Stop-Process -Force
 
-$firewallName = 'Mullet Hop Kiosk Controller (TCP 47832)'
-Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue |
-    Remove-NetFirewallRule
+@(
+    'Mullet Hop Systems Controller (TCP 47832)',
+    'Mullet Hop Kiosk Controller (TCP 47832)'
+) | ForEach-Object {
+    Get-NetFirewallRule -DisplayName $_ -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule
+}
 & netsh.exe http delete urlacl url='http://+:47832/mullethop/' 2>$null | Out-Null
 
 $shortcutPaths = @(
     (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Mullet Hop Kiosk Controller.lnk'),
+    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Mullet Hop Systems Controller.lnk'),
     (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Mullet Hop Kiosk Controller.lnk'),
-    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Kiosk Controller.lnk')
+    (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Mullet Hop Systems Controller.lnk'),
+    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Kiosk Controller.lnk'),
+    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Systems Controller.lnk')
 )
 foreach ($shortcutPath in $shortcutPaths) {
     if (Test-Path -LiteralPath $shortcutPath) {
@@ -66,4 +73,4 @@ if (Test-Path -LiteralPath $dataFolder) {
     Remove-Item -LiteralPath $dataFolder -Recurse -Force
 }
 
-Write-Host 'The Mullet Hop Kiosk Controller was removed.' -ForegroundColor Green
+Write-Host 'The Mullet Hop Systems Controller was removed.' -ForegroundColor Green

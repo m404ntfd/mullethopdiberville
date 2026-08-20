@@ -31,6 +31,7 @@ internal sealed class PosControllerForm : Form
     private bool _sidebarExpanded = true;
     private bool _refreshInProgress;
     private bool _updateCheckInProgress;
+    private bool _remoteUpdateRequested;
     private bool _staffMenuOpen;
     private bool _exitApproved;
     private bool _cleanupComplete;
@@ -351,6 +352,54 @@ internal sealed class PosControllerForm : Form
         }
     }
 
+    private async Task ProcessRemoteUpdateRequestAsync()
+    {
+        if (!_remoteUpdateRequested || _updateCheckInProgress || IsDisposed)
+            return;
+
+        _remoteUpdateRequested = false;
+        _updateCheckInProgress = true;
+        _checkUpdateButton.Enabled = false;
+        _checkUpdateButton.Text = "REMOTE UPDATE…";
+        SetConnectionStatus("Systems Controller requested a POS software update…", true);
+        try
+        {
+            var result = await PosUpdater.CheckAndStageUpdateAsync();
+            PosLog.Write("Remote Systems Controller update request: " + result.Message);
+            if (IsDisposed)
+                return;
+
+            if (result.Status == PosUpdateStatus.ReadyToInstall)
+            {
+                _checkUpdateButton.Text = "INSTALLING…";
+                _exitApproved = true;
+                var applyResult = PosUpdater.ApplyStagedUpdateAndRestart();
+                PosLog.Write("Remote POS update install: " + applyResult.Message);
+                if (applyResult.Status == PosUpdateStatus.Applying)
+                {
+                    _firefoxHost?.Dispose();
+                    return;
+                }
+                _exitApproved = false;
+                SetConnectionStatus(applyResult.Message, false);
+                return;
+            }
+
+            SetConnectionStatus(result.Message, result.Status == PosUpdateStatus.UpToDate);
+        }
+        finally
+        {
+            _updateCheckInProgress = false;
+            if (!IsDisposed)
+            {
+                _checkUpdateButton.Text = _sidebarExpanded
+                    ? (PosUpdater.HasStagedUpdate ? "INSTALL UPDATE" : "CHECK FOR UPDATES")
+                    : (PosUpdater.HasStagedUpdate ? "INSTALL" : "UPDATE");
+                _checkUpdateButton.Enabled = true;
+            }
+        }
+    }
+
     private async Task RefreshStatusesAsync()
     {
         if (_refreshInProgress)
@@ -367,6 +416,8 @@ internal sealed class PosControllerForm : Form
         {
             var client = new PosControllerClient(_settings.ControllerUrl, _settings.PairingKey);
             var response = await client.GetStatusAsync();
+            if (response.InstallUpdate)
+                _remoteUpdateRequested = true;
             var previousSlots = _settings.KioskSlots.ToArray();
             var added = _settings.RememberSuccessfulConnection(
                 _settings.ControllerUrl,
@@ -376,7 +427,7 @@ internal sealed class PosControllerForm : Form
             {
                 UpdateUnlinkedCards();
                 PosLog.Write(
-                    $"Automatically added {added} kiosk device{(added == 1 ? "" : "s")} from the Kiosk Controller.");
+                    $"Automatically added {added} kiosk device{(added == 1 ? "" : "s")} from the Systems Controller.");
             }
             var byId = response.Kiosks.ToDictionary(kiosk => kiosk.StationId, StringComparer.Ordinal);
             for (var slot = 0; slot < _cards.Length; slot++)
@@ -394,6 +445,7 @@ internal sealed class PosControllerForm : Form
                     ? $"Connected • {added} kiosk{(added == 1 ? "" : "s")} added"
                     : $"Controller connected • {DateTime.Now:h:mm:ss tt}",
                 true);
+            await ProcessRemoteUpdateRequestAsync();
         }
         catch (Exception ex)
         {

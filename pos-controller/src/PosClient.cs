@@ -32,6 +32,7 @@ internal sealed class PosKioskStatus
 internal sealed class PosStatusResponse
 {
     public DateTime ServerTimeUtc { get; set; }
+    public bool InstallUpdate { get; set; }
     public List<PosKioskStatus> Kiosks { get; set; } = [];
 }
 
@@ -46,6 +47,7 @@ internal sealed class PosControllerClient
     private const string TimestampHeader = "X-MulletHop-Timestamp";
     private const string SignatureHeader = "X-MulletHop-Signature";
     private const string PosMachineHeader = "X-MulletHop-POS-Machine";
+    private const string PosVersionHeader = "X-MulletHop-POS-Version";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient Client = CreateClient();
     private readonly string _controllerUrl;
@@ -81,12 +83,12 @@ internal sealed class PosControllerClient
         if (!Uri.TryCreate(controllerUrl?.Trim(), UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            error = "Enter a valid kiosk controller address.";
+            error = "Enter a valid Systems Controller address.";
             return false;
         }
         if (string.IsNullOrWhiteSpace(pairingKey) || pairingKey.Trim().Length < 16)
         {
-            error = "Enter the complete pairing key from the Kiosk Controller.";
+            error = "Enter the complete pairing key from the Systems Controller.";
             return false;
         }
         error = string.Empty;
@@ -96,7 +98,7 @@ internal sealed class PosControllerClient
     private async Task<T> PostAsync<T>(string relativePath, string body)
     {
         if (!TryBuildApiUri(_controllerUrl, relativePath, out var uri))
-            throw new InvalidOperationException("The kiosk controller address is not valid.");
+            throw new InvalidOperationException("The Systems Controller address is not valid.");
 
         using var request = CreateSignedRequest(uri, _pairingKey, body);
         using var response = await Client.SendAsync(request);
@@ -105,14 +107,14 @@ internal sealed class PosControllerClient
         {
             throw new InvalidOperationException(
                 response.StatusCode == System.Net.HttpStatusCode.Unauthorized
-                    ? "The Kiosk Controller rejected the pairing key."
-                    : $"The Kiosk Controller returned HTTP {(int)response.StatusCode}: " +
+                    ? "The Systems Controller rejected the pairing key."
+                    : $"The Systems Controller returned HTTP {(int)response.StatusCode}: " +
                       (string.IsNullOrWhiteSpace(responseBody) ? response.ReasonPhrase : responseBody));
         }
 
         VerifySignedResponse(response, _pairingKey, responseBody);
         return JsonSerializer.Deserialize<T>(responseBody, JsonOptions)
-               ?? throw new InvalidDataException("The Kiosk Controller returned an empty response.");
+               ?? throw new InvalidDataException("The Systems Controller returned an empty response.");
     }
 
     private static HttpRequestMessage CreateSignedRequest(Uri uri, string pairingKey, string body)
@@ -127,6 +129,7 @@ internal sealed class PosControllerClient
             SignatureHeader,
             Sign(pairingKey.Trim(), timestamp, body));
         request.Headers.TryAddWithoutValidation(PosMachineHeader, Environment.MachineName);
+        request.Headers.TryAddWithoutValidation(PosVersionHeader, PosUpdater.CurrentVersion);
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue(
             "MulletHopPosController", PosUpdater.CurrentVersion));
         return request;
@@ -136,24 +139,24 @@ internal sealed class PosControllerClient
     {
         if (!response.Headers.TryGetValues(TimestampHeader, out var timestamps) ||
             !response.Headers.TryGetValues(SignatureHeader, out var signatures))
-            throw new InvalidDataException("The Kiosk Controller response was not signed.");
+            throw new InvalidDataException("The Systems Controller response was not signed.");
 
         var timestamp = timestamps.FirstOrDefault() ?? string.Empty;
         var signature = signatures.FirstOrDefault() ?? string.Empty;
         if (!long.TryParse(timestamp, out var unixTime) ||
             Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - unixTime) > 300)
-            throw new InvalidDataException("The Kiosk Controller response timestamp was not valid.");
+            throw new InvalidDataException("The Systems Controller response timestamp was not valid.");
 
         var expected = Sign(pairingKey.Trim(), timestamp, body);
         try
         {
             if (!CryptographicOperations.FixedTimeEquals(
                     Convert.FromBase64String(expected), Convert.FromBase64String(signature)))
-                throw new InvalidDataException("The Kiosk Controller response signature was not valid.");
+                throw new InvalidDataException("The Systems Controller response signature was not valid.");
         }
         catch (FormatException)
         {
-            throw new InvalidDataException("The Kiosk Controller response signature was not valid.");
+            throw new InvalidDataException("The Systems Controller response signature was not valid.");
         }
     }
 

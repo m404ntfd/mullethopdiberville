@@ -350,20 +350,27 @@ internal sealed class FirefoxHost : IDisposable
         if (form is null || !form.ContainsFocus)
             return;
 
-        var browserThread = GetWindowThreadProcessId(_firefoxWindow, out _);
-        var currentThread = GetCurrentThreadId();
-        var attached = browserThread != 0 && browserThread != currentThread &&
-                       AttachThreadInput(currentThread, browserThread, true);
         try
         {
-            _host.Focus();
-            _ = SetForegroundWindow(form.Handle);
-            _ = SetFocus(_firefoxWindow);
+            var browserThread = GetWindowThreadProcessId(_firefoxWindow, out _);
+            var currentThread = GetCurrentThreadId();
+            var attached = browserThread != 0 && browserThread != currentThread &&
+                           AttachThreadInput(currentThread, browserThread, true);
+            try
+            {
+                _host.Focus();
+                _ = SetForegroundWindow(form.Handle);
+                _ = SetFocus(_firefoxWindow);
+            }
+            finally
+            {
+                if (attached)
+                    _ = AttachThreadInput(currentThread, browserThread, false);
+            }
         }
-        finally
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
         {
-            if (attached)
-                _ = AttachThreadInput(currentThread, browserThread, false);
+            PosLog.Write("Windows Firefox focus support is unavailable: " + ex.Message);
         }
     }
 
@@ -572,7 +579,7 @@ internal sealed class FirefoxHost : IDisposable
     [DllImport("user32.dll")]
     private static extern IntPtr SetFocus(IntPtr window);
 
-    [DllImport("user32.dll")]
+    [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll")]
