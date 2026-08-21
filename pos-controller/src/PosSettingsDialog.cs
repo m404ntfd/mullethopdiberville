@@ -1,3 +1,5 @@
+using MulletHop.Shared;
+
 namespace MulletHopPosController;
 
 internal sealed class PosSettingsDialog : Form
@@ -14,6 +16,7 @@ internal sealed class PosSettingsDialog : Form
     private readonly ComboBox[] _slots = [new(), new(), new(), new()];
     private readonly Label _connectionStatus = new();
     private readonly Label _assignmentStatus = new();
+    private readonly Label _wristbandStatus = new();
     private List<PosKioskStatus> _knownKiosks = [];
     private List<string> _pendingAssignments = [string.Empty, string.Empty, string.Empty, string.Empty];
     private bool _updatingSlotControls;
@@ -61,10 +64,12 @@ internal sealed class PosSettingsDialog : Form
         };
         var connection = BuildConnectionGroup();
         var assignments = BuildAssignmentsGroup();
+        var wristbands = BuildWristbandGroup();
         var startup = BuildStartupGroup();
         var security = BuildSecurityGroup();
         content.Controls.Add(security);
         content.Controls.Add(startup);
+        content.Controls.Add(wristbands);
         content.Controls.Add(assignments);
         content.Controls.Add(connection);
         Controls.Add(content);
@@ -195,6 +200,87 @@ internal sealed class PosSettingsDialog : Form
             Font = new Font("Segoe UI", 9, FontStyle.Regular)
         });
         return group;
+    }
+
+    private GroupBox BuildWristbandGroup()
+    {
+        var group = MakeGroup("Wristband Colors and Jump Times", 132);
+        group.Dock = DockStyle.Top;
+        group.Controls.Add(new Label
+        {
+            Text = "Set colors by day and one-hour jump time, manage active colors, and identify the color currently loaded in WB-1 through WB-7.",
+            Bounds = new Rectangle(18, 31, 505, 48),
+            ForeColor = Color.FromArgb(52, 65, 76),
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Regular)
+        });
+        var edit = MakeButton(
+            "Edit Wristband Colors",
+            Color.FromArgb(245, 130, 32),
+            Color.FromArgb(16, 24, 32));
+        edit.Bounds = new Rectangle(545, 32, 205, 42);
+        edit.Click += async (_, _) => await OpenWristbandSettingsAsync();
+        group.Controls.Add(edit);
+        _wristbandStatus.Text = string.IsNullOrWhiteSpace(_working.WristbandSettings.Revision)
+            ? "No wristband color settings have been synchronized yet."
+            : "Wristband color settings are synchronized with the Systems Controller.";
+        _wristbandStatus.Bounds = new Rectangle(18, 91, 732, 27);
+        _wristbandStatus.ForeColor = Color.FromArgb(83, 97, 109);
+        _wristbandStatus.Font = new Font("Segoe UI", 9, FontStyle.Regular);
+        group.Controls.Add(_wristbandStatus);
+        return group;
+    }
+
+    private async Task OpenWristbandSettingsAsync()
+    {
+        if (!PosControllerClient.IsConfigurationValid(
+                _controllerUrl.Text,
+                _pairingKey.Text,
+                out var error))
+        {
+            MessageBox.Show(this, error, "Wristband Colors", MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        _wristbandStatus.Text = "Loading wristband settings from the Systems Controller…";
+        _wristbandStatus.ForeColor = Color.FromArgb(8, 119, 189);
+        try
+        {
+            var client = new PosControllerClient(_controllerUrl.Text, _pairingKey.Text);
+            var current = await client.GetWristbandSettingsAsync();
+            current.Normalize();
+            using var dialog = new WristbandColorSettingsDialog(current);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                _wristbandStatus.Text = "No wristband color changes were saved.";
+                _wristbandStatus.ForeColor = Color.FromArgb(83, 97, 109);
+                return;
+            }
+
+            _wristbandStatus.Text = "Saving wristband settings to the master Systems Controller…";
+            var saved = await client.SaveWristbandSettingsAsync(dialog.Settings);
+            saved.Normalize();
+            _working.ControllerUrl = _controllerUrl.Text.Trim();
+            _working.PairingKey = _pairingKey.Text.Trim();
+            _working.WristbandSettings = saved;
+            _working.Save();
+            AppliedSettings = _working.Clone();
+            _wristbandStatus.Text =
+                "Saved. All connected POS applications will receive these wristband settings.";
+            _wristbandStatus.ForeColor = Color.FromArgb(44, 116, 29);
+        }
+        catch (Exception ex)
+        {
+            _wristbandStatus.Text = "Wristband settings could not be saved.";
+            _wristbandStatus.ForeColor = Color.FromArgb(187, 34, 46);
+            MessageBox.Show(
+                this,
+                "The wristband settings could not be loaded or saved through the Systems Controller. " +
+                "The POS will continue using its last synchronized color list.\n\n" + ex.Message,
+                "Wristband Colors",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
     }
 
     private async Task LoadKiosksAsync(bool showSuccess)

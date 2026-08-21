@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using MulletHop.KioskDiscovery;
 using MulletHop.LocalNetworking;
+using MulletHop.Shared;
 
 namespace MulletHopKioskController;
 
@@ -243,6 +244,10 @@ internal sealed class ControllerServer : IDisposable
                 string.Equals(
                     path,
                     BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.SoftwareUpdatePath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    path,
+                    BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.WristbandSettingsPath,
                     StringComparison.OrdinalIgnoreCase))
             {
                 var remoteAddress = context.Request.RemoteEndPoint?.Address;
@@ -327,6 +332,33 @@ internal sealed class ControllerServer : IDisposable
                     return;
                 }
 
+                if (string.Equals(
+                        path,
+                        BasePath.TrimEnd('/') + "/" + ControllerPeerCoordinator.WristbandSettingsPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var wristbandRequest =
+                        JsonSerializer.Deserialize<ControllerWristbandSettingsRequest>(
+                            body,
+                            JsonOptions);
+                    if (wristbandRequest is null ||
+                        !Guid.TryParseExact(wristbandRequest.ControllerId, "N", out _) ||
+                        !Peers.IsKnownController(wristbandRequest.ControllerId) ||
+                        wristbandRequest.Settings is null)
+                    {
+                        await WritePlainResponseAsync(
+                            context,
+                            HttpStatusCode.BadRequest,
+                            "Invalid wristband settings relay request.");
+                        return;
+                    }
+                    await WriteSignedResponseAsync(
+                        context,
+                        _state.SaveWristbandSettings(wristbandRequest.Settings),
+                        _state.PeerAccessKey);
+                    return;
+                }
+
                 var peerCommand = JsonSerializer.Deserialize<ControllerPeerCommandRequest>(body, JsonOptions);
                 if (peerCommand is null ||
                     !Guid.TryParseExact(peerCommand.ControllerId, "N", out _) ||
@@ -391,8 +423,55 @@ internal sealed class ControllerServer : IDisposable
                 {
                     serverTimeUtc = DateTime.UtcNow,
                     installUpdate = _state.TakePosUpdate(posMachine),
+                    wristbandSettingsRevision = _state.WristbandSettingsRevision,
                     kiosks = _state.PosStatusSnapshot()
                 });
+                return;
+            }
+
+            if (string.Equals(
+                    path,
+                    BasePath.TrimEnd('/') + "/api/pos/wristbands/get",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RecordPosMachine(context.Request);
+                await WriteSignedResponseAsync(
+                    context,
+                    _state.CreateWristbandSettingsPackage());
+                return;
+            }
+
+            if (string.Equals(
+                    path,
+                    BasePath.TrimEnd('/') + "/api/pos/wristbands/save",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RecordPosMachine(context.Request);
+                var wristbandSettings = JsonSerializer.Deserialize<WristbandSettingsPackage>(
+                    body,
+                    JsonOptions);
+                if (wristbandSettings is null ||
+                    wristbandSettings.Colors is null ||
+                    wristbandSettings.Printers is null ||
+                    wristbandSettings.Days is null ||
+                    wristbandSettings.Colors.Count > 50 ||
+                    wristbandSettings.Printers.Count > 20 ||
+                    wristbandSettings.Days.Count > 10 ||
+                    wristbandSettings.Days.Any(day => day is null ||
+                        day.Slots is null || day.Slots.Count > 100))
+                {
+                    await WritePlainResponseAsync(
+                        context,
+                        HttpStatusCode.BadRequest,
+                        "Invalid wristband color settings.");
+                    return;
+                }
+                var savedWristbandSettings = _state.IsMaster
+                    ? _state.SaveWristbandSettings(wristbandSettings)
+                    : await Peers.SaveWristbandSettingsOnMasterAsync(wristbandSettings);
+                if (!_state.IsMaster)
+                    _state.ApplyReplicatedWristbandSettings(savedWristbandSettings);
+                await WriteSignedResponseAsync(context, savedWristbandSettings);
                 return;
             }
 

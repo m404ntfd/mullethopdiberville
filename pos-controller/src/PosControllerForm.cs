@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using MulletHop.Shared;
 
 namespace MulletHopPosController;
 
@@ -36,6 +37,7 @@ internal sealed class PosControllerForm : Form
     private bool _updateCheckInProgress;
     private bool _remoteUpdateRequested;
     private bool _staffMenuOpen;
+    private bool _wristbandPrinterPromptOpen;
     private bool _exitApproved;
     private bool _cleanupComplete;
     private Rectangle _fullScreenBounds;
@@ -64,6 +66,7 @@ internal sealed class PosControllerForm : Form
         _firefoxHost.CrashDetected += (_, message) => ShowFirefoxCrash(message);
         _firefoxHost.BrowserInteractionStarted += (_, _) => BeginBrowserInteraction();
         _firefoxHost.BrowserInteractionCompleted += (_, _) => CompleteBrowserInteraction();
+        _firefoxHost.WristbandPrintRequested += HandleWristbandPrintRequested;
         TrackSidebarInteraction(_sidebar);
         _sidebarFocusReturnTimer.Tick += (_, _) => ReturnFocusAfterSidebarInteraction();
         _refreshTimer.Tick += async (_, _) => await RefreshStatusesAsync();
@@ -89,6 +92,9 @@ internal sealed class PosControllerForm : Form
 
     internal static void RunFocusRegressionSmokeTest()
     {
+        if (!WristbandSettingsPackage.SmokeTest())
+            throw new InvalidOperationException("Wristband color settings failed their regression test.");
+
         using var form = new PosControllerForm(new PosSettings());
         form.CreateControl();
         if (FirefoxHost.WindowThreadIdForSmokeTest(form.Handle) == 0)
@@ -134,6 +140,37 @@ internal sealed class PosControllerForm : Form
         {
             throw new InvalidOperationException(
                 "The Firefox display-health test missed a collapsed, incomplete, or blank LilyPad page.");
+        }
+
+        var wristbandPrintUrl =
+            "https://mullet.lilypadpos.app/public/PrintRegularWristbandsPDF.php";
+        if (!FirefoxHost.IsWristbandPrintUrlForSmokeTest(wristbandPrintUrl) ||
+            !FirefoxHost.IsWristbandPrintUrlForSmokeTest(
+                "https://mullet.lilypadpos.app/public/PrintBirthdayWristband.pdf?job=1") ||
+            FirefoxHost.IsWristbandPrintUrlForSmokeTest(
+                "https://mullet.lilypadpos.app/public/PrintReceiptPDF.php") ||
+            FirefoxHost.IsWristbandPrintUrlForSmokeTest(
+                "https://example.com/public/PrintRegularWristbandsPDF.php") ||
+            FirefoxHost.PageHealthIndicatesFailureForSmokeTest(
+                healthyPage with { Url = wristbandPrintUrl, BodyTextLength = 0 },
+                new Size(1200, 800)))
+        {
+            throw new InvalidOperationException(
+                "Wristband print-page detection did not identify only LilyPad wristband jobs.");
+        }
+
+        var printerNames = WristbandPrinterDialog.PrinterNamesForSmokeTest;
+        if (printerNames.Count != 7 ||
+            !printerNames.SequenceEqual(Enumerable.Range(1, 7).Select(number => $"WB-{number}")) ||
+            !FirefoxPrintDestinationSelector.IsSupportedWristbandPrinterForSmokeTest("WB-7") ||
+            FirefoxPrintDestinationSelector.IsSupportedWristbandPrinterForSmokeTest("WB-8") ||
+            !FirefoxPrintDestinationSelector.TextIdentifiesPrinterForSmokeTest(
+                "Destination: WB-1 (ready)",
+                "WB-1") ||
+            FirefoxPrintDestinationSelector.TextIdentifiesPrinterForSmokeTest("WB-10", "WB-1"))
+        {
+            throw new InvalidOperationException(
+                "The wristband printer selector did not preserve the WB-1 through WB-7 range.");
         }
 
         if (new PosSettings().StartAutomatically)
@@ -627,6 +664,28 @@ internal sealed class PosControllerForm : Form
             var response = await client.GetStatusAsync();
             if (response.InstallUpdate)
                 _remoteUpdateRequested = true;
+            if (!string.IsNullOrWhiteSpace(response.WristbandSettingsRevision) &&
+                !string.Equals(
+                    response.WristbandSettingsRevision,
+                    _settings.WristbandSettings.Revision,
+                    StringComparison.Ordinal))
+            {
+                try
+                {
+                    var wristbandSettings = await client.GetWristbandSettingsAsync();
+                    wristbandSettings.Normalize();
+                    _settings.WristbandSettings = wristbandSettings;
+                    _settings.Save();
+                    PosLog.Write(
+                        $"Wristband color settings {wristbandSettings.Revision} synchronized from the Systems Controller.");
+                }
+                catch (Exception ex)
+                {
+                    PosLog.Write(
+                        "Wristband settings synchronization failed; keeping the last saved colors. " +
+                        ex.Message);
+                }
+            }
             var previousSlots = _settings.KioskSlots.ToArray();
             var added = _settings.RememberSuccessfulConnection(
                 _settings.ControllerUrl,
@@ -682,6 +741,73 @@ internal sealed class PosControllerForm : Form
             await SendCommandAsync(slot, PosCommandTypes.SetBusinessClosed, true);
         else
             await SendCommandAsync(slot, PosCommandTypes.SetClosed, true);
+    }
+
+    private async void HandleWristbandPrintRequested(
+        object? sender,
+        WristbandPrintRequestedEventArgs e)
+    {
+        if (_wristbandPrinterPromptOpen || _cleanupComplete || IsDisposed ||
+            _firefoxHost is null)
+        {
+            return;
+        }
+
+        _wristbandPrinterPromptOpen = true;
+        _browserModeActive = false;
+        _firefoxHost.SetBrowserFocusPreferred(false);
+        try
+        {
+            using var dialog = new WristbandPrinterDialog(_settings.WristbandSettings);
+            if (dialog.ShowDialog(this) != DialogResult.OK ||
+                string.IsNullOrWhiteSpace(dialog.SelectedPrinterName))
+            {
+                if (!_firefoxHost.CancelPrintPreview())
+                {
+                    PosLog.Write(
+                        "The wristband printer prompt was cancelled, but Firefox did not accept Escape.");
+                }
+                else
+                {
+                    PosLog.Write("The wristband print preview was cancelled by the user.");
+                }
+                return;
+            }
+
+            var printerName = dialog.SelectedPrinterName;
+            PosLog.Write($"The user selected {printerName} for the current wristband print job.");
+            var result = await _firefoxHost.SelectPrintDestinationAsync(printerName);
+            if (!result.Success)
+            {
+                PosLog.Write(result.Message);
+                MessageBox.Show(
+                    this,
+                    result.Message + "\n\nThe POS-X Thermal Printer remains the default receipt printer.",
+                    "Select Wristband Printer",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            PosLog.Write("Wristband printer prompt error: " + ex);
+            MessageBox.Show(
+                this,
+                "The wristband printer could not be selected automatically. " +
+                "Choose WB-1 through WB-7 manually in Firefox's Destination list.\n\n" +
+                ex.Message,
+                "Select Wristband Printer",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _wristbandPrinterPromptOpen = false;
+            _browserModeActive = true;
+            _firefoxHost?.SetBrowserFocusPreferred(true);
+            BeginInvoke(new Action(() =>
+                _firefoxHost?.FocusBrowser("wristband printer prompt completed")));
+        }
     }
 
     private async Task SendCommandAsync(int slot, string commandType, bool? closed = null)

@@ -753,7 +753,7 @@ internal sealed class ControllerForm : Form
         ConfigureTableActionButton(_controllerUpdateButton, "Check Updates", Color.FromArgb(8, 119, 189), Color.White);
         ConfigureTableActionButton(_systemsUpdatesButton, "Systems & POS Updates", Color.FromArgb(52, 152, 143), Color.White);
         ConfigureTableActionButton(_manageAdsButton, "Manage Ads", Color.FromArgb(117, 68, 154), Color.White);
-        ConfigureTableActionButton(_businessHoursButton, "Business Hours", Color.FromArgb(118, 196, 66));
+        ConfigureTableActionButton(_businessHoursButton, "Hours & Wristbands", Color.FromArgb(118, 196, 66));
         ConfigureTableActionButton(_softwareDownloadsButton, "Download Apps", Color.FromArgb(8, 119, 189), Color.White);
         ConfigureTableActionButton(_remoteAccessButton, "Remote Access", Color.FromArgb(105, 210, 236));
         ConfigureTableActionButton(_pullConnectionsButton, "Pull Connections", Color.FromArgb(52, 152, 143), Color.White);

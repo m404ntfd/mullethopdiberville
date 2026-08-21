@@ -224,7 +224,7 @@ when they reconnect.
 
 The lower-right Systems Controller Program section includes the controller's own
 Auto/Light/Dark appearance selector, master-controller indicator and toggle,
-plus Check Updates, Systems & POS Updates, Manage Ads, Business Hours, Download Apps, Remote Access,
+plus Check Updates, Systems & POS Updates, Manage Ads, Hours & Wristbands, Download Apps, Remote Access,
 Restart Controller, Exit Program, and Pull Connections buttons. Download Apps opens a Software
 Downloads window that finds the latest published all-programs installer, standalone
 Waiver Kiosk installer, or Mullet Hop POS package, asks where to save it, and shows
@@ -272,7 +272,7 @@ using the saved JPG files and schedules until a later sync succeeds.
 MANAGE HOURS AND KIOSK APPEARANCE
 ---------------------------------
 
-Select Business Hours in the Systems Controller Program section. The Business Hours tab
+Select Hours & Wristbands in the Systems Controller Program section. The Business Hours tab
 sets each day's opening, Last Jump Time Sold, and closing time; whether to show
 the Business Closed video at the Last Jump cutoff; whether to black out one minute after
 closing; and the pre-opening screensaver time. The Business Closed video displays
@@ -286,6 +286,14 @@ then follows the kiosk's Windows setting; if Windows is still using Dark mode,
 the kiosk remains dark. Save & Publish stores one combined Hours and Appearance
 profile. Sync Selected Kiosk and Sync All Kiosks send that profile through the
 same authenticated connection used for other controller commands.
+
+The Wristband Colors tab opens the shared color editor. Choose a day to assign a
+wristband color to each one-hour jump window; rows begin every 30 minutes from that
+day's opening through Last Jump Time Sold. Manage Color List can add, edit, remove,
+activate, or deactivate colors. The same editor records the color currently loaded in
+WB-1 through WB-7 so the POS print selector can label and color every printer button.
+These settings are stored by the master controller, replicated to the other Systems
+Controllers, and synchronized to all connected POS applications.
 
 
 NETWORK NOTES
@@ -310,7 +318,9 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.15.2 starts elevated at Windows sign-in, remains in
+Systems Controller version 1.15.3 adds the shared wristband color catalog, day/time
+schedule, WB-1 through WB-7 assignments, master storage, controller replication, and POS
+synchronization. Version 1.15.2 starts elevated at Windows sign-in, remains in
 the system tray after its service is ready, and launches Mullet Hop POS only when
 the POS auto-start setting is enabled. Version 1.15.1 asks for an explicit Yes/No confirmation before
 the user switches the local PC to the master role; automatic priority failover remains
