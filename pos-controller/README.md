@@ -53,12 +53,15 @@ protects Firefox focus while the sidebar is idle, and checks for a hung browser,
 failed startup, a Firefox process exit, a tab-crash title, and a collapsed or
 incomplete LilyPad viewport.
 It terminates and reopens the complete embedded Firefox session once automatically.
-Only if the recovery also fails does a red banner ask staff to use **Refresh
-Lilypad**. Refresh Lilypad forcibly terminates the Firefox process tree, clears
-every saved tab and session, and opens one fresh LilyPad home page.
+Automatic recovery reopens the most recently healthy LilyPad page when it was seen
+within the last four hours. Only if that recovery also fails does a red banner ask
+staff to use **Refresh Lilypad**. Refresh Lilypad intentionally performs a clean
+reset: it forcibly terminates the POS Firefox process tree, clears every saved tab
+and session, and opens one fresh LilyPad home page.
 
-The dedicated Firefox session always starts from a clean tab/session state and loads
-the LilyPad login page with JavaScript and fresh HTTP responses enabled. On LilyPad,
+The dedicated Firefox session starts from a clean tab/session state with JavaScript
+and fresh HTTP responses enabled. Normal startup and manual Refresh load the LilyPad
+login page; automatic recovery may instead reopen the recent healthy page. On LilyPad,
 moving from the username field into the password field fires the page's native
 username-change request; LilyPad then supplies the location and station choices for
 that employee. The POS host restores cross-process Firefox focus after activation so
@@ -99,7 +102,13 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile.
+restarts without changing the user's normal Firefox profile. Version 1.7.5 records the
+dedicated process identity and asks Windows for the exact owner of a locked POS profile.
+After an application interruption it terminates only that verified orphaned POS Firefox
+tree, clears the stale lock, and retries startup. Normal Firefox profiles and windows
+are not terminated. The last healthy LilyPad URL is retained for up to four hours so
+automatic recovery can return to the open page when possible; unsaved text entered into
+the page cannot be guaranteed because that state belongs to the failed Firefox process.
 
 Version 1.7.4 adds the optional POS automatic-startup setting, which is off by
 default. It selects the correct full-size Firefox top-level window, checks the live

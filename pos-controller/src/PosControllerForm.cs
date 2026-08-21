@@ -139,6 +139,16 @@ internal sealed class PosControllerForm : Form
         if (new PosSettings().StartAutomatically)
             throw new InvalidOperationException("POS automatic startup is not off by default.");
 
+        if (!FirefoxHost.ProfileLockDialogTitleIndicatesFailureForSmokeTest("Close Firefox") ||
+            !FirefoxHost.ProfileLockDialogTitleIndicatesFailureForSmokeTest(
+                "Firefox is already running") ||
+            FirefoxHost.ProfileLockDialogTitleIndicatesFailureForSmokeTest("LilyPad POS System"))
+        {
+            throw new InvalidOperationException(
+                "Firefox profile-lock dialog detection did not distinguish a normal browser window.");
+        }
+        FirefoxProfileRecovery.RunSmokeTest();
+
         using var card = new KioskControlCard(1);
         card.SetExpanded(expanded: false);
         var status = new PosKioskStatus
