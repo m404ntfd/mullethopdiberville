@@ -51,6 +51,8 @@ internal sealed class FirefoxHost : IDisposable
     private DateTime? _unhealthyPageSinceUtc;
     private bool _layoutRepairAttempted;
     private string? _lastKnownLilyPadUrl;
+    private string? _activeWristbandDocumentKey;
+    private bool _wristbandPromptRaised;
     private string? _nextLaunchUrl;
     private bool _disposed;
 
@@ -61,6 +63,7 @@ internal sealed class FirefoxHost : IDisposable
     public event EventHandler<string>? CrashDetected;
     public event EventHandler? BrowserInteractionStarted;
     public event EventHandler? BrowserInteractionCompleted;
+    public event EventHandler<WristbandPrintRequestedEventArgs>? WristbandPrintRequested;
 
     public FirefoxHost(Control host)
     {
@@ -131,6 +134,8 @@ internal sealed class FirefoxHost : IDisposable
             _crashReported = false;
             _unhealthyPageSinceUtc = null;
             _layoutRepairAttempted = false;
+            _activeWristbandDocumentKey = null;
+            _wristbandPromptRaised = false;
             _lastLayoutPulseUtc = DateTime.MinValue;
             _firefoxWindow = IntPtr.Zero;
             _process = Process.Start(startInfo)
@@ -219,6 +224,41 @@ internal sealed class FirefoxHost : IDisposable
         _browserFocusPreferred = preferred;
         if (preferred)
             FocusEmbeddedWindow("browser mode enabled");
+    }
+
+    public Task<PrintDestinationSelectionResult> SelectPrintDestinationAsync(
+        string printerName,
+        CancellationToken cancellationToken = default)
+    {
+        if (_firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow))
+        {
+            return Task.FromResult(PrintDestinationSelectionResult.Failed(
+                "The embedded Firefox window is not available."));
+        }
+
+        return FirefoxPrintDestinationSelector.SelectAsync(
+            _firefoxWindow,
+            printerName,
+            cancellationToken);
+    }
+
+    public bool CancelPrintPreview()
+    {
+        if (_firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow))
+            return false;
+
+        _ = FocusEmbeddedWindow("cancel wristband print preview");
+        var keyDownPosted = PostMessage(
+            _firefoxWindow,
+            WmKeyDown,
+            new IntPtr(VkEscape),
+            new IntPtr(0x00010001));
+        var keyUpPosted = PostMessage(
+            _firefoxWindow,
+            WmKeyUp,
+            new IntPtr(VkEscape),
+            new IntPtr(unchecked((int)0xC0010001)));
+        return keyDownPosted && keyUpPosted;
     }
 
     private void FindAndAttachWindow()
@@ -474,12 +514,46 @@ internal sealed class FirefoxHost : IDisposable
         }
         try
         {
-            _host.BeginInvoke(new Action(() => EvaluatePageHealth(health)));
+            _host.BeginInvoke(new Action(() =>
+            {
+                EvaluatePageHealth(health);
+                ObserveWristbandPrintPage(health);
+            }));
         }
         catch (InvalidOperationException)
         {
             // The POS window is closing while the health result arrives.
         }
+    }
+
+    private void ObserveWristbandPrintPage(LilyPadPageHealth health)
+    {
+        var wristbandUrl = NormalizeLilyPadUrl(health.Url);
+        if (!IsWristbandPrintUrl(wristbandUrl))
+        {
+            _activeWristbandDocumentKey = null;
+            _wristbandPromptRaised = false;
+            return;
+        }
+
+        var documentKey = $"{wristbandUrl}|{health.PageTimeOrigin:R}";
+        if (!string.Equals(
+                _activeWristbandDocumentKey,
+                documentKey,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            _activeWristbandDocumentKey = documentKey;
+            _wristbandPromptRaised = false;
+        }
+
+        if (_wristbandPromptRaised)
+            return;
+
+        _wristbandPromptRaised = true;
+        PosLog.Write("A LilyPad wristband print page requested a wristband printer selection.");
+        WristbandPrintRequested?.Invoke(
+            this,
+            new WristbandPrintRequestedEventArgs(wristbandUrl!));
     }
 
     private void EvaluatePageHealth(LilyPadPageHealth health)
@@ -533,7 +607,7 @@ internal sealed class FirefoxHost : IDisposable
             return "The completed LilyPad login page does not contain its username and password controls.";
         }
 
-        if (health.BodyTextLength == 0)
+        if (health.BodyTextLength == 0 && !IsWristbandPrintUrl(health.Url))
             return "The completed LilyPad page has no visible content.";
 
         return null;
@@ -542,6 +616,9 @@ internal sealed class FirefoxHost : IDisposable
     internal static bool PageHealthIndicatesFailureForSmokeTest(
         LilyPadPageHealth health,
         Size hostSize) => DescribePageHealthIssue(health, hostSize) is not null;
+
+    internal static bool IsWristbandPrintUrlForSmokeTest(string? value) =>
+        IsWristbandPrintUrl(value);
 
     private void FirefoxExited(object? sender, EventArgs e)
     {
@@ -803,6 +880,23 @@ internal sealed class FirefoxHost : IDisposable
         return uri.AbsoluteUri;
     }
 
+    private static bool IsWristbandPrintUrl(string? value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(uri.Host, "mullet.lilypadpos.app", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileName(uri.AbsolutePath);
+        return fileName.Contains("Wristband", StringComparison.OrdinalIgnoreCase) &&
+               (fileName.Contains("Print", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Contains("PDF", StringComparison.OrdinalIgnoreCase)) &&
+               (fileName.EndsWith(".php", StringComparison.OrdinalIgnoreCase) ||
+                fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static void PrepareFirefoxProfile(string profilePath)
     {
         Directory.CreateDirectory(profilePath);
@@ -818,6 +912,8 @@ internal sealed class FirefoxHost : IDisposable
             user_pref("browser.cache.disk.enable", false);
             user_pref("browser.cache.offline.enable", false);
             user_pref("network.http.use-cache", false);
+            user_pref("print.save_print_settings", false);
+            user_pref("print_printer", "POS-X Thermal Printer");
             user_pref("datareporting.policy.dataSubmissionEnabled", false);
             user_pref("datareporting.healthreport.uploadEnabled", false);
             user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
@@ -963,6 +1059,8 @@ internal sealed class FirefoxHost : IDisposable
         _pointerWasDown = false;
         _keyboardWasDown = false;
         _browserInteractionPending = false;
+        _activeWristbandDocumentKey = null;
+        _wristbandPromptRaised = false;
         _compatibilityBridge?.Dispose();
         _compatibilityBridge = null;
         var processes = new[] { _windowProcess, _process }
@@ -1005,6 +1103,8 @@ internal sealed class FirefoxHost : IDisposable
         IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     private const uint WmSize = 0x0005;
+    private const uint WmKeyDown = 0x0100;
+    private const uint WmKeyUp = 0x0101;
     private const uint GwOwner = 4;
 
     private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
@@ -1060,6 +1160,10 @@ internal sealed class FirefoxHost : IDisposable
         IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
+    private static extern bool PostMessage(
+        IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr window);
 
     [DllImport("user32.dll")]
@@ -1096,6 +1200,7 @@ internal sealed class FirefoxHost : IDisposable
     private const int VkMiddleButton = 0x04;
     private const int VkXButton1 = 0x05;
     private const int VkXButton2 = 0x06;
+    private const int VkEscape = 0x1B;
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int virtualKey);

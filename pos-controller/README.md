@@ -68,6 +68,22 @@ that employee. The POS host restores cross-process Firefox focus after activatio
 that this username → password → location-selection sequence continues to work after
 the POS window has been minimized or covered.
 
+## Wristband printing
+
+When LilyPad opens a wristband PDF print page, Mullet Hop POS displays a large
+WB-1 through WB-7 printer selector. Only wristband printers that Windows reports
+as installed can be selected. The initial selector displays **COLOR NOT SET**;
+printer-color assignments will be added to Settings in a later update.
+
+The selected WB printer is applied only to the currently open Firefox print
+preview. The user can review the destination and select Print normally. **Return /
+Cancel Print** closes the selector and sends Escape to the current print preview.
+If Firefox does not expose its Destination control to Windows, the application
+asks the user to select the chosen WB printer manually instead of interrupting
+the sale. The application does not change the Windows default printer, and its
+dedicated Firefox profile keeps **POS-X Thermal Printer** as the normal receipt
+and cash-drawer destination for later print jobs.
+
 ## Installation
 
 1. Install Mozilla Firefox on the front-desk computer.
@@ -102,7 +118,10 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.5 records the
+restarts without changing the user's normal Firefox profile. Version 1.7.6 detects
+LilyPad wristband print pages, prompts for WB-1 through WB-7, and applies the selected
+printer only to that Firefox print preview while retaining POS-X Thermal Printer for
+normal receipt jobs. Version 1.7.5 records the
 dedicated process identity and asks Windows for the exact owner of a locked POS profile.
 After an application interruption it terminates only that verified orphaned POS Firefox
 tree, clears the stale lock, and retries startup. Normal Firefox profiles and windows

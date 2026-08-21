@@ -288,6 +288,13 @@ Selecting a machine already assigned elsewhere moves or swaps it automatically.
 The Application Startup checkbox can ask the Systems Controller to launch POS after
 its service is ready at Windows sign-in. This checkbox is off by default.
 
+Mullet Hop POS 1.7.6 detects LilyPad wristband PDF print pages and opens an initial
+WB-1 through WB-7 selection prompt. It changes only the current Firefox print-preview
+destination and leaves Windows and the dedicated POS Firefox profile set to use the
+POS-X Thermal Printer for normal receipts and cash-drawer operation. Installed WB
+printers are enabled in the prompt; their buttons show COLOR NOT SET until the planned
+printer-color settings are added.
+
 Version 1.7.5 records the exact POS Firefox process, detects the Windows process that
 owns a stale dedicated-profile lock, and terminates only that verified orphaned POS
 Firefox tree. It retains the last healthy LilyPad URL for up to four hours for one

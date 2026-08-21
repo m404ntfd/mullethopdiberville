@@ -14,7 +14,8 @@ internal sealed record LilyPadPageHealth(
     int ViewportHeight,
     int BodyTextLength,
     bool HasUsername,
-    bool HasPassword)
+    bool HasPassword,
+    double PageTimeOrigin = 0)
 {
     public bool IsLoginPage =>
         Uri.TryCreate(Url, UriKind.Absolute, out var uri) &&
@@ -135,7 +136,8 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
             ? document.body.innerText.trim().length
             : 0,
           hasUsername: document.getElementById("Username") instanceof HTMLInputElement,
-          hasPassword: document.getElementById("Password") instanceof HTMLInputElement
+          hasPassword: document.getElementById("Password") instanceof HTMLInputElement,
+          pageTimeOrigin: Number.isFinite(performance.timeOrigin) ? performance.timeOrigin : 0
         })
         """;
     private static readonly JsonSerializerOptions HealthJsonOptions =
