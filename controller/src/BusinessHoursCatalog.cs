@@ -1,3 +1,5 @@
+using MulletHop.Shared;
+
 namespace MulletHopKioskController;
 
 internal enum ControllerKioskThemeMode
@@ -203,7 +205,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
     {
         _state = state;
         _selectedStationId = selectedStationId;
-        Text = "Business Hours and Kiosk Appearance";
+        Text = "Business Hours, Kiosk Appearance, and Wristbands";
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(650, 700);
         MinimumSize = new Size(666, 739);
@@ -225,7 +227,11 @@ internal sealed class ControllerBusinessHoursDialog : Form
         {
             BackColor = Color.FromArgb(244, 248, 251), Padding = new Padding(0)
         };
-        tabs.TabPages.AddRange([hoursPage, appearancePage]);
+        var wristbandPage = new TabPage("Wristband Colors")
+        {
+            BackColor = Color.FromArgb(244, 248, 251), Padding = new Padding(0)
+        };
+        tabs.TabPages.AddRange([hoursPage, appearancePage, wristbandPage]);
 
         _enabled.Text = "Use automatic business hours";
         _enabled.Checked = profile.Enabled;
@@ -354,6 +360,30 @@ internal sealed class ControllerBusinessHoursDialog : Form
         appearancePage.Controls.AddRange([themeGroup, scheduleGroup]);
         UpdateAppearanceEnabledState();
 
+        var wristbandGroup = new GroupBox
+        {
+            Text = "Wristband Color Schedule",
+            Bounds = new Rectangle(10, 18, 590, 230),
+            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(117, 68, 154)
+        };
+        var wristbandNote = LabelAt(
+            "Set the wristband color for every one-hour jump window. New windows begin every 30 minutes, from opening through Last Jump Time Sold. You can also assign the color currently loaded in WB-1 through WB-7.",
+            20, 35, 548);
+        wristbandNote.Height = 86;
+        var editWristbands = ButtonAt(
+            "Edit Wristband Colors && Jump Times",
+            120, 142, 350, Color.FromArgb(245, 130, 32));
+        editWristbands.Height = 48;
+        editWristbands.Click += (_, _) => OpenWristbandSettings();
+        wristbandGroup.Controls.AddRange([wristbandNote, editWristbands]);
+        wristbandPage.Controls.Add(wristbandGroup);
+        var wristbandHelp = LabelAt(
+            "The schedule uses the currently saved Business Hours. If hours have changed, select Save & Publish before editing wristband times.",
+            30, 280, 548, true);
+        wristbandHelp.Height = 70;
+        wristbandPage.Controls.Add(wristbandHelp);
+
         _status.SetBounds(24, 526, 602, 44);
         _status.ForeColor = Color.FromArgb(52, 65, 76);
         _status.Text = DescribeStatus();
@@ -390,6 +420,39 @@ internal sealed class ControllerBusinessHoursDialog : Form
         _state.SaveBusinessHours(profile);
         _state.QueueCommandForAll(CommandTypes.SyncBusinessHours);
         RefreshStatus("Business Hours and kiosk appearance published; all kiosks will sync on their next check-in.");
+    }
+
+    private void OpenWristbandSettings()
+    {
+        if (!_state.IsMaster)
+        {
+            MessageBox.Show(
+                this,
+                "Wristband settings can be changed on the active master Systems Controller or from Mullet Hop POS.",
+                "Wristband Colors",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new WristbandColorSettingsDialog(
+            _state.CreateWristbandSettingsPackage());
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+        try
+        {
+            _state.SaveWristbandSettings(dialog.Settings);
+            RefreshStatus("Wristband colors and jump-time schedule saved and shared with Mullet Hop POS.");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                "The wristband settings could not be saved.\n\n" + ex.Message,
+                "Wristband Colors",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
     }
 
     private ControllerBusinessHours? ReadProfile()

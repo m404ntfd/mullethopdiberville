@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using MulletHop.Shared;
 
 namespace MulletHopPosController;
 
@@ -10,6 +11,7 @@ internal sealed class PosSettings
     public List<string> KioskSlots { get; set; } = [string.Empty, string.Empty, string.Empty, string.Empty];
     public List<PosRememberedKiosk> RememberedKiosks { get; set; } = [];
     public bool StartAutomatically { get; set; }
+    public WristbandSettingsPackage WristbandSettings { get; set; } = new();
     public string StaffPinSalt { get; set; } = string.Empty;
     public string StaffPinHash { get; set; } = string.Empty;
 
@@ -58,6 +60,7 @@ internal sealed class PosSettings
         KioskSlots = [.. KioskSlots],
         RememberedKiosks = RememberedKiosks.Select(kiosk => kiosk.Clone()).ToList(),
         StartAutomatically = StartAutomatically,
+        WristbandSettings = WristbandSettings.Clone(),
         StaffPinSalt = StaffPinSalt,
         StaffPinHash = StaffPinHash
     };
@@ -69,6 +72,7 @@ internal sealed class PosSettings
         KioskSlots = [.. source.KioskSlots];
         RememberedKiosks = source.RememberedKiosks.Select(kiosk => kiosk.Clone()).ToList();
         StartAutomatically = source.StartAutomatically;
+        WristbandSettings = source.WristbandSettings.Clone();
         StaffPinSalt = source.StaffPinSalt;
         StaffPinHash = source.StaffPinHash;
         Normalize();
@@ -213,6 +217,8 @@ internal sealed class PosSettings
             .ToList();
         StaffPinSalt ??= string.Empty;
         StaffPinHash ??= string.Empty;
+        WristbandSettings ??= new WristbandSettingsPackage();
+        WristbandSettings.Normalize();
     }
 
     private static string CleanName(string? value, string? fallback)

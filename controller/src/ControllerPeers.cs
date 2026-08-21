@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using MulletHop.LocalNetworking;
+using MulletHop.Shared;
 
 namespace MulletHopKioskController;
 
@@ -92,6 +93,11 @@ internal sealed class ControllerSoftwareUpdateRequest : ControllerPeerRequest
     public string TargetId { get; set; } = string.Empty;
 }
 
+internal sealed class ControllerWristbandSettingsRequest : ControllerPeerRequest
+{
+    public WristbandSettingsPackage Settings { get; set; } = new();
+}
+
 internal sealed class ControllerPeerCommandResponse
 {
     public bool Accepted { get; set; }
@@ -123,7 +129,8 @@ internal static class ControllerMasterElection
             new MasterPriorityEntry { ControllerId = first },
             new MasterPriorityEntry { ControllerId = second }
         };
-        return SelectWinner(priority, new[] { first, second })?.ControllerId == first &&
+        return WristbandSettingsPackage.SmokeTest() &&
+               SelectWinner(priority, new[] { first, second })?.ControllerId == first &&
                SelectWinner(priority, new[] { second })?.ControllerId == second &&
                SelectWinner(priority, Array.Empty<string>()) is null;
     }
@@ -135,6 +142,7 @@ internal sealed class ControllerPeerCoordinator : IDisposable
     public const string ReplicaPath = "api/controller/replica";
     public const string CommandPath = "api/controller/command";
     public const string SoftwareUpdatePath = "api/controller/software-update";
+    public const string WristbandSettingsPath = "api/controller/wristband-settings";
     private const string TimestampHeader = "X-MulletHop-Timestamp";
     private const string SignatureHeader = "X-MulletHop-Signature";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -287,6 +295,74 @@ internal sealed class ControllerPeerCoordinator : IDisposable
         return result is null
             ? new ControllerPeerCommandResult(false, "The master controller returned an empty response.")
             : new ControllerPeerCommandResult(result.Accepted, result.Message);
+    }
+
+    public async Task<WristbandSettingsPackage> SaveWristbandSettingsOnMasterAsync(
+        WristbandSettingsPackage settings,
+        CancellationToken cancellationToken = default)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var master = await ResolveMasterAsync(cancellationToken);
+            if (master is null)
+            {
+                throw new InvalidOperationException(
+                    "No active or saved master Systems Controller is available.");
+            }
+
+            try
+            {
+                var body = JsonSerializer.Serialize(new ControllerWristbandSettingsRequest
+                {
+                    ControllerId = _state.ControllerId,
+                    Settings = settings
+                }, JsonOptions);
+                var endpoint = new Uri(new Uri(master.ControllerAddress), WristbandSettingsPath);
+                using var request = CreateSignedRequest(
+                    endpoint,
+                    master.PeerAccessKey,
+                    body,
+                    master.ClockOffsetSeconds);
+                using var response = await _client.SendAsync(request, cancellationToken);
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new InvalidDataException(
+                        string.IsNullOrWhiteSpace(responseBody)
+                            ? $"The master Systems Controller returned HTTP {(int)response.StatusCode}."
+                            : responseBody.Trim());
+                }
+
+                VerifySignedResponse(
+                    response,
+                    master.PeerAccessKey,
+                    responseBody,
+                    master.ClockOffsetSeconds);
+                return JsonSerializer.Deserialize<WristbandSettingsPackage>(
+                           responseBody,
+                           JsonOptions)
+                       ?? throw new InvalidDataException(
+                           "The master Systems Controller returned empty wristband settings.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or
+                                       JsonException or InvalidDataException or IOException)
+            {
+                ControllerLog.Write("Master wristband-settings relay error: " + ex.Message);
+                RemovePeer(master.ControllerId);
+                if (attempt == 0)
+                    continue;
+                throw new InvalidOperationException(
+                    "The wristband settings could not be sent to the master Systems Controller.",
+                    ex);
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The wristband settings could not be sent to the master Systems Controller.");
     }
 
     public async Task<ControllerPeerCommandResult> QueueSoftwareUpdateOnMasterAsync(

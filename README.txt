@@ -101,12 +101,14 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.12, Systems Controller version 1.15.2, and Mullet Hop POS
-version 1.7.5 are the matching package releases. Kiosk 2.11.12 retains the 2.11.11
+Waiver Kiosk version 2.11.12, Systems Controller version 1.15.3, and Mullet Hop POS
+version 1.7.7 are the matching package releases. Kiosk 2.11.12 retains the 2.11.11
 schedule behavior that treats a 12:00 AM
 closing as next-day midnight, plays the closure video at Last Jump Time Sold,
 blacks out one minute after closing, supports a separate Dark-mode switch time
-for every day, and defaults new installations to Light. Systems Controller 1.15.2
+for every day, and defaults new installations to Light. Systems Controller 1.15.3
+adds a synchronized wristband color catalog, daily jump-time schedule, and current
+WB-1 through WB-7 color assignments shared with every controller and POS. Version 1.15.2
 starts elevated at Windows sign-in and remains in the system tray after its service
 is ready. It launches Mullet Hop POS only when the optional POS auto-start setting
 is enabled; the setting is off by default. Version 1.15.1 asks for confirmation
@@ -288,12 +290,13 @@ Selecting a machine already assigned elsewhere moves or swaps it automatically.
 The Application Startup checkbox can ask the Systems Controller to launch POS after
 its service is ready at Windows sign-in. This checkbox is off by default.
 
-Mullet Hop POS 1.7.6 detects LilyPad wristband PDF print pages and opens an initial
-WB-1 through WB-7 selection prompt. It changes only the current Firefox print-preview
-destination and leaves Windows and the dedicated POS Firefox profile set to use the
-POS-X Thermal Printer for normal receipts and cash-drawer operation. Installed WB
-printers are enabled in the prompt; their buttons show COLOR NOT SET until the planned
-printer-color settings are added.
+Mullet Hop POS 1.7.7 adds the shared wristband color editor to Settings and shows each
+printer's configured color directly on the WB-1 through WB-7 print buttons. The daily
+schedule creates one-hour jump windows every 30 minutes, beginning at opening and ending
+at Last Jump Time Sold. Version 1.7.6 detects LilyPad wristband PDF print pages and changes
+only the current Firefox print-preview destination, leaving Windows and the dedicated POS
+Firefox profile set to use the POS-X Thermal Printer for normal receipts and cash-drawer
+operation.
 
 Version 1.7.5 records the exact POS Firefox process, detects the Windows process that
 owns a stale dedicated-profile lock, and terminates only that verified orphaned POS

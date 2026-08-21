@@ -1,4 +1,5 @@
 using System.Drawing.Printing;
+using MulletHop.Shared;
 
 namespace MulletHopPosController;
 
@@ -16,9 +17,12 @@ internal sealed class WristbandPrinterDialog : Form
 {
     private static readonly string[] ExpectedPrinterNames =
         Enumerable.Range(1, 7).Select(number => $"WB-{number}").ToArray();
+    private readonly WristbandSettingsPackage _settings;
 
-    public WristbandPrinterDialog()
+    public WristbandPrinterDialog(WristbandSettingsPackage settings)
     {
+        _settings = settings.Clone();
+        _settings.Normalize();
         Text = "Select Wristband Printer";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -119,21 +123,27 @@ internal sealed class WristbandPrinterDialog : Form
             var printerName = ExpectedPrinterNames[index];
             var isInstalled = installed.Contains(printerName);
             var canSelect = isInstalled || !inventoryAvailable;
+            var assignedColor = _settings.ColorForPrinter(printerName);
+            var colorLabel = assignedColor is null
+                ? "COLOR NOT SET"
+                : assignedColor.Name.ToUpperInvariant() +
+                  (assignedColor.IsActive ? string.Empty : " (INACTIVE)");
+            var buttonColor = assignedColor is null
+                ? Color.FromArgb(234, 239, 243)
+                : WristbandColorSettingsDialog.ParseColor(assignedColor.HexColor);
             var button = new Button
             {
                 Dock = DockStyle.Fill,
                 Margin = new Padding(10),
                 Tag = printerName,
                 Text = printerName + Environment.NewLine +
-                       (isInstalled
-                           ? "COLOR NOT SET"
-                           : inventoryAvailable ? "NOT INSTALLED" : "STATUS UNKNOWN"),
+                       (canSelect ? colorLabel : "NOT INSTALLED"),
                 Enabled = canSelect,
                 BackColor = canSelect
-                    ? Color.FromArgb(234, 239, 243)
+                    ? buttonColor
                     : Color.FromArgb(218, 222, 226),
                 ForeColor = canSelect
-                    ? Color.FromArgb(42, 22, 56)
+                    ? WristbandColorSettingsDialog.ContrastingText(buttonColor)
                     : Color.FromArgb(111, 117, 123),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 13, FontStyle.Bold),
@@ -151,7 +161,7 @@ internal sealed class WristbandPrinterDialog : Form
         {
             Dock = DockStyle.Fill,
             Margin = new Padding(10),
-            Text = "Printer colors will be configurable in a later update.",
+            Text = "Printer colors are managed in POS or Systems Controller Settings.",
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = Color.FromArgb(83, 97, 109),
             Font = new Font("Segoe UI", 9, FontStyle.Italic)

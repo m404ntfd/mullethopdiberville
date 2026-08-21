@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using MulletHop.Shared;
 
 namespace MulletHopPosController;
 
@@ -91,6 +92,9 @@ internal sealed class PosControllerForm : Form
 
     internal static void RunFocusRegressionSmokeTest()
     {
+        if (!WristbandSettingsPackage.SmokeTest())
+            throw new InvalidOperationException("Wristband color settings failed their regression test.");
+
         using var form = new PosControllerForm(new PosSettings());
         form.CreateControl();
         if (FirefoxHost.WindowThreadIdForSmokeTest(form.Handle) == 0)
@@ -660,6 +664,28 @@ internal sealed class PosControllerForm : Form
             var response = await client.GetStatusAsync();
             if (response.InstallUpdate)
                 _remoteUpdateRequested = true;
+            if (!string.IsNullOrWhiteSpace(response.WristbandSettingsRevision) &&
+                !string.Equals(
+                    response.WristbandSettingsRevision,
+                    _settings.WristbandSettings.Revision,
+                    StringComparison.Ordinal))
+            {
+                try
+                {
+                    var wristbandSettings = await client.GetWristbandSettingsAsync();
+                    wristbandSettings.Normalize();
+                    _settings.WristbandSettings = wristbandSettings;
+                    _settings.Save();
+                    PosLog.Write(
+                        $"Wristband color settings {wristbandSettings.Revision} synchronized from the Systems Controller.");
+                }
+                catch (Exception ex)
+                {
+                    PosLog.Write(
+                        "Wristband settings synchronization failed; keeping the last saved colors. " +
+                        ex.Message);
+                }
+            }
             var previousSlots = _settings.KioskSlots.ToArray();
             var added = _settings.RememberSuccessfulConnection(
                 _settings.ControllerUrl,
@@ -732,7 +758,7 @@ internal sealed class PosControllerForm : Form
         _firefoxHost.SetBrowserFocusPreferred(false);
         try
         {
-            using var dialog = new WristbandPrinterDialog();
+            using var dialog = new WristbandPrinterDialog(_settings.WristbandSettings);
             if (dialog.ShowDialog(this) != DialogResult.OK ||
                 string.IsNullOrWhiteSpace(dialog.SelectedPrinterName))
             {

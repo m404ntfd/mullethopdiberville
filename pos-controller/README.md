@@ -72,8 +72,16 @@ the POS window has been minimized or covered.
 
 When LilyPad opens a wristband PDF print page, Mullet Hop POS displays a large
 WB-1 through WB-7 printer selector. Only wristband printers that Windows reports
-as installed can be selected. The initial selector displays **COLOR NOT SET**;
-printer-color assignments will be added to Settings in a later update.
+as installed can be selected. Each button shows the color currently assigned to
+that printer in Settings and uses that color as its background. A printer without
+an assignment displays **COLOR NOT SET**.
+
+The Wristband Colors section in Settings uses the same editor as the Systems
+Controller. Choose a day to assign colors to one-hour jump windows beginning every
+30 minutes from opening through Last Jump Time Sold. Manage Color List can add, edit,
+remove, activate, or deactivate colors, and the printer section records the color
+currently loaded in WB-1 through WB-7. The master Systems Controller stores these
+settings and synchronizes them to the other controllers and POS applications.
 
 The selected WB printer is applied only to the currently open Firefox print
 preview. The user can review the destination and select Print normally. **Return /
@@ -118,7 +126,9 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.6 detects
+restarts without changing the user's normal Firefox profile. Version 1.7.7 adds the
+synchronized color catalog, daily jump-time schedule, current WB-1 through WB-7 color
+assignments, and color-labeled wristband printer buttons. Version 1.7.6 detects
 LilyPad wristband print pages, prompts for WB-1 through WB-7, and applies the selected
 printer only to that Firefox print preview while retaining POS-X Thermal Printer for
 normal receipt jobs. Version 1.7.5 records the

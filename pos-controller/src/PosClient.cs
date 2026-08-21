@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using MulletHop.Shared;
 
 namespace MulletHopPosController;
 
@@ -33,6 +34,7 @@ internal sealed class PosStatusResponse
 {
     public DateTime ServerTimeUtc { get; set; }
     public bool InstallUpdate { get; set; }
+    public string WristbandSettingsRevision { get; set; } = string.Empty;
     public List<PosKioskStatus> Kiosks { get; set; } = [];
 }
 
@@ -62,6 +64,18 @@ internal sealed class PosControllerClient
     public async Task<PosStatusResponse> GetStatusAsync()
     {
         return await PostAsync<PosStatusResponse>("api/pos/status", "{}");
+    }
+
+    public async Task<WristbandSettingsPackage> GetWristbandSettingsAsync()
+    {
+        return await PostAsync<WristbandSettingsPackage>("api/pos/wristbands/get", "{}");
+    }
+
+    public async Task<WristbandSettingsPackage> SaveWristbandSettingsAsync(
+        WristbandSettingsPackage settings)
+    {
+        var body = JsonSerializer.Serialize(settings, JsonOptions);
+        return await PostAsync<WristbandSettingsPackage>("api/pos/wristbands/save", body);
     }
 
     public async Task<PosCommandResponse> SendCommandAsync(

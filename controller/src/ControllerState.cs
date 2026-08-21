@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using MulletHop.Shared;
 
 namespace MulletHopKioskController;
 
@@ -143,6 +144,7 @@ internal sealed class ControllerReplicaSnapshot
     public List<ManagedKiosk> Kiosks { get; set; } = [];
     public AdvertisementSyncPackage Advertisements { get; set; } = new();
     public BusinessHoursSyncPackage BusinessHours { get; set; } = new();
+    public WristbandSettingsPackage WristbandSettings { get; set; } = new();
     public List<MasterPriorityEntry> MasterPriority { get; set; } = [];
 }
 
@@ -225,6 +227,7 @@ internal sealed class ControllerData
     public ControllerBusinessHours BusinessHours { get; set; } = new();
     public string BusinessHoursRevision { get; set; } = string.Empty;
     public DateTime? BusinessHoursUpdatedUtc { get; set; }
+    public WristbandSettingsPackage WristbandSettings { get; set; } = new();
 }
 
 internal sealed class ControllerState
@@ -288,6 +291,12 @@ internal sealed class ControllerState
                 ControllerId = _data.ControllerId,
                 MachineName = Environment.MachineName
             });
+            changed = true;
+        }
+        if (string.IsNullOrWhiteSpace(_data.WristbandSettings.Revision))
+        {
+            _data.WristbandSettings.Revision = Guid.NewGuid().ToString("N");
+            _data.WristbandSettings.GeneratedUtc = DateTime.UtcNow;
             changed = true;
         }
         if (changed || (_data.IsMaster && !File.Exists(_masterConnectionsPath)))
@@ -529,6 +538,8 @@ internal sealed class ControllerState
             _data.BusinessHours = profile;
             _data.BusinessHoursRevision = Guid.NewGuid().ToString("N");
             _data.BusinessHoursUpdatedUtc = DateTime.UtcNow;
+            _data.WristbandSettings.Revision = Guid.NewGuid().ToString("N");
+            _data.WristbandSettings.GeneratedUtc = DateTime.UtcNow;
             SaveLocked();
             ControllerLog.Write($"Published Business Hours and kiosk appearance profile {_data.BusinessHoursRevision}.");
         }
@@ -566,6 +577,69 @@ internal sealed class ControllerState
         }
     }
 
+    public string WristbandSettingsRevision
+    {
+        get { lock (_gate) return _data.WristbandSettings.Revision; }
+    }
+
+    public WristbandSettingsPackage CreateWristbandSettingsPackage()
+    {
+        lock (_gate)
+        {
+            var package = _data.WristbandSettings.Clone();
+            package.BusinessDays = _data.BusinessHours.Days.Select(day =>
+            {
+                var businessDate = new DateTime(2000, 1, 3);
+                var opening = day.OpeningOn(businessDate);
+                var lastJump = day.LastJumpOn(businessDate);
+                return new WristbandBusinessDayWindow
+                {
+                    Day = (int)day.Day,
+                    IsOpen = day.IsOpen,
+                    OpenMinute = (int)(opening - businessDate.Date).TotalMinutes,
+                    LastJumpMinute = (int)(lastJump - businessDate.Date).TotalMinutes
+                };
+            }).ToList();
+            package.GeneratedUtc = DateTime.UtcNow;
+            package.Normalize();
+            return package;
+        }
+    }
+
+    public WristbandSettingsPackage SaveWristbandSettings(WristbandSettingsPackage settings)
+    {
+        lock (_gate)
+        {
+            if (!_data.IsMaster)
+            {
+                throw new InvalidOperationException(
+                    "Wristband settings can be changed only on the active master Systems Controller.");
+            }
+            var saved = settings.Clone();
+            saved.BusinessDays = [];
+            saved.Revision = Guid.NewGuid().ToString("N");
+            saved.GeneratedUtc = DateTime.UtcNow;
+            saved.Normalize();
+            _data.WristbandSettings = saved;
+            SaveLocked();
+            ControllerLog.Write($"Saved wristband color settings {saved.Revision}.");
+            return CreateWristbandSettingsPackage();
+        }
+    }
+
+    public void ApplyReplicatedWristbandSettings(WristbandSettingsPackage settings)
+    {
+        lock (_gate)
+        {
+            var saved = settings.Clone();
+            saved.BusinessDays = [];
+            saved.Normalize();
+            _data.WristbandSettings = saved;
+            SaveLocked();
+            ControllerLog.Write($"Applied replicated wristband color settings {saved.Revision}.");
+        }
+    }
+
     public IReadOnlyList<ManagedKiosk> Snapshot()
     {
         lock (_gate)
@@ -594,6 +668,7 @@ internal sealed class ControllerState
                 advertisements = new AdvertisementSyncPackage();
             }
             var businessHours = CreateBusinessHoursSyncPackage();
+            var wristbandSettings = CreateWristbandSettingsPackage();
             var priority = _data.MasterPriority.Select(entry => entry.Clone()).ToList();
             var serialized = JsonSerializer.Serialize(new
             {
@@ -601,6 +676,7 @@ internal sealed class ControllerState
                 pairingKey = _data.PairingKey,
                 advertisementRevision = advertisements.Revision,
                 businessHoursRevision = _data.BusinessHoursRevision,
+                wristbandSettingsRevision = wristbandSettings.Revision,
                 priority
             }, JsonOptions);
             return new ControllerReplicaSnapshot
@@ -613,6 +689,7 @@ internal sealed class ControllerState
                 Kiosks = kiosks,
                 Advertisements = advertisements,
                 BusinessHours = businessHours,
+                WristbandSettings = wristbandSettings,
                 MasterPriority = priority
             };
         }
@@ -735,6 +812,14 @@ internal sealed class ControllerState
                     StringComparison.Ordinal))
             {
                 ApplyCloudBusinessHours(replica.BusinessHours, replica.GeneratedUtc);
+            }
+            if (!string.IsNullOrWhiteSpace(replica.WristbandSettings?.Revision) &&
+                !string.Equals(
+                    replica.WristbandSettings.Revision,
+                    _data.WristbandSettings.Revision,
+                    StringComparison.Ordinal))
+            {
+                ApplyReplicatedWristbandSettings(replica.WristbandSettings);
             }
             _lastMasterReplicaRevision = replica.Revision;
             SaveLocked();
@@ -1178,6 +1263,8 @@ internal sealed class ControllerState
             _data.BusinessHours = profile;
             _data.BusinessHoursRevision = package.Revision;
             _data.BusinessHoursUpdatedUtc = updatedUtc;
+            _data.WristbandSettings.Revision = Guid.NewGuid().ToString("N");
+            _data.WristbandSettings.GeneratedUtc = updatedUtc;
             SaveLocked();
             ControllerLog.Write($"Applied cloud Business Hours and kiosk appearance profile {package.Revision}.");
         }
@@ -1202,6 +1289,8 @@ internal sealed class ControllerState
             data.BusinessHours ??= new ControllerBusinessHours();
             data.BusinessHoursRevision ??= string.Empty;
             data.BusinessHours.Normalize();
+            data.WristbandSettings ??= new WristbandSettingsPackage();
+            data.WristbandSettings.Normalize();
             foreach (var advertisement in data.Advertisements)
                 advertisement.Normalize();
             return data;
