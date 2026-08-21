@@ -49,6 +49,9 @@ internal sealed class FirefoxHost : IDisposable
     private bool _browserFocusPreferred = true;
     private DateTime _nextFocusGuardUtc = DateTime.MinValue;
     private DateTime _lastFocusFailureLoggedUtc = DateTime.MinValue;
+    private DateTime _lastLayoutPulseUtc = DateTime.MinValue;
+    private DateTime? _unhealthyPageSinceUtc;
+    private bool _layoutRepairAttempted;
     private bool _disposed;
 
     public event EventHandler<string>? StatusChanged;
@@ -110,14 +113,19 @@ internal sealed class FirefoxHost : IDisposable
             _startedUtc = DateTime.UtcNow;
             _attachAttempts = 0;
             _crashReported = false;
+            _unhealthyPageSinceUtc = null;
+            _layoutRepairAttempted = false;
+            _lastLayoutPulseUtc = DateTime.MinValue;
             _firefoxWindow = IntPtr.Zero;
             _process = Process.Start(startInfo)
                        ?? throw new InvalidOperationException("Firefox did not start.");
             if (compatibilityPort.HasValue)
             {
                 _compatibilityBridge = new LilyPadCompatibilityBridge(compatibilityPort.Value);
+                _compatibilityBridge.PageHealthObserved += HandlePageHealthObserved;
                 _compatibilityBridge.Start();
             }
+            _windowTimer.Interval = 500;
             _windowTimer.Start();
             SetStatus("Starting Firefox and loading LilyPad POS…");
         }
@@ -198,6 +206,13 @@ internal sealed class FirefoxHost : IDisposable
 
         if (_firefoxWindow != IntPtr.Zero && IsWindow(_firefoxWindow))
         {
+            var now = DateTime.UtcNow;
+            if (now - _attachedUtc < TimeSpan.FromSeconds(12) &&
+                now - _lastLayoutPulseUtc >= TimeSpan.FromSeconds(2))
+            {
+                _lastLayoutPulseUtc = now;
+                ResizeEmbeddedWindow(forceLayout: true);
+            }
             if (_automaticRecoveryUsed && DateTime.UtcNow - _attachedUtc >= TimeSpan.FromSeconds(20))
             {
                 _automaticRecoveryUsed = false;
@@ -233,22 +248,21 @@ internal sealed class FirefoxHost : IDisposable
 
     private IntPtr GetFirefoxWindow()
     {
+        var processIds = new HashSet<uint>();
+        using var currentProcess = Process.GetCurrentProcess();
+        var currentSession = currentProcess.SessionId;
         if (_process is not null && !_process.HasExited)
-        {
-            _process.Refresh();
-            if (_process.MainWindowHandle != IntPtr.Zero)
-                return _process.MainWindowHandle;
-        }
+            processIds.Add(unchecked((uint)_process.Id));
 
         foreach (var process in Process.GetProcessesByName("firefox"))
         {
             try
             {
-                if (process.StartTime.ToUniversalTime() < _startedUtc.AddSeconds(-3))
-                    continue;
-                process.Refresh();
-                if (process.MainWindowHandle != IntPtr.Zero)
-                    return process.MainWindowHandle;
+                if (process.StartTime.ToUniversalTime() >= _startedUtc.AddSeconds(-3) &&
+                    process.SessionId == currentSession)
+                {
+                    processIds.Add(unchecked((uint)process.Id));
+                }
             }
             catch
             {
@@ -260,6 +274,46 @@ internal sealed class FirefoxHost : IDisposable
                     process.Dispose();
             }
         }
+
+        var candidates = new List<(IntPtr Window, long Area, bool LilyPadTitle)>();
+        _ = EnumWindows((window, parameter) =>
+        {
+            _ = GetWindowThreadProcessId(window, out var processId);
+            if (!processIds.Contains(processId) ||
+                !IsWindowVisible(window) ||
+                GetWindow(window, GwOwner) != IntPtr.Zero ||
+                !TryGetWindowRectangle(window, out var rectangle))
+            {
+                return true;
+            }
+
+            var className = GetWindowClassName(window);
+            if (!className.Contains("MozillaWindowClass", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var title = GetWindowTitle(window);
+            candidates.Add((
+                window,
+                Math.Max(0L, (long)rectangle.Width * rectangle.Height),
+                title.Contains("LilyPad", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("mullet.lilypadpos.app", StringComparison.OrdinalIgnoreCase)));
+            return true;
+        }, IntPtr.Zero);
+
+        var selected = candidates
+            .OrderByDescending(candidate => candidate.LilyPadTitle)
+            .ThenByDescending(candidate => candidate.Area)
+            .FirstOrDefault();
+        if (selected.Window != IntPtr.Zero)
+            return selected.Window;
+
+        if (_process is not null && !_process.HasExited)
+        {
+            _process.Refresh();
+            if (_process.MainWindowHandle != IntPtr.Zero)
+                return _process.MainWindowHandle;
+        }
+
         return IntPtr.Zero;
     }
 
@@ -301,7 +355,8 @@ internal sealed class FirefoxHost : IDisposable
             SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
         _lastEmbeddedSize = Size.Empty;
         _attachedUtc = DateTime.UtcNow;
-        ResizeEmbeddedWindow();
+        PosLog.Write($"Embedding Firefox window '{GetWindowTitle(window)}'.");
+        ResizeEmbeddedWindow(forceLayout: true);
         FocusEmbeddedWindow("Firefox attached");
         _browserInputTimer.Start();
         try
@@ -314,7 +369,7 @@ internal sealed class FirefoxHost : IDisposable
         }
     }
 
-    private void ResizeEmbeddedWindow()
+    private void ResizeEmbeddedWindow(bool forceLayout = false)
     {
         if (_firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow) || !_host.IsHandleCreated)
             return;
@@ -322,7 +377,7 @@ internal sealed class FirefoxHost : IDisposable
         var size = new Size(
             Math.Max(1, _host.ClientSize.Width),
             Math.Max(1, _host.ClientSize.Height));
-        if (size == _lastEmbeddedSize)
+        if (!forceLayout && size == _lastEmbeddedSize)
             return;
 
         _ = SetWindowPos(
@@ -334,7 +389,90 @@ internal sealed class FirefoxHost : IDisposable
             size.Height,
             SwpNoZOrder | SwpNoActivate | SwpShowWindow);
         _lastEmbeddedSize = size;
+        if (forceLayout)
+        {
+            _ = SendMessage(
+                _firefoxWindow,
+                WmSize,
+                IntPtr.Zero,
+                new IntPtr((size.Height << 16) | (size.Width & 0xFFFF)));
+        }
     }
+
+    private void HandlePageHealthObserved(LilyPadPageHealth health)
+    {
+        if (_disposed || _host.IsDisposed)
+            return;
+        try
+        {
+            _host.BeginInvoke(new Action(() => EvaluatePageHealth(health)));
+        }
+        catch (InvalidOperationException)
+        {
+            // The POS window is closing while the health result arrives.
+        }
+    }
+
+    private void EvaluatePageHealth(LilyPadPageHealth health)
+    {
+        if (_disposed || _restarting || _crashReported || _firefoxWindow == IntPtr.Zero)
+            return;
+
+        var issue = DescribePageHealthIssue(health, _host.ClientSize);
+        if (issue is null)
+        {
+            _unhealthyPageSinceUtc = null;
+            _layoutRepairAttempted = false;
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        _unhealthyPageSinceUtc ??= now;
+        if (!_layoutRepairAttempted)
+        {
+            _layoutRepairAttempted = true;
+            ResizeEmbeddedWindow(forceLayout: true);
+            PosLog.Write("Firefox display health check requested a layout repair: " + issue);
+            return;
+        }
+
+        if (now - _unhealthyPageSinceUtc < TimeSpan.FromSeconds(5))
+            return;
+
+        PosLog.Write("Firefox display health check failed after layout repair: " + issue);
+        HandleFailure(
+            "Firefox displayed an incomplete or collapsed LilyPad page. Select Refresh Lilypad " +
+            "to close Firefox and reopen the LilyPad POS home page.");
+    }
+
+    private static string? DescribePageHealthIssue(LilyPadPageHealth health, Size hostSize)
+    {
+        if (!string.Equals(health.ReadyState, "complete", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var minimumWidth = Math.Max(320, hostSize.Width / 3);
+        var minimumHeight = Math.Max(240, hostSize.Height / 3);
+        if (hostSize.Width >= 640 && hostSize.Height >= 480 &&
+            (health.ViewportWidth < minimumWidth || health.ViewportHeight < minimumHeight))
+        {
+            return $"Firefox viewport {health.ViewportWidth}x{health.ViewportHeight} is smaller " +
+                   $"than its {hostSize.Width}x{hostSize.Height} POS host.";
+        }
+
+        if (health.IsLoginPage && (!health.HasUsername || !health.HasPassword))
+        {
+            return "The completed LilyPad login page does not contain its username and password controls.";
+        }
+
+        if (health.BodyTextLength == 0)
+            return "The completed LilyPad page has no visible content.";
+
+        return null;
+    }
+
+    internal static bool PageHealthIndicatesFailureForSmokeTest(
+        LilyPadPageHealth health,
+        Size hostSize) => DescribePageHealthIssue(health, hostSize) is not null;
 
     private void FirefoxExited(object? sender, EventArgs e)
     {
@@ -790,6 +928,61 @@ internal sealed class FirefoxHost : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
         IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    private const uint WmSize = 0x0005;
+    private const uint GwOwner = 4;
+
+    private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRectangle
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+        public int Width => Math.Max(0, Right - Left);
+        public int Height => Math.Max(0, Bottom - Top);
+    }
+
+    private static bool TryGetWindowRectangle(IntPtr window, out NativeRectangle rectangle) =>
+        GetWindowRect(window, out rectangle) && rectangle.Width > 0 && rectangle.Height > 0;
+
+    private static string GetWindowTitle(IntPtr window)
+    {
+        var length = GetWindowTextLength(window);
+        if (length <= 0)
+            return string.Empty;
+        var value = new StringBuilder(length + 1);
+        _ = GetWindowText(window, value, value.Capacity);
+        return value.ToString();
+    }
+
+    private static string GetWindowClassName(IntPtr window)
+    {
+        var value = new StringBuilder(256);
+        _ = GetClassName(window, value, value.Capacity);
+        return value.ToString();
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr window, out NativeRectangle rectangle);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr window, StringBuilder className, int maxCount);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(
+        IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr window);

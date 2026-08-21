@@ -20,6 +20,18 @@ internal static class Program
             return;
         }
 
+        if (args.Contains("--windows-startup-smoke-test", StringComparer.OrdinalIgnoreCase))
+        {
+            Environment.ExitCode = ControllerWindowsStartup.SmokeTest() ? 0 : 1;
+            return;
+        }
+
+        if (!ControllerWindowsStartup.IsAdministrator())
+        {
+            ControllerWindowsStartup.RestartElevated(args);
+            return;
+        }
+
         WaitForPreviousInstance(args);
 
         using var mutex = new Mutex(true, MutexName, out var ownsMutex);
@@ -37,14 +49,26 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         MigrateShortcuts();
+        var startedByWindows = ControllerWindowsStartup.IsWindowsStartup(args);
+        if (!ControllerWindowsStartup.EnsureRegistered(startedByWindows, out var startupError))
+        {
+            MessageBox.Show(
+                "The Systems Controller is running as an administrator, but Windows could not " +
+                "configure its automatic sign-in task. Re-run the Systems Controller installer " +
+                "to repair startup.\n\n" + startupError,
+                "Automatic Startup Needs Repair",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
 
         try
         {
-            Application.Run(new ControllerForm());
+            Application.Run(new ControllerForm(startedByWindows));
         }
         catch (Exception ex)
         {
             ControllerLog.Write("Fatal controller error: " + ex);
+            Environment.ExitCode = 1;
             MessageBox.Show(
                 "The Systems Controller could not start.\n\n" + ex.Message,
                 "Mullet Hop Systems Controller",

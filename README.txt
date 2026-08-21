@@ -101,18 +101,24 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.10, Systems Controller version 1.15.1, and Mullet Hop POS
-version 1.7.3 are the matching package releases. Kiosk 2.11.10 retains the 2.11.9
+Waiver Kiosk version 2.11.11, Systems Controller version 1.15.2, and Mullet Hop POS
+version 1.7.4 are the matching package releases. Kiosk 2.11.11 retains the 2.11.10
 schedule behavior that treats a 12:00 AM
 closing as next-day midnight, plays the closure video at Last Jump Time Sold,
 blacks out one minute after closing, supports a separate Dark-mode switch time
-for every day, and defaults new installations to Light. Systems Controller 1.15.1
-asks for confirmation before a user switches the local PC to master. Version 1.15.0
+for every day, and defaults new installations to Light. Systems Controller 1.15.2
+starts elevated at Windows sign-in and remains in the system tray after its service
+is ready. It launches Mullet Hop POS only when the optional POS auto-start setting
+is enabled; the setting is off by default. Version 1.15.1 asks for confirmation
+before a user switches the local PC to master. Version 1.15.0
 adds an ordered Device-ID master list, confirmed automatic failover, and complete
 replication of kiosk connections, advertisements, Business Hours, and appearance
 settings to every controller. Systems Controller 1.14.3 uses
 a responsive windowed layout with protected button sizes, a larger restore size,
-and non-overlapping header and summary sections. Mullet Hop POS 1.7.3 keeps Firefox
+and non-overlapping header and summary sections. Mullet Hop POS 1.7.4 selects the
+correct full-size Firefox window, detects a collapsed or incomplete LilyPad page,
+forces a layout repair, and performs one clean automatic recovery if necessary.
+Mullet Hop POS 1.7.3 keeps Firefox
 focused while the sidebar runs in the background, auto-collapses after browser
 input, adds Restore Keyboard without reloading the sale, and redraws kiosk controls
 only when their status changes. Version 1.7.2 requests
@@ -264,7 +270,8 @@ taskbar, where selecting its taskbar icon restores it. Only the passcode-protect
 Exit Application command closes Firefox and stops Mullet Hop POS. Firefox runs with
 its normal browser controls visible. The application restores Firefox input focus
 when its window activates and checks the embedded browser for startup, hang, process,
-and tab-crash failures. It closes and reopens the complete Firefox session once
+tab-crash, collapsed-viewport, and incomplete-page failures. It first forces a
+Firefox layout repair, then closes and reopens the complete Firefox session once
 automatically before showing a red problem message. Refresh Lilypad forcibly closes
 the dedicated Firefox process tree, clears its saved tabs and session state, and
 opens one fresh window at the LilyPad home page. Ctrl + Alt + M opens Settings. Settings
@@ -272,8 +279,11 @@ requires the application's 4-8 digit passcode. The Settings window finds
 kiosks already paired with the on-site Systems Controller, remembers the controller
 address and pairing key, and saves each kiosk's identity and Kiosk 1-4 position.
 Selecting a machine already assigned elsewhere moves or swaps it automatically.
+The Application Startup checkbox can ask the Systems Controller to launch POS after
+its service is ready at Windows sign-in. This checkbox is off by default.
 
-Version 1.6.0 fixes the embedded Firefox native focus crash and accepts software
+Version 1.7.4 adds that optional auto-start setting and repairs or recovers the
+blank/collapsed embedded Firefox condition. Version 1.6.0 fixes the embedded Firefox native focus crash and accepts software
 update requests relayed by any Systems Controller. Version 1.5.1 minimizes to the Windows taskbar, renames the controls to Settings
 and Refresh Lilypad, restores Firefox input focus, and performs one automatic
 full-session recovery before reporting a Firefox failure. Version 1.5.0 keeps

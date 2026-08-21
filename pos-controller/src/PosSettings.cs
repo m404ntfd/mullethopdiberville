@@ -9,6 +9,7 @@ internal sealed class PosSettings
     public string PairingKey { get; set; } = string.Empty;
     public List<string> KioskSlots { get; set; } = [string.Empty, string.Empty, string.Empty, string.Empty];
     public List<PosRememberedKiosk> RememberedKiosks { get; set; } = [];
+    public bool StartAutomatically { get; set; }
     public string StaffPinSalt { get; set; } = string.Empty;
     public string StaffPinHash { get; set; } = string.Empty;
 
@@ -56,6 +57,7 @@ internal sealed class PosSettings
         PairingKey = PairingKey,
         KioskSlots = [.. KioskSlots],
         RememberedKiosks = RememberedKiosks.Select(kiosk => kiosk.Clone()).ToList(),
+        StartAutomatically = StartAutomatically,
         StaffPinSalt = StaffPinSalt,
         StaffPinHash = StaffPinHash
     };
@@ -66,6 +68,7 @@ internal sealed class PosSettings
         PairingKey = source.PairingKey;
         KioskSlots = [.. source.KioskSlots];
         RememberedKiosks = source.RememberedKiosks.Select(kiosk => kiosk.Clone()).ToList();
+        StartAutomatically = source.StartAutomatically;
         StaffPinSalt = source.StaffPinSalt;
         StaffPinHash = source.StaffPinHash;
         Normalize();

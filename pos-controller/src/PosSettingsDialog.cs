@@ -10,6 +10,7 @@ internal sealed class PosSettingsDialog : Form
     private readonly PosSettings _working;
     private readonly TextBox _controllerUrl = new();
     private readonly TextBox _pairingKey = new();
+    private readonly CheckBox _startAutomatically = new();
     private readonly ComboBox[] _slots = [new(), new(), new(), new()];
     private readonly Label _connectionStatus = new();
     private readonly Label _assignmentStatus = new();
@@ -60,8 +61,10 @@ internal sealed class PosSettingsDialog : Form
         };
         var connection = BuildConnectionGroup();
         var assignments = BuildAssignmentsGroup();
+        var startup = BuildStartupGroup();
         var security = BuildSecurityGroup();
         content.Controls.Add(security);
+        content.Controls.Add(startup);
         content.Controls.Add(assignments);
         content.Controls.Add(connection);
         Controls.Add(content);
@@ -72,6 +75,7 @@ internal sealed class PosSettingsDialog : Form
 
         _controllerUrl.Text = _working.ControllerUrl;
         _pairingKey.Text = _working.PairingKey;
+        _startAutomatically.Checked = _working.StartAutomatically;
         PopulateSlots(_working.RememberedKioskStatuses());
         Shown += async (_, _) =>
         {
@@ -169,6 +173,27 @@ internal sealed class PosSettingsDialog : Form
         change.Bounds = new Rectangle(590, 35, 160, 40);
         change.Click += (_, _) => ChangePasscode();
         group.Controls.Add(change);
+        return group;
+    }
+
+    private GroupBox BuildStartupGroup()
+    {
+        var group = MakeGroup("Application Startup", 104);
+        group.Dock = DockStyle.Top;
+        _startAutomatically.Text =
+            "Start Mullet Hop POS automatically after the Systems Controller is ready";
+        _startAutomatically.Bounds = new Rectangle(20, 31, 720, 32);
+        _startAutomatically.AutoSize = false;
+        _startAutomatically.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        _startAutomatically.ForeColor = Color.FromArgb(16, 24, 32);
+        group.Controls.Add(_startAutomatically);
+        group.Controls.Add(new Label
+        {
+            Text = "This option is off by default. The Systems Controller still starts with Windows.",
+            Bounds = new Rectangle(46, 65, 690, 26),
+            ForeColor = Color.FromArgb(83, 97, 109),
+            Font = new Font("Segoe UI", 9, FontStyle.Regular)
+        });
         return group;
     }
 
@@ -393,6 +418,7 @@ internal sealed class PosSettingsDialog : Form
         _working.ControllerUrl = _controllerUrl.Text.Trim();
         _working.PairingKey = _pairingKey.Text.Trim();
         _working.KioskSlots = assignments;
+        _working.StartAutomatically = _startAutomatically.Checked;
         try
         {
             _working.Save();

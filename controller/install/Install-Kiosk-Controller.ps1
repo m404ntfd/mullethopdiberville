@@ -32,7 +32,8 @@ $legacyInstallFolder = Join-Path $env:ProgramFiles 'Mullet Hop Kiosk Controller'
 $urlPrefix = 'http://+:47832/mullethop/'
 $firewallName = 'Mullet Hop Systems Controller (TCP 47832)'
 $legacyFirewallName = 'Mullet Hop Kiosk Controller (TCP 47832)'
-$currentUser = "$env:USERDOMAIN\$env:USERNAME"
+$startupTaskName = 'Mullet Hop Systems Controller'
+$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 
 Get-Process -Name 'MulletHopKioskController' -ErrorAction SilentlyContinue |
     Stop-Process -Force
@@ -68,22 +69,49 @@ New-NetFirewallRule `
     -LocalPort 47832 `
     -Profile Private | Out-Null
 
-$shell = New-Object -ComObject WScript.Shell
-$legacyStartupShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Kiosk Controller.lnk'
-if (Test-Path -LiteralPath $legacyStartupShortcut) {
-    Remove-Item -LiteralPath $legacyStartupShortcut -Force
+$startupFolder = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+@(
+    (Join-Path $startupFolder 'Mullet Hop Kiosk Controller.lnk'),
+    (Join-Path $startupFolder 'Mullet Hop Systems Controller.lnk')
+) | ForEach-Object {
+    if (Test-Path -LiteralPath $_) {
+        Remove-Item -LiteralPath $_ -Force
+    }
 }
-$startupShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mullet Hop Systems Controller.lnk'
-$shortcut = $shell.CreateShortcut($startupShortcut)
-$shortcut.TargetPath = $installedExe
-$shortcut.WorkingDirectory = $installFolder
-$shortcut.Description = 'Manage Mullet Hop waiver kiosks, Systems Controllers, and POS workstations'
-$shortcut.Save()
+
+$startupAction = New-ScheduledTaskAction `
+    -Execute $installedExe `
+    -Argument '--windows-startup' `
+    -WorkingDirectory $installFolder
+$startupTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+$startupPrincipal = New-ScheduledTaskPrincipal `
+    -UserId $currentUser `
+    -LogonType Interactive `
+    -RunLevel Highest
+$startupSettings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -MultipleInstances IgnoreNew
+$startupTask = New-ScheduledTask `
+    -Action $startupAction `
+    -Trigger $startupTrigger `
+    -Principal $startupPrincipal `
+    -Settings $startupSettings `
+    -Description 'Starts the Mullet Hop Systems Controller elevated and hidden in the system tray.'
+Register-ScheduledTask `
+    -TaskName $startupTaskName `
+    -InputObject $startupTask `
+    -Force | Out-Null
 
 Write-Host 'Installation complete.' -ForegroundColor Green
-Write-Host 'The controller will start automatically when this Windows account signs in.' -ForegroundColor Green
+Write-Host 'The controller will start elevated in the system tray when this Windows account signs in.' -ForegroundColor Green
+Write-Host 'Mullet Hop POS starts afterward only when automatic startup is enabled in POS Settings.' -ForegroundColor Green
 Write-Host 'Controller updates will be checked and installed automatically when it opens.' -ForegroundColor Green
 Write-Host 'Windows Firewall allows kiosk check-ins on private networks only.' -ForegroundColor Green
 Write-Host ''
 
-Start-Process -FilePath $installedExe -WorkingDirectory $installFolder
+Start-ScheduledTask -TaskName $startupTaskName

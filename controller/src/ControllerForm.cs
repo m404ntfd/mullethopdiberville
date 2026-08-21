@@ -10,6 +10,7 @@ internal sealed class ControllerForm : Form
 {
     private readonly ControllerState _state = new();
     private readonly ControllerServer _server;
+    private readonly bool _startedByWindows;
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 1000 };
     private readonly Label _serviceStatus = new();
     private readonly ComboBox _addresses = new();
@@ -55,9 +56,12 @@ internal sealed class ControllerForm : Form
     private bool _trayNoticeShown;
     private bool _assistanceFlashOn;
     private bool _refreshingKioskList;
+    private bool _startupSequenceComplete;
+    private bool _startupServiceError;
 
-    public ControllerForm()
+    public ControllerForm(bool startedByWindows = false)
     {
+        _startedByWindows = startedByWindows;
         if (_remoteSettings.IsRemoteMachine && _state.IsMaster)
             _state.SetMaster(false, "remote-mode controllers cannot be the local master");
         _server = new ControllerServer(_state);
@@ -95,6 +99,11 @@ internal sealed class ControllerForm : Form
 
         _lastResolvedDarkMode = ControllerTheme.IsDark;
         ControllerTheme.Apply(this);
+        if (_startedByWindows)
+        {
+            ShowInTaskbar = false;
+            WindowState = FormWindowState.Minimized;
+        }
 
         _refreshTimer.Tick += (_, _) =>
         {
@@ -103,9 +112,14 @@ internal sealed class ControllerForm : Form
         };
         Shown += async (_, _) =>
         {
-            StartControllerServices();
+            var controllerReady = StartControllerServices();
+            _startupSequenceComplete = true;
             UpdateMasterStatus();
-            await CheckControllerUpdateAsync(showUpToDateMessage: false);
+            if (_startedByWindows)
+                FinishWindowsStartup(controllerReady);
+            await CheckControllerUpdateAsync(
+                showUpToDateMessage: false,
+                interactive: !_startedByWindows);
         };
         FormClosed += (_, _) =>
         {
@@ -119,7 +133,7 @@ internal sealed class ControllerForm : Form
         FormClosing += HandleFormClosing;
         Resize += (_, _) =>
         {
-            if (WindowState == FormWindowState.Minimized)
+            if (_startupSequenceComplete && WindowState == FormWindowState.Minimized)
                 HideControllerInTray();
         };
         Activated += (_, _) =>
@@ -173,7 +187,7 @@ internal sealed class ControllerForm : Form
         HideControllerInTray();
     }
 
-    private void HideControllerInTray()
+    private void HideControllerInTray(bool showNotice = true)
     {
         if (IsDisposed || _allowApplicationExit)
             return;
@@ -181,7 +195,7 @@ internal sealed class ControllerForm : Form
         ShowInTaskbar = false;
         Hide();
         WindowState = FormWindowState.Normal;
-        if (_trayNoticeShown)
+        if (!showNotice || _trayNoticeShown)
             return;
 
         _trayNoticeShown = true;
@@ -190,6 +204,33 @@ internal sealed class ControllerForm : Form
             "The controller service remains active. Double-click the fish icon to reopen it.";
         _trayIcon.BalloonTipIcon = ToolTipIcon.Info;
         _trayIcon.ShowBalloonTip(3_000);
+    }
+
+    private void FinishWindowsStartup(bool controllerReady)
+    {
+        if (!controllerReady || _startupServiceError)
+        {
+            RestoreControllerFromTray();
+            return;
+        }
+
+        var posResult = ControllerWindowsStartup.StartPosAfterControllerReady();
+        if (posResult.Status == PosStartupStatus.Failed)
+        {
+            RestoreControllerFromTray();
+            MessageBox.Show(this,
+                posResult.Message +
+                "\n\nThe Systems Controller is still running. Start Mullet Hop POS from " +
+                "the Windows Start menu or repair its installation.",
+                "Mullet Hop POS Did Not Start",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        HideControllerInTray(showNotice: false);
+        ControllerLog.Write(
+            "Windows startup completed; the Systems Controller is running in the system tray.");
     }
 
     private void RestoreControllerFromTray()
@@ -843,16 +884,18 @@ internal sealed class ControllerForm : Form
         };
     }
 
-    private void StartControllerServices()
+    private bool StartControllerServices()
     {
+        bool controllerReady;
         if (!_remoteSettings.IsRemoteMachine)
-            StartControllerService();
+            controllerReady = StartControllerService();
         else
         {
             _serviceStatus.Text = "● REMOTE MODE STARTING";
             _serviceStatus.BackColor = Color.FromArgb(8, 119, 189);
             _refreshTimer.Start();
             RefreshKioskList();
+            controllerReady = true;
         }
 
         if (_remoteSettings.Enabled)
@@ -878,9 +921,11 @@ internal sealed class ControllerForm : Form
                 ShowServiceError("Cloud synchronization could not start.\n\n" + ex.Message);
             }
         }
+
+        return controllerReady;
     }
 
-    private void StartControllerService()
+    private bool StartControllerService()
     {
         try
         {
@@ -889,15 +934,18 @@ internal sealed class ControllerForm : Form
             _serviceStatus.BackColor = Color.FromArgb(54, 128, 27);
             _refreshTimer.Start();
             RefreshKioskList();
+            return _server.IsRunning;
         }
         catch (HttpListenerException ex) when (ex.ErrorCode == 5)
         {
             ShowServiceError(
                 "Windows did not allow the controller to open its network port. Run Install-Kiosk-Controller.cmd as administrator, then reopen the controller.");
+            return false;
         }
         catch (Exception ex)
         {
             ShowServiceError("The controller network service could not start.\n\n" + ex.Message);
+            return false;
         }
     }
 
@@ -1034,6 +1082,9 @@ internal sealed class ControllerForm : Form
 
     private void ShowServiceError(string message)
     {
+        _startupServiceError = true;
+        if (_startedByWindows && !_startupSequenceComplete)
+            RestoreControllerFromTray();
         _serviceStatus.Text = "● NETWORK SERVICE STOPPED";
         _serviceStatus.BackColor = Color.FromArgb(180, 35, 24);
         ControllerLog.Write(message);
@@ -1358,7 +1409,9 @@ internal sealed class ControllerForm : Form
         _selectionStatus.Text = resultText;
     }
 
-    private async Task CheckControllerUpdateAsync(bool showUpToDateMessage)
+    private async Task CheckControllerUpdateAsync(
+        bool showUpToDateMessage,
+        bool interactive = true)
     {
         _controllerUpdateButton.Enabled = false;
         var originalText = _controllerUpdateButton.Text;
@@ -1374,7 +1427,8 @@ internal sealed class ControllerForm : Form
             if (result.Status != ControllerUpdateStatus.ReadyToInstall)
             {
                 _controllerUpdateReady.Visible = false;
-                if (showUpToDateMessage || result.Status != ControllerUpdateStatus.UpToDate)
+                if (interactive &&
+                    (showUpToDateMessage || result.Status != ControllerUpdateStatus.UpToDate))
                 {
                     MessageBox.Show(this, result.Message, "Controller Update",
                         MessageBoxButtons.OK,
@@ -1382,6 +1436,15 @@ internal sealed class ControllerForm : Form
                             ? MessageBoxIcon.Warning
                             : MessageBoxIcon.Information);
                 }
+                return;
+            }
+
+            if (!interactive)
+            {
+                ShowDeferredUpdateReady();
+                ControllerLog.Write(
+                    "A controller update is ready and will remain staged until the controller " +
+                    "is opened or restarted.");
                 return;
             }
 

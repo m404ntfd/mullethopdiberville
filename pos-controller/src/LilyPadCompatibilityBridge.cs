@@ -6,6 +6,21 @@ using System.Text.Json;
 
 namespace MulletHopPosController;
 
+internal sealed record LilyPadPageHealth(
+    string Url,
+    string Title,
+    string ReadyState,
+    int ViewportWidth,
+    int ViewportHeight,
+    int BodyTextLength,
+    bool HasUsername,
+    bool HasPassword)
+{
+    public bool IsLoginPage =>
+        Uri.TryCreate(Url, UriKind.Absolute, out var uri) &&
+        string.Equals(uri.AbsolutePath, "/public/Login.php", StringComparison.OrdinalIgnoreCase);
+}
+
 /// <summary>
 /// Adds a narrowly scoped compatibility handler to the LilyPad login page.
 /// Firefox exposes WebDriver BiDi only on a randomly selected loopback port, so
@@ -109,6 +124,22 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
           }
         }
         """;
+    private const string PageHealthFunction = """
+        () => JSON.stringify({
+          url: location.href,
+          title: document.title || "",
+          readyState: document.readyState || "",
+          viewportWidth: Math.max(0, Math.round(window.innerWidth || 0)),
+          viewportHeight: Math.max(0, Math.round(window.innerHeight || 0)),
+          bodyTextLength: document.body && document.body.innerText
+            ? document.body.innerText.trim().length
+            : 0,
+          hasUsername: document.getElementById("Username") instanceof HTMLInputElement,
+          hasPassword: document.getElementById("Password") instanceof HTMLInputElement
+        })
+        """;
+    private static readonly JsonSerializerOptions HealthJsonOptions =
+        new(JsonSerializerDefaults.Web);
 
     private readonly int _port;
     private readonly CancellationTokenSource _stopping = new();
@@ -117,6 +148,8 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
     private Task? _worker;
     private int _nextCommandId;
     private bool _disposed;
+
+    public event Action<LilyPadPageHealth>? PageHealthObserved;
 
     public LilyPadCompatibilityBridge(int port)
     {
@@ -165,8 +198,10 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
                 while (!cancellationToken.IsCancellationRequested &&
                        socket.State == WebSocketState.Open)
                 {
-                    if (await ReceiveTextAsync(socket, cancellationToken) is null)
-                        break;
+                    await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+                    var health = await ProbePageHealthAsync(socket, cancellationToken);
+                    if (health is not null)
+                        PageHealthObserved?.Invoke(health);
                 }
                 if (!cancellationToken.IsCancellationRequested)
                     lastError = new IOException("Firefox closed the local compatibility connection.");
@@ -244,7 +279,7 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
             return;
         }
 
-        foreach (var context in contexts.EnumerateArray())
+        foreach (var context in EnumerateContexts(contexts))
         {
             if (!context.TryGetProperty("context", out var contextId) ||
                 contextId.ValueKind != JsonValueKind.String ||
@@ -265,6 +300,101 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
                     target = new { context = contextId.GetString() }
                 },
                 cancellationToken);
+        }
+    }
+
+    private async Task<LilyPadPageHealth?> ProbePageHealthAsync(
+        ClientWebSocket socket,
+        CancellationToken cancellationToken)
+    {
+        JsonElement tree;
+        try
+        {
+            tree = await SendCommandAsync(
+                socket,
+                "browsingContext.getTree",
+                new { },
+                cancellationToken);
+        }
+        catch (InvalidDataException)
+        {
+            // Navigation can invalidate a context between health checks.
+            return null;
+        }
+
+        if (!tree.TryGetProperty("contexts", out var contexts) ||
+            contexts.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var context in EnumerateContexts(contexts))
+        {
+            if (!context.TryGetProperty("context", out var contextId) ||
+                contextId.ValueKind != JsonValueKind.String ||
+                !context.TryGetProperty("url", out var url) ||
+                url.ValueKind != JsonValueKind.String ||
+                !IsLilyPadUrl(url.GetString()))
+            {
+                continue;
+            }
+
+            try
+            {
+                var result = await SendCommandAsync(
+                    socket,
+                    "script.callFunction",
+                    new
+                    {
+                        functionDeclaration = PageHealthFunction,
+                        awaitPromise = false,
+                        target = new { context = contextId.GetString() }
+                    },
+                    cancellationToken);
+                if (!result.TryGetProperty("type", out var resultType) ||
+                    !string.Equals(
+                        resultType.GetString(),
+                        "success",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !result.TryGetProperty("result", out var remoteValue) ||
+                    !remoteValue.TryGetProperty("type", out var remoteType) ||
+                    !string.Equals(
+                        remoteType.GetString(),
+                        "string",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !remoteValue.TryGetProperty("value", out var value) ||
+                    value.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                return JsonSerializer.Deserialize<LilyPadPageHealth>(
+                    value.GetString() ?? string.Empty,
+                    HealthJsonOptions);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or JsonException)
+            {
+                PosLog.Write("LilyPad page-health probe skipped: " + ex.Message);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateContexts(JsonElement contexts)
+    {
+        foreach (var context in contexts.EnumerateArray())
+        {
+            yield return context;
+            if (!context.TryGetProperty("children", out var children) ||
+                children.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var child in EnumerateContexts(children))
+                yield return child;
         }
     }
 
@@ -348,6 +478,10 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
         Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
         string.Equals(uri.Host, "mullet.lilypadpos.app", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(uri.AbsolutePath, "/public/Login.php", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLilyPadUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        string.Equals(uri.Host, "mullet.lilypadpos.app", StringComparison.OrdinalIgnoreCase);
 
     public void Dispose()
     {

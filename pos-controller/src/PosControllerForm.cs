@@ -103,6 +103,42 @@ internal sealed class PosControllerForm : Form
         if (form._sidebarExpanded || !form._browserModeActive)
             throw new InvalidOperationException("Browser input did not activate browser mode and collapse the sidebar.");
 
+        var healthyPage = new LilyPadPageHealth(
+            FirefoxHost.HomePage,
+            "LilyPad POS System",
+            "complete",
+            1200,
+            800,
+            300,
+            HasUsername: true,
+            HasPassword: true);
+        if (FirefoxHost.PageHealthIndicatesFailureForSmokeTest(
+                healthyPage,
+                new Size(1200, 800)))
+        {
+            throw new InvalidOperationException("A healthy LilyPad page failed the display-health test.");
+        }
+        if (!FirefoxHost.PageHealthIndicatesFailureForSmokeTest(
+                healthyPage with { ViewportWidth = 120, ViewportHeight = 60 },
+                new Size(1200, 800)) ||
+            !FirefoxHost.PageHealthIndicatesFailureForSmokeTest(
+                healthyPage with { HasPassword = false },
+                new Size(1200, 800)) ||
+            !FirefoxHost.PageHealthIndicatesFailureForSmokeTest(
+                healthyPage with
+                {
+                    Url = "https://mullet.lilypadpos.app/public/WaiverAddToSale.php",
+                    BodyTextLength = 0
+                },
+                new Size(1200, 800)))
+        {
+            throw new InvalidOperationException(
+                "The Firefox display-health test missed a collapsed, incomplete, or blank LilyPad page.");
+        }
+
+        if (new PosSettings().StartAutomatically)
+            throw new InvalidOperationException("POS automatic startup is not off by default.");
+
         using var card = new KioskControlCard(1);
         card.SetExpanded(expanded: false);
         var status = new PosKioskStatus

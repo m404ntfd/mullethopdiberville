@@ -41,12 +41,19 @@ https://github.com/m404ntfd/mullethopdiberville/releases/latest
    computer name. DHCP address changes are supported because controllers are
    saved and elected by permanent Device ID; a router reservation remains optional.
 
-The controller starts automatically when that Windows account signs in. It also
-checks GitHub for controller updates whenever it opens. When an update is found,
-the controller downloads it and offers Restart and Install Now or Install Later.
-Choosing Install Later displays a red "! Update Ready to Install" notice until
-the controller is restarted. Use Check Updates in the lower-right Systems
-Controller Program section to check manually.
+The controller starts with administrator privileges when that Windows account
+signs in and stays hidden in the system tray after its network service is ready.
+Mullet Hop POS starts afterward only if **Start Mullet Hop POS automatically after
+the Systems Controller is ready** is enabled in POS Settings; that option is off
+by default. A controller service or POS startup failure restores the controller
+window so the error is visible. Opening the controller manually requests Windows
+administrator approval.
+
+The controller checks GitHub for updates whenever it opens. A hidden startup check
+stages an available update without placing a prompt over another application.
+Opening the controller shows the red "! Update Ready to Install" notice until the
+controller is restarted. Use Check Updates in the lower-right Systems Controller
+Program section to check manually.
 
 Version 1.1.0 must be installed once with the new package to establish the
 automatic updater. After that one-time installation, later controller versions
@@ -303,7 +310,9 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.15.1 asks for an explicit Yes/No confirmation before
+Systems Controller version 1.15.2 starts elevated at Windows sign-in, remains in
+the system tray after its service is ready, and launches Mullet Hop POS only when
+the POS auto-start setting is enabled. Version 1.15.1 asks for an explicit Yes/No confirmation before
 the user switches the local PC to the master role; automatic priority failover remains
 unattended. Version 1.15.0 adds Device-ID master priorities, confirmed
 automatic failover, and complete controller replication of kiosk connections,

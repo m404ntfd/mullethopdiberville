@@ -29,6 +29,16 @@ Get-Process -Name 'MulletHopKioskController' -ErrorAction SilentlyContinue |
     Stop-Process -Force
 
 @(
+    'Mullet Hop Systems Controller',
+    'Mullet Hop Kiosk Controller'
+) | ForEach-Object {
+    Unregister-ScheduledTask `
+        -TaskName $_ `
+        -Confirm:$false `
+        -ErrorAction SilentlyContinue
+}
+
+@(
     'Mullet Hop Systems Controller (TCP 47832)',
     'Mullet Hop Kiosk Controller (TCP 47832)'
 ) | ForEach-Object {

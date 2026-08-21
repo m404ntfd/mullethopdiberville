@@ -206,6 +206,14 @@ jobs:
           if ($controller.ExitCode -ne 0) {
             throw "The Systems Controller master-election test failed with exit code $($controller.ExitCode)."
           }
+          $controllerStartup = Start-Process `
+            -FilePath "controller-publish/MulletHopKioskController.exe" `
+            -ArgumentList "--windows-startup-smoke-test" `
+            -Wait `
+            -PassThru
+          if ($controllerStartup.ExitCode -ne 0) {
+            throw "The Systems Controller Windows-startup test failed with exit code $($controllerStartup.ExitCode)."
+          }
           $installer = Start-Process `
             -FilePath "installer-publish/MulletHopAllProgramsInstaller.exe" `
             -ArgumentList "--startup-smoke-test" `

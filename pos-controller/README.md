@@ -50,7 +50,8 @@ to open the protected Settings window.
 Firefox is embedded with its normal browser controls instead of kiosk mode. The
 application restores Firefox input focus when the POS window activates, continuously
 protects Firefox focus while the sidebar is idle, and checks for a hung browser, a
-failed startup, a Firefox process exit, and a tab-crash title.
+failed startup, a Firefox process exit, a tab-crash title, and a collapsed or
+incomplete LilyPad viewport.
 It terminates and reopens the complete embedded Firefox session once automatically.
 Only if the recovery also fails does a red banner ask staff to use **Refresh
 Lilypad**. Refresh Lilypad forcibly terminates the Firefox process tree, clears
@@ -81,6 +82,12 @@ the POS window has been minimized or covered.
    swaps it automatically.
 9. Select **Save Kiosk Assignments** or **Save Settings**.
 
+Under **Application Startup**, optionally enable **Start Mullet Hop POS
+automatically after the Systems Controller is ready**. It is off by default. The
+Systems Controller still starts elevated at Windows sign-in and remains in the
+system tray; it launches POS only when this setting is enabled and POS is not
+already running.
+
 Mullet Hop POS talks to the on-site Kiosk Controller over TCP 47832 using the existing
 signed local-network connection. It does not open a listening port and does not
 require a firewall exception on the POS computer. New paired devices are saved
@@ -94,6 +101,10 @@ The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
 restarts without changing the user's normal Firefox profile.
 
+Version 1.7.4 adds the optional POS automatic-startup setting, which is off by
+default. It selects the correct full-size Firefox top-level window, checks the live
+LilyPad renderer and viewport, forces a layout repair if the page collapses, and
+performs one clean Firefox recovery if the repair does not restore the page.
 Version 1.7.3 keeps keyboard focus on Firefox while the status sidebar works in the
 background, immediately restores focus when browser input is detected, auto-collapses
 the sidebar after that input completes, adds a non-destructive Restore Keyboard
