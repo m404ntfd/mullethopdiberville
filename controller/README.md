@@ -287,10 +287,10 @@ the kiosk remains dark. Save & Publish stores one combined Hours and Appearance
 profile. Sync Selected Kiosk and Sync All Kiosks send that profile through the
 same authenticated connection used for other controller commands.
 
-The Wristband Colors tab opens the shared color editor. Choose a day to assign a
-wristband color to each one-hour jump window; rows begin every 30 minutes from that
-day's opening through Last Jump Time Sold. Manage Color List can add, edit, remove,
-activate, or deactivate colors. The same editor records the color currently loaded in
+The Wristband Colors tab opens the shared editor. Choose a day to assign a wristband
+color to each one-hour jump window; rows begin every 30 minutes from that day's opening
+through Last Jump Time Sold. Its first Color List tab always shows Add, Edit, Remove,
+Make Active, and Make Inactive. The Printer Colors tab records the color currently loaded in
 WB-1 through WB-7 so the POS print selector can label and color every printer button.
 These settings are stored by the master controller, replicated to the other Systems
 Controllers, and synchronized to all connected POS applications.
@@ -318,9 +318,10 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.15.4 adds explicit Add Color, Delete Color, Make Active,
-and Make Inactive controls to the shared wristband editor used by Systems Controller
-and POS. Version 1.15.3 adds the shared wristband color catalog, day/time
+Systems Controller version 1.15.5 places the full Color List directly on the first tab
+of wristband settings, with always-visible Add, Edit, Remove, Make Active, and Make
+Inactive controls shared by Systems Controller and POS. Version 1.15.4 added those
+actions in the separate color editor. Version 1.15.3 adds the shared wristband color catalog, day/time
 schedule, WB-1 through WB-7 assignments, master storage, controller replication, and POS
 synchronization. Version 1.15.2 starts elevated at Windows sign-in, remains in
 the system tray after its service is ready, and launches Mullet Hop POS only when

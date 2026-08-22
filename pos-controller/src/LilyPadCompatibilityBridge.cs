@@ -22,18 +22,51 @@ internal sealed record LilyPadPageHealth(
         string.Equals(uri.AbsolutePath, "/public/Login.php", StringComparison.OrdinalIgnoreCase);
 }
 
+internal readonly record struct LilyPadPdfDownloadResult(
+    bool Success,
+    byte[]? PdfBytes,
+    string Message)
+{
+    public static LilyPadPdfDownloadResult Failed(string message) =>
+        new(false, null, message);
+}
+
 /// <summary>
-/// Adds a narrowly scoped compatibility handler to the LilyPad login page.
+/// Adds narrowly scoped compatibility handlers for the LilyPad login page and
+/// direct wristband printing.
 /// Firefox exposes WebDriver BiDi only on a randomly selected loopback port, so
 /// the bridge is not reachable from another computer on the network.
 /// </summary>
 internal sealed class LilyPadCompatibilityBridge : IDisposable
 {
-    private const int MaximumMessageBytes = 1_048_576;
+    private const int MaximumMessageBytes = 32 * 1024 * 1024;
+    private const int MaximumPdfBytes = 20 * 1024 * 1024;
     private const string CompatibilityFunction = """
         () => {
-          if (location.hostname !== "mullet.lilypadpos.app" ||
-              location.pathname !== "/public/Login.php") {
+          if (location.hostname !== "mullet.lilypadpos.app") {
+            return;
+          }
+
+          if (/wristband/i.test(location.pathname) &&
+              /(pdf|php)$/i.test(location.pathname)) {
+            const suppressBrowserPrintDialog = () => {
+              document.documentElement?.setAttribute(
+                "data-mullet-hop-direct-wristband-print",
+                "1");
+            };
+            try {
+              Object.defineProperty(window, "print", {
+                configurable: true,
+                writable: false,
+                value: suppressBrowserPrintDialog
+              });
+            } catch {
+              window.print = suppressBrowserPrintDialog;
+            }
+            return;
+          }
+
+          if (location.pathname !== "/public/Login.php") {
             return;
           }
 
@@ -140,12 +173,69 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
           pageTimeOrigin: Number.isFinite(performance.timeOrigin) ? performance.timeOrigin : 0
         })
         """;
+    private const string DownloadPdfFunction = """
+        async (expectedUrl) => {
+          const failure = message => JSON.stringify({ success: false, message });
+          try {
+            const requested = new URL(expectedUrl, location.href);
+            if (requested.hostname !== "mullet.lilypadpos.app" ||
+                !/wristband/i.test(requested.pathname) ||
+                !/(pdf|php)$/i.test(requested.pathname)) {
+              return failure("The current page is not a LilyPad wristband PDF.");
+            }
+
+            let bytes = null;
+            let contentType = "application/pdf";
+            const loadedDocument = globalThis.PDFViewerApplication?.pdfDocument;
+            if (loadedDocument && typeof loadedDocument.getData === "function") {
+              const loadedBytes = await loadedDocument.getData();
+              bytes = loadedBytes instanceof Uint8Array
+                ? loadedBytes
+                : new Uint8Array(loadedBytes);
+            }
+            if (!bytes) {
+              const response = await fetch(requested.href, {
+                credentials: "include",
+                cache: "force-cache",
+                redirect: "follow"
+              });
+              if (!response.ok) {
+                return failure(`LilyPad returned HTTP ${response.status} for the wristband PDF.`);
+              }
+              bytes = new Uint8Array(await response.arrayBuffer());
+              contentType = response.headers.get("content-type") || "";
+            }
+            if (bytes.byteLength < 5 ||
+                bytes[0] !== 0x25 || bytes[1] !== 0x50 || bytes[2] !== 0x44 ||
+                bytes[3] !== 0x46 || bytes[4] !== 0x2d) {
+              return failure("LilyPad did not return a valid wristband PDF.");
+            }
+            if (bytes.byteLength > 20971520) {
+              return failure("The LilyPad wristband PDF is larger than the 20 MB safety limit.");
+            }
+
+            let binary = "";
+            const chunkSize = 0x8000;
+            for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+              binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+            }
+            return JSON.stringify({
+              success: true,
+              contentType,
+              base64: btoa(binary)
+            });
+          } catch (error) {
+            return failure(error instanceof Error ? error.message : String(error));
+          }
+        }
+        """;
     private static readonly JsonSerializerOptions HealthJsonOptions =
         new(JsonSerializerDefaults.Web);
 
     private readonly int _port;
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _socketGate = new();
+    private readonly SemaphoreSlim _commandGate = new(1, 1);
     private ClientWebSocket? _socket;
     private Task? _worker;
     private int _nextCommandId;
@@ -177,6 +267,122 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         var cancellationToken = _stopping.Token;
         _worker ??= Task.Run(() => RunAsync(cancellationToken));
+    }
+
+    public async Task<LilyPadPdfDownloadResult> DownloadWristbandPdfAsync(
+        string pageUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsLilyPadWristbandUrl(pageUrl))
+        {
+            return LilyPadPdfDownloadResult.Failed(
+                "The current page is not a LilyPad wristband PDF.");
+        }
+
+        ClientWebSocket? socket;
+        lock (_socketGate)
+            socket = _socket;
+        if (socket is null || socket.State != WebSocketState.Open)
+        {
+            return LilyPadPdfDownloadResult.Failed(
+                "Firefox's local LilyPad connection is not ready. Wait a moment and try the wristband print again.");
+        }
+
+        var callerCancellationToken = cancellationToken;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        cancellationToken = timeout.Token;
+        try
+        {
+            var tree = await SendCommandAsync(
+                socket,
+                "browsingContext.getTree",
+                new { },
+                cancellationToken);
+            if (!tree.TryGetProperty("contexts", out var contexts) ||
+                contexts.ValueKind != JsonValueKind.Array)
+            {
+                return LilyPadPdfDownloadResult.Failed(
+                    "Firefox did not expose the current LilyPad wristband page.");
+            }
+
+            foreach (var context in EnumerateContexts(contexts))
+            {
+                if (!context.TryGetProperty("context", out var contextId) ||
+                    contextId.ValueKind != JsonValueKind.String ||
+                    !context.TryGetProperty("url", out var contextUrl) ||
+                    contextUrl.ValueKind != JsonValueKind.String ||
+                    !IsLilyPadWristbandUrl(contextUrl.GetString()))
+                {
+                    continue;
+                }
+
+                var result = await SendCommandAsync(
+                    socket,
+                    "script.callFunction",
+                    new
+                    {
+                        functionDeclaration = DownloadPdfFunction,
+                        awaitPromise = true,
+                        target = new { context = contextId.GetString() },
+                        arguments = new[] { new { type = "string", value = pageUrl } }
+                    },
+                    cancellationToken);
+                var payload = ReadRemoteString(result);
+                if (string.IsNullOrWhiteSpace(payload))
+                {
+                    return LilyPadPdfDownloadResult.Failed(
+                        "Firefox did not return the wristband PDF data.");
+                }
+
+                using var document = JsonDocument.Parse(payload);
+                var root = document.RootElement;
+                if (!root.TryGetProperty("success", out var success) || !success.GetBoolean())
+                {
+                    var message = root.TryGetProperty("message", out var messageValue)
+                        ? messageValue.GetString()
+                        : null;
+                    return LilyPadPdfDownloadResult.Failed(
+                        string.IsNullOrWhiteSpace(message)
+                            ? "Firefox could not retrieve the authenticated LilyPad wristband PDF."
+                            : message);
+                }
+                if (!root.TryGetProperty("base64", out var base64) ||
+                    base64.ValueKind != JsonValueKind.String)
+                {
+                    return LilyPadPdfDownloadResult.Failed(
+                        "Firefox returned an incomplete wristband PDF.");
+                }
+
+                var bytes = Convert.FromBase64String(base64.GetString() ?? string.Empty);
+                if (bytes.Length > MaximumPdfBytes || !HasPdfSignature(bytes))
+                {
+                    return LilyPadPdfDownloadResult.Failed(
+                        "Firefox returned an invalid or oversized wristband PDF.");
+                }
+                return new LilyPadPdfDownloadResult(
+                    true,
+                    bytes,
+                    "The authenticated LilyPad wristband PDF is ready to print.");
+            }
+            return LilyPadPdfDownloadResult.Failed(
+                "The LilyPad wristband page is no longer open in Firefox.");
+        }
+        catch (OperationCanceledException) when (!callerCancellationToken.IsCancellationRequested)
+        {
+            return LilyPadPdfDownloadResult.Failed(
+                "Firefox did not provide the wristband PDF within 20 seconds. No print job was sent.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            PosLog.Write("Authenticated LilyPad wristband PDF retrieval failed: " + ex);
+            return LilyPadPdfDownloadResult.Failed(
+                "Firefox could not retrieve the current wristband PDF: " + ex.Message);
+        }
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
@@ -406,52 +612,79 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
         object parameters,
         CancellationToken cancellationToken)
     {
-        var commandId = Interlocked.Increment(ref _nextCommandId);
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        await _commandGate.WaitAsync(cancellationToken);
+        try
         {
-            id = commandId,
-            method,
-            @params = parameters
-        });
-        await socket.SendAsync(
-            new ArraySegment<byte>(payload),
-            WebSocketMessageType.Text,
-            true,
-            cancellationToken);
+            var commandId = Interlocked.Increment(ref _nextCommandId);
+            var payload = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                id = commandId,
+                method,
+                @params = parameters
+            });
+            await socket.SendAsync(
+                new ArraySegment<byte>(payload),
+                WebSocketMessageType.Text,
+                true,
+                cancellationToken);
 
-        while (true)
+            while (true)
+            {
+                var message = await ReceiveTextAsync(socket, cancellationToken);
+                if (message is null)
+                    throw new IOException("Firefox closed the local compatibility connection.");
+
+                using var document = JsonDocument.Parse(message);
+                var root = document.RootElement;
+                if (!root.TryGetProperty("id", out var responseId) ||
+                    responseId.ValueKind != JsonValueKind.Number ||
+                    responseId.GetInt32() != commandId)
+                {
+                    continue;
+                }
+
+                if (root.TryGetProperty("type", out var type) &&
+                    string.Equals(type.GetString(), "error", StringComparison.OrdinalIgnoreCase))
+                {
+                    var error = root.TryGetProperty("error", out var errorValue)
+                        ? errorValue.GetString()
+                        : "unknown error";
+                    var detail = root.TryGetProperty("message", out var detailValue)
+                        ? detailValue.GetString()
+                        : string.Empty;
+                    throw new InvalidDataException(
+                        string.IsNullOrWhiteSpace(detail) ? error : $"{error}: {detail}");
+                }
+
+                return root.TryGetProperty("result", out var result)
+                    ? result.Clone()
+                    : default;
+            }
+        }
+        finally
         {
-            var message = await ReceiveTextAsync(socket, cancellationToken);
-            if (message is null)
-                throw new IOException("Firefox closed the local compatibility connection.");
-
-            using var document = JsonDocument.Parse(message);
-            var root = document.RootElement;
-            if (!root.TryGetProperty("id", out var responseId) ||
-                responseId.ValueKind != JsonValueKind.Number ||
-                responseId.GetInt32() != commandId)
-            {
-                continue;
-            }
-
-            if (root.TryGetProperty("type", out var type) &&
-                string.Equals(type.GetString(), "error", StringComparison.OrdinalIgnoreCase))
-            {
-                var error = root.TryGetProperty("error", out var errorValue)
-                    ? errorValue.GetString()
-                    : "unknown error";
-                var detail = root.TryGetProperty("message", out var detailValue)
-                    ? detailValue.GetString()
-                    : string.Empty;
-                throw new InvalidDataException(
-                    string.IsNullOrWhiteSpace(detail) ? error : $"{error}: {detail}");
-            }
-
-            return root.TryGetProperty("result", out var result)
-                ? result.Clone()
-                : default;
+            _commandGate.Release();
         }
     }
+
+    private static string? ReadRemoteString(JsonElement result)
+    {
+        if (!result.TryGetProperty("type", out var resultType) ||
+            !string.Equals(resultType.GetString(), "success", StringComparison.OrdinalIgnoreCase) ||
+            !result.TryGetProperty("result", out var remoteValue) ||
+            !remoteValue.TryGetProperty("type", out var remoteType) ||
+            !string.Equals(remoteType.GetString(), "string", StringComparison.OrdinalIgnoreCase) ||
+            !remoteValue.TryGetProperty("value", out var value) ||
+            value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        return value.GetString();
+    }
+
+    private static bool HasPdfSignature(byte[] bytes) =>
+        bytes.Length >= 5 && bytes[0] == (byte)'%' && bytes[1] == (byte)'P' &&
+        bytes[2] == (byte)'D' && bytes[3] == (byte)'F' && bytes[4] == (byte)'-';
 
     private static async Task<string?> ReceiveTextAsync(
         ClientWebSocket socket,
@@ -484,6 +717,13 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
     private static bool IsLilyPadUrl(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
         string.Equals(uri.Host, "mullet.lilypadpos.app", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLilyPadWristbandUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        string.Equals(uri.Host, "mullet.lilypadpos.app", StringComparison.OrdinalIgnoreCase) &&
+        uri.AbsolutePath.Contains("Wristband", StringComparison.OrdinalIgnoreCase) &&
+        (uri.AbsolutePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
+         uri.AbsolutePath.EndsWith(".php", StringComparison.OrdinalIgnoreCase));
 
     public void Dispose()
     {

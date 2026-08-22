@@ -66,7 +66,8 @@ internal sealed class WristbandPrinterDialog : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(30, 14, 30, 8),
             Text = "Choose WB-1 through WB-7. The button selects that matching Windows printer " +
-                   "and immediately prints the current preview. POS-X remains the receipt printer.",
+                   "and directly prints the current wristband PDF. No second print dialog opens. " +
+                   "POS-X remains the receipt printer.",
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = Color.FromArgb(37, 48, 58),
             Font = new Font("Segoe UI", 11, FontStyle.Bold)

@@ -52,6 +52,8 @@ internal sealed class FirefoxHost : IDisposable
     private bool _layoutRepairAttempted;
     private string? _lastKnownLilyPadUrl;
     private string? _activeWristbandDocumentKey;
+    private string? _activeWristbandDownloadUrl;
+    private Task<LilyPadPdfDownloadResult>? _activeWristbandDownload;
     private bool _wristbandPromptRaised;
     private string? _nextLaunchUrl;
     private bool _disposed;
@@ -226,39 +228,45 @@ internal sealed class FirefoxHost : IDisposable
             FocusEmbeddedWindow("browser mode enabled");
     }
 
-    public Task<PrintDestinationSelectionResult> PrintCurrentPreviewAsync(
+    public async Task<PrintDestinationSelectionResult> PrintCurrentPreviewAsync(
         string printerName,
+        string pageUrl,
         CancellationToken cancellationToken = default)
     {
         if (_firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow))
         {
-            return Task.FromResult(PrintDestinationSelectionResult.Failed(
-                "The embedded Firefox window is not available."));
+            return PrintDestinationSelectionResult.Failed(
+                "The embedded Firefox window is not available.");
         }
 
-        return FirefoxPrintDestinationSelector.SelectAndPrintAsync(
+        var bridge = _compatibilityBridge;
+        if (bridge is null)
+        {
+            return PrintDestinationSelectionResult.Failed(
+                "Firefox's local LilyPad connection is not available. Select Refresh Lilypad and try again.");
+        }
+
+        var download = string.Equals(
+                _activeWristbandDownloadUrl,
+                pageUrl,
+                StringComparison.OrdinalIgnoreCase)
+            ? _activeWristbandDownload
+            : null;
+        download ??= bridge.DownloadWristbandPdfAsync(pageUrl, cancellationToken);
+        var pdf = await download;
+        if (!pdf.Success)
+        {
+            PosLog.Write("The prefetched wristband PDF was unavailable; retrying the safe download once.");
+            pdf = await bridge.DownloadWristbandPdfAsync(pageUrl, cancellationToken);
+        }
+        if (!pdf.Success || pdf.PdfBytes is null)
+            return PrintDestinationSelectionResult.Failed(pdf.Message);
+
+        return await DirectWristbandPrinter.PrintAsync(
             _firefoxWindow,
+            pdf.PdfBytes,
             printerName,
             cancellationToken);
-    }
-
-    public bool CancelPrintPreview()
-    {
-        if (_firefoxWindow == IntPtr.Zero || !IsWindow(_firefoxWindow))
-            return false;
-
-        _ = FocusEmbeddedWindow("cancel wristband print preview");
-        var keyDownPosted = PostMessage(
-            _firefoxWindow,
-            WmKeyDown,
-            new IntPtr(VkEscape),
-            new IntPtr(0x00010001));
-        var keyUpPosted = PostMessage(
-            _firefoxWindow,
-            WmKeyUp,
-            new IntPtr(VkEscape),
-            new IntPtr(unchecked((int)0xC0010001)));
-        return keyDownPosted && keyUpPosted;
     }
 
     private void FindAndAttachWindow()
@@ -532,6 +540,8 @@ internal sealed class FirefoxHost : IDisposable
         if (!IsWristbandPrintUrl(wristbandUrl))
         {
             _activeWristbandDocumentKey = null;
+            _activeWristbandDownloadUrl = null;
+            _activeWristbandDownload = null;
             _wristbandPromptRaised = false;
             return;
         }
@@ -543,6 +553,8 @@ internal sealed class FirefoxHost : IDisposable
                 StringComparison.OrdinalIgnoreCase))
         {
             _activeWristbandDocumentKey = documentKey;
+            _activeWristbandDownloadUrl = wristbandUrl;
+            _activeWristbandDownload = _compatibilityBridge?.DownloadWristbandPdfAsync(wristbandUrl!);
             _wristbandPromptRaised = false;
         }
 
@@ -1060,6 +1072,8 @@ internal sealed class FirefoxHost : IDisposable
         _keyboardWasDown = false;
         _browserInteractionPending = false;
         _activeWristbandDocumentKey = null;
+        _activeWristbandDownloadUrl = null;
+        _activeWristbandDownload = null;
         _wristbandPromptRaised = false;
         _compatibilityBridge?.Dispose();
         _compatibilityBridge = null;
@@ -1103,8 +1117,6 @@ internal sealed class FirefoxHost : IDisposable
         IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     private const uint WmSize = 0x0005;
-    private const uint WmKeyDown = 0x0100;
-    private const uint WmKeyUp = 0x0101;
     private const uint GwOwner = 4;
 
     private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
@@ -1160,10 +1172,6 @@ internal sealed class FirefoxHost : IDisposable
         IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
-    private static extern bool PostMessage(
-        IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr window);
 
     [DllImport("user32.dll")]
@@ -1200,7 +1208,6 @@ internal sealed class FirefoxHost : IDisposable
     private const int VkMiddleButton = 0x04;
     private const int VkXButton1 = 0x05;
     private const int VkXButton2 = 0x06;
-    private const int VkEscape = 0x1B;
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int virtualKey);
