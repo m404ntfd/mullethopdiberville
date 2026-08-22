@@ -23,7 +23,7 @@ internal sealed class WristbandPrinterDialog : Form
     {
         _settings = settings.Clone();
         _settings.Normalize();
-        Text = "Select Wristband Printer";
+        Text = "Print Wristbands";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         ClientSize = new Size(820, 570);
@@ -53,7 +53,7 @@ internal sealed class WristbandPrinterDialog : Form
         var header = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "SELECT A WRISTBAND PRINTER",
+            Text = "SELECT A WRISTBAND PRINTER & PRINT",
             TextAlign = ContentAlignment.MiddleCenter,
             BackColor = Color.FromArgb(42, 22, 56),
             ForeColor = Color.White,
@@ -65,8 +65,8 @@ internal sealed class WristbandPrinterDialog : Form
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(30, 14, 30, 8),
-            Text = "Choose WB-1 through WB-7 for this wristband print job. " +
-                   "The POS-X Thermal Printer remains the normal receipt printer.",
+            Text = "Choose WB-1 through WB-7. The button selects that matching Windows printer " +
+                   "and immediately prints the current preview. POS-X remains the receipt printer.",
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = Color.FromArgb(37, 48, 58),
             Font = new Font("Segoe UI", 11, FontStyle.Bold)
@@ -137,7 +137,7 @@ internal sealed class WristbandPrinterDialog : Form
                 Margin = new Padding(10),
                 Tag = printerName,
                 Text = printerName + Environment.NewLine +
-                       (canSelect ? colorLabel : "NOT INSTALLED"),
+                       (canSelect ? colorLabel + Environment.NewLine + "PRINT NOW" : "NOT INSTALLED"),
                 Enabled = canSelect,
                 BackColor = canSelect
                     ? buttonColor

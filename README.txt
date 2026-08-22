@@ -102,7 +102,7 @@ open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
 Waiver Kiosk version 2.11.12, Systems Controller version 1.15.3, and Mullet Hop POS
-version 1.7.7 are the matching package releases. Kiosk 2.11.12 retains the 2.11.11
+version 1.7.8 are the matching package releases. Kiosk 2.11.12 retains the 2.11.11
 schedule behavior that treats a 12:00 AM
 closing as next-day midnight, plays the closure video at Last Jump Time Sold,
 blacks out one minute after closing, supports a separate Dark-mode switch time
@@ -290,7 +290,10 @@ Selecting a machine already assigned elsewhere moves or swaps it automatically.
 The Application Startup checkbox can ask the Systems Controller to launch POS after
 its service is ready at Windows sign-in. This checkbox is off by default.
 
-Mullet Hop POS 1.7.7 adds the shared wristband color editor to Settings and shows each
+Mullet Hop POS 1.7.8 maps every WB-1 through WB-7 button directly to the matching
+Windows printer, selects it in the current Firefox preview, and activates Firefox's
+Print button. If Firefox does not confirm both actions, the preview remains open for
+staff to complete manually. Version 1.7.7 adds the shared wristband color editor to Settings and shows each
 printer's configured color directly on the WB-1 through WB-7 print buttons. The daily
 schedule creates one-hour jump windows every 30 minutes, beginning at opening and ending
 at Last Jump Time Sold. Version 1.7.6 detects LilyPad wristband PDF print pages and changes
