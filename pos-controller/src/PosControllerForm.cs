@@ -170,7 +170,20 @@ internal sealed class PosControllerForm : Form
             FirefoxPrintDestinationSelector.TextIdentifiesPrinterForSmokeTest("WB-10", "WB-1") ||
             !FirefoxPrintDestinationSelector.TextIdentifiesPrintActionForSmokeTest("Print") ||
             FirefoxPrintDestinationSelector.TextIdentifiesPrintActionForSmokeTest(
-                "Print using the system dialog"))
+                "Print using the system dialog") ||
+            !FirefoxPrintDestinationSelector.TextIdentifiesSystemPrintDialogActionForSmokeTest(
+                "Print using the system dialog…") ||
+            FirefoxPrintDestinationSelector.TextIdentifiesSystemPrintDialogActionForSmokeTest(
+                "Print") ||
+            !FirefoxPrintDestinationSelector.TextIdentifiesWristbandReturnLinkForSmokeTest(
+                "Mullet Hop logo",
+                null) ||
+            !FirefoxPrintDestinationSelector.TextIdentifiesWristbandReturnLinkForSmokeTest(
+                null,
+                "https://mullet.lilypadpos.app/public/EditTrackerInSale.php?ArrayKey=0") ||
+            FirefoxPrintDestinationSelector.TextIdentifiesWristbandReturnLinkForSmokeTest(
+                null,
+                wristbandPrintUrl))
         {
             throw new InvalidOperationException(
                 "The wristband printer selector did not preserve the WB-1 through WB-7 range.");
@@ -789,6 +802,18 @@ internal sealed class PosControllerForm : Form
                     "Print Wristbands",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
+            }
+            else if (!result.ReturnLinkActivated)
+            {
+                PosLog.Write(result.Message);
+                MessageBox.Show(
+                    this,
+                    $"The wristbands were sent to {printerName}, but the Mullet Hop logo link " +
+                    "was not available to the application. Select the Mullet Hop logo on the " +
+                    "wristband page to return. Do not print the job again.",
+                    "Wristbands Printed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
             }
         }
         catch (Exception ex)
