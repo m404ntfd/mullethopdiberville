@@ -125,8 +125,8 @@ internal sealed class WristbandColorSettingsDialog : Form
         _dayPicker.DropDownStyle = ComboBoxStyle.DropDownList;
         _dayPicker.Bounds = new Rectangle(62, 4, 185, 32);
         top.Controls.Add(_dayPicker);
-        var manage = MakeButton("Manage Color List", Color.FromArgb(245, 130, 32));
-        manage.Bounds = new Rectangle(260, 3, 175, 35);
+        var manage = MakeButton("Add / Delete / Activate Colors", Color.FromArgb(245, 130, 32));
+        manage.Bounds = new Rectangle(250, 3, 225, 35);
         manage.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         manage.Click += (_, _) => ManageColors();
         top.Controls.Add(manage);
@@ -462,6 +462,10 @@ internal sealed class WristbandColorManagerDialog : Form
 {
     private readonly List<WristbandColorDefinition> _colors;
     private readonly ListBox _list = new();
+    private readonly Button _edit;
+    private readonly Button _delete;
+    private readonly Button _makeActive;
+    private readonly Button _makeInactive;
 
     public WristbandColorManagerDialog(IEnumerable<WristbandColorDefinition> colors)
     {
@@ -489,15 +493,18 @@ internal sealed class WristbandColorManagerDialog : Form
         _list.DoubleClick += (_, _) => EditSelected();
         Controls.Add(_list);
 
-        var add = MakeButton("Add Color", 24, 384, 120, Color.FromArgb(118, 196, 66));
-        var edit = MakeButton("Edit", 154, 384, 90, Color.FromArgb(105, 210, 236));
-        var remove = MakeButton("Remove", 254, 384, 100, Color.FromArgb(187, 34, 46), Color.White);
-        var toggle = MakeButton("Active / Inactive", 364, 384, 160, Color.FromArgb(245, 130, 32));
+        var add = MakeButton("Add Color", 24, 384, 105, Color.FromArgb(118, 196, 66));
+        _edit = MakeButton("Edit Color", 137, 384, 98, Color.FromArgb(105, 210, 236));
+        _delete = MakeButton("Delete Color", 243, 384, 110, Color.FromArgb(187, 34, 46), Color.White);
+        _makeActive = MakeButton("Make Active", 361, 384, 105, Color.FromArgb(245, 130, 32));
+        _makeInactive = MakeButton("Make Inactive", 474, 384, 112, Color.FromArgb(98, 107, 117), Color.White);
         add.Click += (_, _) => AddColor();
-        edit.Click += (_, _) => EditSelected();
-        remove.Click += (_, _) => RemoveSelected();
-        toggle.Click += (_, _) => ToggleSelected();
-        Controls.AddRange([add, edit, remove, toggle]);
+        _edit.Click += (_, _) => EditSelected();
+        _delete.Click += (_, _) => DeleteSelected();
+        _makeActive.Click += (_, _) => SetSelectedActive(true);
+        _makeInactive.Click += (_, _) => SetSelectedActive(false);
+        _list.SelectedIndexChanged += (_, _) => UpdateActionButtons();
+        Controls.AddRange([add, _edit, _delete, _makeActive, _makeInactive]);
 
         var done = MakeButton("Use This Color List", 368, 446, 218, Color.FromArgb(117, 68, 154), Color.White);
         done.DialogResult = DialogResult.OK;
@@ -554,15 +561,15 @@ internal sealed class WristbandColorManagerDialog : Form
         RefreshList(selected.Id);
     }
 
-    private void RemoveSelected()
+    private void DeleteSelected()
     {
         var selected = SelectedColor;
         if (selected is null)
             return;
         if (MessageBox.Show(
                 this,
-                $"Remove {selected.Name}? It will also be removed from saved time and printer assignments.",
-                "Remove Wristband Color",
+                $"Delete {selected.Name}? It will also be removed from saved time and printer assignments.",
+                "Delete Wristband Color",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning) != DialogResult.Yes)
         {
@@ -572,13 +579,22 @@ internal sealed class WristbandColorManagerDialog : Form
         RefreshList();
     }
 
-    private void ToggleSelected()
+    private void SetSelectedActive(bool active)
     {
         var selected = SelectedColor;
         if (selected is null)
             return;
-        selected.IsActive = !selected.IsActive;
+        selected.IsActive = active;
         RefreshList(selected.Id);
+    }
+
+    private void UpdateActionButtons()
+    {
+        var selected = SelectedColor;
+        _edit.Enabled = selected is not null;
+        _delete.Enabled = selected is not null;
+        _makeActive.Enabled = selected is not null && !selected.IsActive;
+        _makeInactive.Enabled = selected is not null && selected.IsActive;
     }
 
     private void RefreshList(string? selectedId = null)
@@ -601,6 +617,7 @@ internal sealed class WristbandColorManagerDialog : Form
         {
             _list.SelectedIndex = 0;
         }
+        UpdateActionButtons();
         _list.Invalidate();
     }
 

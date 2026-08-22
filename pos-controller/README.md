@@ -78,19 +78,22 @@ an assignment displays **COLOR NOT SET**.
 
 The Wristband Colors section in Settings uses the same editor as the Systems
 Controller. Choose a day to assign colors to one-hour jump windows beginning every
-30 minutes from opening through Last Jump Time Sold. Manage Color List can add, edit,
-remove, activate, or deactivate colors, and the printer section records the color
+30 minutes from opening through Last Jump Time Sold. **Add / Delete / Activate Colors**
+opens explicit Add Color, Edit Color, Delete Color, Make Active, and Make Inactive
+controls, and the printer section records the color
 currently loaded in WB-1 through WB-7. The master Systems Controller stores these
 settings and synchronizes them to the other controllers and POS applications.
 
 Each button maps directly to its matching Windows printer name: WB-1 selects WB-1,
-WB-2 selects WB-2, and so on through WB-7. Pressing a button selects that printer in
-the current Firefox print preview and then activates Firefox's Print button. **Return /
-Cancel Print** closes the selector and sends Escape to the current print preview.
-If Firefox cannot confirm the destination or expose its Print button, it leaves the
-preview open and asks the user to complete the job manually. The application does not
-change the Windows default printer, and its dedicated Firefox profile keeps **POS-X
-Thermal Printer** as the normal receipt and cash-drawer destination for later jobs.
+WB-2 selects WB-2, and so on through WB-7. Pressing a button opens Firefox's Windows
+system print dialog, confirms that exact WB printer, and submits Print once. The app
+waits for the system dialog to close before it treats the job as sent, then selects the
+Mullet Hop logo link embedded in the wristband PDF to return to its LilyPad destination.
+**Return / Cancel Print** closes the selector and sends Escape to the current preview.
+If Windows cannot confirm the printer or close the dialog, it remains visible for staff
+and the app does not submit a second job. The application does not change the Windows
+default printer, and its dedicated Firefox profile keeps **POS-X Thermal Printer** as
+the normal receipt and cash-drawer destination for later jobs.
 
 ## Installation
 
@@ -126,9 +129,12 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.8 maps each
-wristband button to the identically named Windows printer and automatically submits the
-current Firefox print preview after confirming the selected destination. Version 1.7.7 adds the
+restarts without changing the user's normal Firefox profile. Version 1.7.9 opens the
+Windows system print dialog from Firefox, confirms the exact WB printer, submits the job
+once, waits for the dialog to close, and follows the Mullet Hop logo link embedded in the
+wristband PDF. It never retries Print after Windows accepts the action. Version 1.7.8
+mapped each wristband button to the identically named Windows printer in Firefox's
+built-in preview. Version 1.7.7 adds the
 synchronized color catalog, daily jump-time schedule, current WB-1 through WB-7 color
 assignments, and color-labeled wristband printer buttons. Version 1.7.6 detects
 LilyPad wristband print pages, prompts for WB-1 through WB-7, and applies the selected
