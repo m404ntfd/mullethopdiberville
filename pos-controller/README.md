@@ -127,7 +127,10 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.10 reads the
+restarts without changing the user's normal Firefox profile. Version 1.7.11 flattens PDF
+pages into opaque printer-safe rasters, fits them to the WB printer driver's actual
+printable surface without applying an unsafe hard-margin offset, and stops before
+submission if Windows renders a page with no visible content. Version 1.7.10 reads the
 current authenticated wristband PDF from the dedicated Firefox session, renders it with
 Windows, and submits it directly to the chosen WB-1 through WB-7 printer without a
 Firefox or Windows print dialog. POS-X Thermal Printer remains the normal receipt and
