@@ -47,6 +47,8 @@ internal static class DirectWristbandPrinter
     private const int SelectTakeFocus = 0x1;
     private const int SelectTakeSelection = 0x2;
     private const int StretchHalftone = 4;
+    private const double NativeWristbandWidthInches = 1d;
+    private const double NativeWristbandLengthInches = 11d;
     private const uint DibRgbColors = 0;
     private const uint SourceCopyRasterOperation = 0x00CC0020;
     private const int GdiError = -1;
@@ -167,12 +169,15 @@ internal static class DirectWristbandPrinter
         }
         var raster = CreateMonochromeRaster(marked);
         var command = BuildZplCommand(raster);
+        var standardMedia = CalculateNativeWristbandMedia(300, 300);
         return raster.Width == 8 &&
                raster.Height == 1 &&
                raster.BytesPerRow == 1 &&
                raster.Bits.Length == 1 &&
                raster.Bits[0] == 0x80 &&
-               command.Contains("^GFA,1,1,1,80", StringComparison.Ordinal);
+               command.Contains("^GFA,1,1,1,80", StringComparison.Ordinal) &&
+               standardMedia.Width == 300 &&
+               standardMedia.Height == 3300;
     }
 
     private static PrintDestinationSelectionResult RenderAndPrintOnStaThread(
@@ -385,21 +390,15 @@ internal static class DirectWristbandPrinter
         var dpiY = pageSettings.PrinterResolution.Y > 0
             ? pageSettings.PrinterResolution.Y
             : dpiX;
-        var mediaWidthHundredths = Math.Min(paper.Width, paper.Height);
-        var mediaLengthHundredths = Math.Max(paper.Width, paper.Height);
-        var mediaWidth = Math.Clamp(
-            (int)Math.Round(mediaWidthHundredths * dpiX / 100d),
-            64,
-            4096);
-        var mediaLength = Math.Clamp(
-            (int)Math.Round(mediaLengthHundredths * dpiY / 100d),
-            64,
-            30_000);
+        var media = CalculateNativeWristbandMedia(dpiX, dpiY);
+        var mediaWidth = media.Width;
+        var mediaLength = media.Height;
 
         PosLog.Write(
             $"Native ZPL media for {printerName}: driver paper={paper.PaperName} " +
             $"{paper.Width}x{paper.Height} hundredths-inch, resolution={dpiX}x{dpiY} dpi, " +
-            $"raster={mediaWidth}x{mediaLength} dots.");
+            $"forced physical wristband={NativeWristbandWidthInches:0.##}x" +
+            $"{NativeWristbandLengthInches:0.##} inches, raster={mediaWidth}x{mediaLength} dots.");
 
         foreach (var page in pages)
         {
@@ -415,6 +414,16 @@ internal static class DirectWristbandPrinter
                 $"{raster.Width}x{raster.Height} dots, {raster.Bits.Length} raster bytes.");
         }
     }
+
+    private static Size CalculateNativeWristbandMedia(int dpiX, int dpiY) => new(
+        Math.Clamp(
+            (int)Math.Round(NativeWristbandWidthInches * Math.Max(1, dpiX)),
+            128,
+            1200),
+        Math.Clamp(
+            (int)Math.Round(NativeWristbandLengthInches * Math.Max(1, dpiY)),
+            1408,
+            13_200));
 
     private static Bitmap FitForNativeWristband(
         Bitmap source,
@@ -447,7 +456,10 @@ internal static class DirectWristbandPrinter
             var targetWidth = Math.Max(1, (int)Math.Round(oriented.Width * scale));
             var targetHeight = Math.Max(1, (int)Math.Round(oriented.Height * scale));
             var targetX = (width - targetWidth) / 2;
-            var targetY = (height - targetHeight) / 2;
+            // Wristband artwork begins near the feed edge. Center across the
+            // one-inch band, but do not move a shorter source image into the
+            // middle of the eleven-inch wristband.
+            var targetY = 0;
             graphics.DrawImage(
                 oriented,
                 new Rectangle(targetX, targetY, targetWidth, targetHeight),
@@ -500,7 +512,7 @@ internal static class DirectWristbandPrinter
     private static string BuildZplCommand(MonochromeRaster raster)
     {
         var hexadecimal = Convert.ToHexString(raster.Bits);
-        return "^XA\n^CI28\n^PW" + raster.Width +
+        return "^XA\n^CI28\n^LT0\n^LS0\n^PW" + raster.Width +
                "\n^LL" + raster.Height +
                "\n^LH0,0\n^FO0,0^GFA," + raster.Bits.Length + "," +
                raster.Bits.Length + "," + raster.BytesPerRow + "," +
