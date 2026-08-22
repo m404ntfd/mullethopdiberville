@@ -213,8 +213,10 @@ and row. Staff-closed, offline, and error states remain separate.
 Mullet Hop POS and the Systems Controller both ask staff to choose Staff Closure or
 Business Closure before they queue a Close command, ensuring the kiosk reports the
 intended red or blue state.
-Business Hours profiles include opening, Last Jump Time Sold, and closing times
-for each day, plus Show Closed Video at Last Jump time, blackout one minute after
+Business Hours profiles include opening, an automatically calculated Last 1-Hour Jump,
+and closing times for each day. The final full-hour jump always ends at closing, while a
+separate half-hour sale can still end at closing. Profiles also include Show Closed Video
+at the final one-hour jump time, blackout one minute after
 closing, and the existing pre-opening screensaver setting. A 12:00 AM closing is
 midnight at the end of that business day, not the beginning of it.
 
@@ -273,7 +275,8 @@ MANAGE HOURS AND KIOSK APPEARANCE
 ---------------------------------
 
 Select Hours & Wristbands in the Systems Controller Program section. The Business Hours tab
-sets each day's opening, Last Jump Time Sold, and closing time; whether to show
+sets each day's opening and closing time and displays the automatically calculated final
+one-hour jump start; whether to show
 the Business Closed video at the Last Jump cutoff; whether to black out one minute after
 closing; and the pre-opening screensaver time. The Business Closed video displays
 the next opening day and time from this synced schedule. Closing at 12:00 AM is
@@ -289,7 +292,7 @@ same authenticated connection used for other controller commands.
 
 The Wristband Colors tab opens the shared editor. Choose a day to assign a wristband
 color to each one-hour jump window; rows begin every 30 minutes from that day's opening
-through Last Jump Time Sold. Its first Color List tab always shows Add, Edit, Remove,
+through the last full-hour jump that ends at closing. Its first Color List tab always shows Add, Edit, Remove,
 Make Active, and Make Inactive. The Printer Colors tab records the color currently loaded in
 WB-1 through WB-7 so the POS print selector can label and color every printer button.
 These settings are stored by the master controller, replicated to the other Systems

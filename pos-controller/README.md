@@ -78,7 +78,8 @@ an assignment displays **COLOR NOT SET**.
 
 The Wristband Colors section in Settings uses the same editor as the Systems
 Controller. Choose a day to assign colors to one-hour jump windows beginning every
-30 minutes from opening through Last Jump Time Sold. The first **Color List** tab
+30 minutes from opening through the last full-hour jump that ends at closing. A separate
+half-hour sale can still end at closing. The first **Color List** tab
 always shows Add Color, Edit Color, Remove Color, Make Active, and Make Inactive.
 The **Printer Colors** tab records the color
 currently loaded in WB-1 through WB-7. The master Systems Controller stores these
@@ -127,7 +128,9 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.11 flattens PDF
+restarts without changing the user's normal Firefox profile. Version 1.7.12 transfers
+each rendered wristband through Windows GDI as an opaque 24-bit device raster instead of
+using a printer-driver image record that may advance blank media. Version 1.7.11 flattens PDF
 pages into opaque printer-safe rasters, fits them to the WB printer driver's actual
 printable surface without applying an unsafe hard-margin offset, and stops before
 submission if Windows renders a page with no visible content. Version 1.7.10 reads the

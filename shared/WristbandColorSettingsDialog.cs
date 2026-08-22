@@ -330,7 +330,7 @@ internal sealed class WristbandColorSettingsDialog : Form
         {
             Dock = DockStyle.Fill,
             Text = "Each row is a one-hour jump window. New windows begin every 30 minutes. " +
-                   "The first row uses that day's opening time and the final row uses Last Jump Time Sold from Business Hours.\n\n" +
+                   "The first row uses that day's opening time and the final row is the last full-hour jump that ends at closing. A separate half-hour sale can still end at closing.\n\n" +
                    "Use the Color List tab to add or remove colors and to mark a color active or inactive.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f, FontStyle.Regular)

@@ -378,7 +378,11 @@ internal static class BusinessHoursSmokeTest
                BusinessHoursCalculator.Evaluate(
                    settings, businessDate.AddDays(1).AddHours(9).AddMinutes(30)).Mode ==
                BusinessHoursMode.PreOpening &&
-               monday.ClosingOn(businessDate) == businessDate.AddDays(1);
+               monday.ClosingOn(businessDate) == businessDate.AddDays(1) &&
+               KioskBusinessDayHours.CalculateLastJumpTimeSold(TimeSpan.FromHours(22)) ==
+                   TimeSpan.FromHours(21) &&
+               KioskBusinessDayHours.CalculateLastJumpTimeSold(TimeSpan.Zero) ==
+                   TimeSpan.FromHours(23);
     }
 }
 
@@ -712,6 +716,9 @@ internal sealed partial class KioskForm : Form
                 StringComparison.Ordinal).Replace(
                 "__MULLET_HOP_ASSISTANCE_ACKNOWLEDGED__",
                 _settings.AssistanceAcknowledged ? "true" : "false",
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_ASSISTANCE_FLARE_INTERVAL_MS__",
+                (Math.Clamp(_settings.AssistanceFlareIntervalSeconds, 10, 300) * 1000).ToString(),
                 StringComparison.Ordinal).Replace(
                 "__MULLET_HOP_ASSISTANCE_SESSION__",
                 _assistanceBrowserSession,
@@ -2653,6 +2660,7 @@ internal sealed partial class KioskForm : Form
                             PreviewBusinessClosedOverlayAsync);
                         var settingsResult = settingsDialog.ShowDialog(this);
                         await ApplyKioskThemeIfChangedAsync(force: true);
+                        await InstallWaiverPageScriptAsync();
                         if (settingsResult != DialogResult.OK)
                         {
                             await ResetForNextGuestAsync(
@@ -2842,6 +2850,25 @@ internal sealed partial class KioskForm : Form
           const assistanceSession = '__MULLET_HOP_ASSISTANCE_SESSION__';
           let assistanceRequested = __MULLET_HOP_ASSISTANCE_REQUESTED__;
           let assistanceAcknowledged = __MULLET_HOP_ASSISTANCE_ACKNOWLEDGED__;
+          const assistanceFlareIntervalMs = __MULLET_HOP_ASSISTANCE_FLARE_INTERVAL_MS__;
+          let assistanceFlareTimer = 0;
+
+          const playAssistanceFlare = () => {
+            if (document.hidden) return;
+            const card = document.getElementById('mullet-hop-assistance-card');
+            if (!card) return;
+            card.classList.remove('has-lens-flare');
+            void card.offsetWidth;
+            card.classList.add('has-lens-flare');
+            window.setTimeout(() => card.classList.remove('has-lens-flare'), 3000);
+          };
+          const startAssistanceFlare = () => {
+            if (assistanceFlareTimer) return;
+            window.setTimeout(playAssistanceFlare, 1500);
+            assistanceFlareTimer = window.setInterval(
+              playAssistanceFlare,
+              assistanceFlareIntervalMs);
+          };
 
           try {
             const savedAssistance = JSON.parse(
@@ -2909,8 +2936,10 @@ internal sealed partial class KioskForm : Form
                   assistanceRequested ? 'assistance-clear' : 'assistance-request');
               });
             }
-            tools.appendChild(card);
+            if (card.parentElement !== tools || card !== tools.lastElementChild)
+              tools.appendChild(card);
             updateAssistanceCard();
+            startAssistanceFlare();
           };
 
           let lastActivityMessage = 0;
@@ -3592,10 +3621,45 @@ internal sealed partial class KioskForm : Form
               #mullet-hop-switch-button { background: #69d2ec !important; }
               #mullet-hop-switch-button:hover { background: #8bdef1 !important; }
               #mullet-hop-assistance-card {
+                position: relative;
+                isolation: isolate;
                 overflow: hidden;
+                --mullet-hop-assistance-flare-strength: 1;
                 background: linear-gradient(145deg, #fffef2, #fff4b8) !important;
                 border: 5px solid #e8b000 !important;
                 box-shadow: 0 14px 38px rgba(16,24,32,.25), 0 0 0 5px rgba(255,213,38,.24) !important;
+              }
+              #mullet-hop-assistance-card > * {
+                position: relative;
+                z-index: 1;
+              }
+              #mullet-hop-assistance-card::before {
+                content: '';
+                position: absolute;
+                z-index: 0;
+                top: -55%;
+                bottom: -55%;
+                left: -130%;
+                width: 82%;
+                pointer-events: none;
+                opacity: 0;
+                filter: opacity(var(--mullet-hop-assistance-flare-strength));
+                transform: skewX(-13deg);
+                background:
+                  radial-gradient(circle at 50% 50%,
+                    rgba(255,247,177,.48) 0 6%,
+                    rgba(255,222,74,.25) 15%,
+                    rgba(255,205,26,.10) 28%,
+                    transparent 48%),
+                  linear-gradient(105deg,
+                    transparent 36%,
+                    rgba(255,232,92,0) 42%,
+                    rgba(255,232,92,.30) 50%,
+                    rgba(255,232,92,0) 58%,
+                    transparent 64%);
+              }
+              #mullet-hop-assistance-card.has-lens-flare::before {
+                animation: mullet-hop-assistance-lens-flare 2800ms ease-in-out 1;
               }
               #mullet-hop-assistance-card h2 { color: #755000 !important; }
               #mullet-hop-assistance-button { background: #ffd526 !important; }
@@ -3623,6 +3687,13 @@ internal sealed partial class KioskForm : Form
               @keyframes mullet-hop-assistance-flash {
                 from { opacity: .38; filter: saturate(.65); transform: scale(.88); }
                 to { opacity: 1; filter: saturate(1.2); transform: scale(1.08); }
+              }
+              @keyframes mullet-hop-assistance-lens-flare {
+                0% { left: -130%; opacity: 0; }
+                18% { opacity: .14; }
+                54% { left: 9%; opacity: .72; }
+                88% { left: 148%; opacity: 0; }
+                100% { left: 148%; opacity: 0; }
               }
               .mullet-hop-switch-target-choice {
                 outline: 5px solid #f58220 !important;
@@ -3755,6 +3826,7 @@ internal sealed partial class KioskForm : Form
               }
               body.mullet-hop-waiver-themed.mullet-hop-dark-theme #mullet-hop-assistance-card {
                 color: #f5f8fa !important;
+                --mullet-hop-assistance-flare-strength: .72;
                 background: linear-gradient(145deg, #423b17, #2f2d20) !important;
                 border-color: #ffdc38 !important;
               }
@@ -4151,15 +4223,13 @@ internal sealed class KioskBusinessDayHours
     public void Normalize()
     {
         OpenTime = NormalizeTime(OpenTime);
-        LastJumpTimeSold = NormalizeTime(LastJumpTimeSold);
         CloseTime = NormalizeTime(CloseTime);
-        if (CloseTime <= OpenTime && CloseTime != TimeSpan.Zero)
+        if (!HasValidTimes())
         {
             OpenTime = TimeSpan.FromHours(10);
             CloseTime = TimeSpan.FromHours(22);
         }
-        if (!HasValidLastJumpTime())
-            LastJumpTimeSold = CloseTime;
+        LastJumpTimeSold = CalculateLastJumpTimeSold(CloseTime);
     }
 
     public DateTime OpeningOn(DateTime businessDate) => businessDate.Date + OpenTime;
@@ -4178,9 +4248,14 @@ internal sealed class KioskBusinessDayHours
         return lastJump;
     }
 
-    public bool HasValidTimes() =>
-        IsTimeOfDay(OpenTime) && IsTimeOfDay(CloseTime) &&
-        (CloseTime == TimeSpan.Zero || CloseTime > OpenTime);
+    public bool HasValidTimes()
+    {
+        if (!IsTimeOfDay(OpenTime) || !IsTimeOfDay(CloseTime) ||
+            (CloseTime != TimeSpan.Zero && CloseTime <= OpenTime))
+            return false;
+        var date = new DateTime(2000, 1, 3);
+        return ClosingOn(date) - OpeningOn(date) >= TimeSpan.FromHours(1);
+    }
 
     public bool HasValidLastJumpTime()
     {
@@ -4190,8 +4265,11 @@ internal sealed class KioskBusinessDayHours
         var opening = OpeningOn(date);
         var closing = ClosingOn(date);
         var lastJump = LastJumpOn(date);
-        return lastJump > opening && lastJump <= closing;
+        return lastJump == closing - TimeSpan.FromHours(1) && lastJump >= opening;
     }
+
+    public static TimeSpan CalculateLastJumpTimeSold(TimeSpan closeTime) =>
+        NormalizeTime(closeTime - TimeSpan.FromHours(1));
 
     private static bool IsTimeOfDay(TimeSpan value) =>
         value >= TimeSpan.Zero && value < TimeSpan.FromDays(1);
@@ -4215,6 +4293,7 @@ internal sealed class KioskSettings
     public int IdleTimeoutMinutes { get; set; } = 3;
     public int ScreensaverTimeoutMinutes { get; set; } = 3;
     public int CompletionResetSeconds { get; set; } = 15;
+    public int AssistanceFlareIntervalSeconds { get; set; } = 45;
     public bool StationClosed { get; set; }
     public bool ManualBusinessBlackout { get; set; }
     public bool BusinessHoursEnabled { get; set; }
@@ -4398,6 +4477,7 @@ internal sealed class KioskSettings
         IdleTimeoutMinutes = Math.Clamp(IdleTimeoutMinutes, 1, 60);
         ScreensaverTimeoutMinutes = Math.Clamp(ScreensaverTimeoutMinutes, 1, 240);
         CompletionResetSeconds = Math.Clamp(CompletionResetSeconds, 12, 60);
+        AssistanceFlareIntervalSeconds = Math.Clamp(AssistanceFlareIntervalSeconds, 10, 300);
         BusinessClosedMessageMinutes = Math.Clamp(BusinessClosedMessageMinutes, 1, 240);
         PreOpeningScreensaverMinutes = Math.Clamp(PreOpeningScreensaverMinutes, 0, 240);
     }
@@ -4542,6 +4622,8 @@ internal sealed class StaffSettingsDialog : Form
     private readonly DateTimePicker _timePicker = new();
     private readonly NumericUpDown _screensaverMinutes = new();
     private readonly Button _screensaverSaveButton = new();
+    private readonly NumericUpDown _assistanceFlareSeconds = new();
+    private readonly Button _assistanceFlareSaveButton = new();
     private readonly CheckBox _businessHoursEnabled = new();
     private readonly CheckBox _showClosedVideo = new();
     private readonly CheckBox _blackoutAtClosingTime = new();
@@ -5032,7 +5114,59 @@ internal sealed class StaffSettingsDialog : Form
         screensaverGroup.Controls.AddRange([
             screensaverNote, screensaverLabel, _screensaverMinutes,
             screensaverMinutesLabel, _screensaverSaveButton]);
-        stationTab.Controls.AddRange([closedPageGroup, screensaverGroup]);
+        var assistanceFlareGroup = new GroupBox
+        {
+            Text = "Assistance Box Highlight",
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            ForeColor = Color.FromArgb(190, 133, 0),
+            Bounds = new Rectangle(20, 445, 580, 100)
+        };
+        var assistanceFlareNote = new Label
+        {
+            AutoSize = false,
+            Text = "A soft yellow lens flare periodically sweeps across the Need Assistance box.",
+            Font = new Font("Segoe UI", 9.2f),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(18, 25, 540, 25)
+        };
+        var assistanceFlareLabel = new Label
+        {
+            AutoSize = false,
+            Text = "Run every:",
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(18, 57, 88, 30),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        _assistanceFlareSeconds.Minimum = 10;
+        _assistanceFlareSeconds.Maximum = 300;
+        _assistanceFlareSeconds.Value = Math.Clamp(
+            _settings.AssistanceFlareIntervalSeconds, 10, 300);
+        _assistanceFlareSeconds.TextAlign = HorizontalAlignment.Center;
+        _assistanceFlareSeconds.ForeColor = Color.FromArgb(16, 24, 32);
+        _assistanceFlareSeconds.Bounds = new Rectangle(108, 56, 75, 32);
+        _assistanceFlareSeconds.ValueChanged += (_, _) =>
+            _assistanceFlareSaveButton.Text = "Save Interval";
+        var assistanceFlareSuffix = new Label
+        {
+            AutoSize = false,
+            Text = "seconds",
+            Font = new Font("Segoe UI", 9.5f),
+            ForeColor = Color.FromArgb(16, 24, 32),
+            Bounds = new Rectangle(193, 57, 75, 30),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        _assistanceFlareSaveButton.Text = "Save Interval";
+        _assistanceFlareSaveButton.Bounds = new Rectangle(395, 53, 145, 36);
+        _assistanceFlareSaveButton.BackColor = Color.FromArgb(255, 213, 38);
+        _assistanceFlareSaveButton.ForeColor = Color.FromArgb(16, 24, 32);
+        _assistanceFlareSaveButton.FlatStyle = FlatStyle.Flat;
+        _assistanceFlareSaveButton.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        _assistanceFlareSaveButton.Click += (_, _) => SaveAssistanceFlareInterval();
+        assistanceFlareGroup.Controls.AddRange([
+            assistanceFlareNote, assistanceFlareLabel, _assistanceFlareSeconds,
+            assistanceFlareSuffix, _assistanceFlareSaveButton]);
+        stationTab.Controls.AddRange([closedPageGroup, screensaverGroup, assistanceFlareGroup]);
 
         _businessHoursEnabled.Text = "Use automatic business hours";
         _businessHoursEnabled.Checked = _settings.BusinessHoursEnabled;
@@ -5081,7 +5215,7 @@ internal sealed class StaffSettingsDialog : Form
             },
             new Label
             {
-                Text = "Last Jump Time Sold", AutoSize = false, Bounds = new Rectangle(250, 29, 145, 22),
+                Text = "Last 1-Hour Jump", AutoSize = false, Bounds = new Rectangle(250, 29, 145, 22),
                 ForeColor = Color.FromArgb(16, 24, 32), Font = new Font("Segoe UI", 9, FontStyle.Bold),
                 TextAlign = ContentAlignment.TopCenter
             },
@@ -5111,7 +5245,9 @@ internal sealed class StaffSettingsDialog : Form
                 Bounds = new Rectangle(88, rowY + 3, 24, 24)
             };
             var opens = CreateBusinessTimePicker(schedule.OpenTime, 120, rowY, 120);
-            var lastJump = CreateBusinessTimePicker(schedule.LastJumpTimeSold, 250, rowY, 145);
+            var lastJump = CreateBusinessTimePicker(
+                KioskBusinessDayHours.CalculateLastJumpTimeSold(schedule.CloseTime),
+                250, rowY, 145);
             var closes = CreateBusinessTimePicker(schedule.CloseTime, 405, rowY, 140);
             _businessDayControls[day] = (isOpen, opens, lastJump, closes);
             isOpen.CheckedChanged += (_, _) =>
@@ -5120,8 +5256,12 @@ internal sealed class StaffSettingsDialog : Form
                 _businessHoursSaveButton.Text = "Save Business Hours";
             };
             opens.ValueChanged += (_, _) => _businessHoursSaveButton.Text = "Save Business Hours";
-            lastJump.ValueChanged += (_, _) => _businessHoursSaveButton.Text = "Save Business Hours";
-            closes.ValueChanged += (_, _) => _businessHoursSaveButton.Text = "Save Business Hours";
+            closes.ValueChanged += (_, _) =>
+            {
+                lastJump.Value = DateTime.Today +
+                    KioskBusinessDayHours.CalculateLastJumpTimeSold(closes.Value.TimeOfDay);
+                _businessHoursSaveButton.Text = "Save Business Hours";
+            };
             weeklyHoursGroup.Controls.AddRange([dayLabel, isOpen, opens, lastJump, closes]);
         }
 
@@ -5132,7 +5272,7 @@ internal sealed class StaffSettingsDialog : Form
             ForeColor = Color.FromArgb(117, 68, 154),
             Bounds = new Rectangle(15, 353, 590, 118)
         };
-        _showClosedVideo.Text = "Show Closed Video at Last Jump time";
+        _showClosedVideo.Text = "Show Closed Video at final one-hour jump time";
         _showClosedVideo.Checked = _settings.ShowClosedVideo;
         _showClosedVideo.AutoSize = true;
         _showClosedVideo.ForeColor = Color.FromArgb(16, 24, 32);
@@ -5419,7 +5559,7 @@ internal sealed class StaffSettingsDialog : Form
         {
             controls.IsOpen.Enabled = _businessHoursEnabled.Checked;
             controls.Opens.Enabled = _businessHoursEnabled.Checked && controls.IsOpen.Checked;
-            controls.LastJump.Enabled = _businessHoursEnabled.Checked && controls.IsOpen.Checked;
+            controls.LastJump.Enabled = false;
             controls.Closes.Enabled = _businessHoursEnabled.Checked && controls.IsOpen.Checked;
         }
 
@@ -5450,34 +5590,24 @@ internal sealed class StaffSettingsDialog : Form
         {
             var controls = _businessDayControls[day];
             var openTime = controls.Opens.Value.TimeOfDay;
-            var lastJumpTime = controls.LastJump.Value.TimeOfDay;
             var closeTime = controls.Closes.Value.TimeOfDay;
             var schedule = new KioskBusinessDayHours
             {
                 Day = day,
                 IsOpen = controls.IsOpen.Checked,
                 OpenTime = openTime,
-                LastJumpTimeSold = lastJumpTime,
+                LastJumpTimeSold = KioskBusinessDayHours.CalculateLastJumpTimeSold(closeTime),
                 CloseTime = closeTime
             };
             if (schedule.IsOpen && !schedule.HasValidTimes())
             {
                 MessageBox.Show(this,
-                    day + " closing time must be later than its opening time. " +
+                    day + " closing time must be at least one hour later than its opening time. " +
                     "A 12:00 AM closing is treated as midnight at the end of that business day.",
                     "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 controls.Closes.Focus();
                 return;
             }
-            if (schedule.IsOpen && !schedule.HasValidLastJumpTime())
-            {
-                MessageBox.Show(this,
-                    day + " Last Jump Time Sold must be later than opening and no later than closing.",
-                    "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                controls.LastJump.Focus();
-                return;
-            }
-
             schedules.Add(schedule);
         }
 
@@ -5593,6 +5723,30 @@ internal sealed class StaffSettingsDialog : Form
                 ex.GetType().Name + " - " + ex.Message);
             MessageBox.Show(this,
                 "The screensaver time could not be saved.\n\n" + ex.Message,
+                "Staff Settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void SaveAssistanceFlareInterval()
+    {
+        var previousValue = _settings.AssistanceFlareIntervalSeconds;
+        try
+        {
+            _settings.AssistanceFlareIntervalSeconds = (int)_assistanceFlareSeconds.Value;
+            _settings.Save();
+            _assistanceFlareSaveButton.Text = "Saved";
+            KioskLog.Write("Assistance-box lens flare interval changed to " +
+                _settings.AssistanceFlareIntervalSeconds + " second(s).");
+        }
+        catch (Exception ex)
+        {
+            _settings.AssistanceFlareIntervalSeconds = previousValue;
+            _assistanceFlareSeconds.Value = Math.Clamp(previousValue, 10, 300);
+            _assistanceFlareSaveButton.Text = "Save Interval";
+            KioskLog.Write("Assistance flare setting error: " +
+                ex.GetType().Name + " - " + ex.Message);
+            MessageBox.Show(this,
+                "The assistance highlight interval could not be saved.\n\n" + ex.Message,
                 "Staff Settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }

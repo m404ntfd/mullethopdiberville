@@ -45,6 +45,10 @@ internal static class DirectWristbandPrinter
     private const int ChildIdSelf = 0;
     private const int SelectTakeFocus = 0x1;
     private const int SelectTakeSelection = 0x2;
+    private const int StretchHalftone = 4;
+    private const uint DibRgbColors = 0;
+    private const uint SourceCopyRasterOperation = 0x00CC0020;
+    private const int GdiError = -1;
     private static readonly TimeSpan ReturnLinkPollInterval = TimeSpan.FromMilliseconds(300);
     private static readonly Guid AccessibleInterfaceId =
         new("618736E0-3C3D-11CF-810C-00AA00389B71");
@@ -131,6 +135,25 @@ internal static class DirectWristbandPrinter
         }
         return MeasureVisibleInkPercentage(blank) == 0 &&
                MeasureVisibleInkPercentage(marked) > 0;
+    }
+
+    internal static bool PrinterRasterPackingPassesSmokeTest()
+    {
+        using var marked = new Bitmap(4, 3, PixelFormat.Format24bppRgb);
+        using (var graphics = Graphics.FromImage(marked))
+        {
+            graphics.Clear(Color.White);
+            graphics.FillRectangle(Brushes.Black, 0, 0, 1, 1);
+        }
+        var raster = CreatePrinterRaster(marked);
+        return raster.Width == 4 &&
+               raster.Height == 3 &&
+               raster.Stride == 12 &&
+               raster.Bits.Length == 36 &&
+               raster.Bits[0] == 0 &&
+               raster.Bits[1] == 0 &&
+               raster.Bits[2] == 0 &&
+               raster.Bits[3] == 255;
     }
 
     private static PrintDestinationSelectionResult RenderAndPrintOnStaThread(
@@ -302,6 +325,33 @@ internal static class DirectWristbandPrinter
         }
     }
 
+    private static PrinterRaster CreatePrinterRaster(Bitmap image)
+    {
+        var width = image.Width;
+        var height = image.Height;
+        var sourceLength = checked(width * 3);
+        var destinationStride = checked((sourceLength + 3) & ~3);
+        var bits = new byte[checked(destinationStride * height)];
+        var bounds = new Rectangle(0, 0, width, height);
+        var data = image.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+        try
+        {
+            for (var y = 0; y < height; y++)
+            {
+                Marshal.Copy(
+                    IntPtr.Add(data.Scan0, y * data.Stride),
+                    bits,
+                    y * destinationStride,
+                    sourceLength);
+            }
+        }
+        finally
+        {
+            image.UnlockBits(data);
+        }
+        return new PrinterRaster(width, height, destinationStride, bits);
+    }
+
     private static void PrintRenderedPages(
         IReadOnlyList<Bitmap> pages,
         string printerName,
@@ -365,19 +415,145 @@ internal static class DirectWristbandPrinter
                 $"printable={printableBounds.X:0.##},{printableBounds.Y:0.##}," +
                 $"{printableBounds.Width:0.##}x{printableBounds.Height:0.##}, " +
                 $"target={targetX:0.##},{targetY:0.##},{targetWidth:0.##}x{targetHeight:0.##}.");
-            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            graphics.DrawImage(
+            TransferRasterToPrinter(
+                graphics,
                 image,
                 new RectangleF(targetX, targetY, targetWidth, targetHeight),
-                new RectangleF(0, 0, image.Width, image.Height),
-                GraphicsUnit.Pixel);
+                printerName,
+                pageIndex + 1);
             pageIndex++;
             eventArgs.HasMorePages = pageIndex < pages.Count;
         };
         cancellationToken.ThrowIfCancellationRequested();
         document.Print();
     }
+
+    private static void TransferRasterToPrinter(
+        Graphics graphics,
+        Bitmap image,
+        RectangleF pageTarget,
+        string printerName,
+        int pageNumber)
+    {
+        var targetPoints = new[]
+        {
+            new PointF(pageTarget.Left, pageTarget.Top),
+            new PointF(pageTarget.Right, pageTarget.Bottom)
+        };
+        graphics.TransformPoints(CoordinateSpace.Device, CoordinateSpace.Page, targetPoints);
+        var destination = Rectangle.FromLTRB(
+            (int)Math.Round(Math.Min(targetPoints[0].X, targetPoints[1].X)),
+            (int)Math.Round(Math.Min(targetPoints[0].Y, targetPoints[1].Y)),
+            (int)Math.Round(Math.Max(targetPoints[0].X, targetPoints[1].X)),
+            (int)Math.Round(Math.Max(targetPoints[0].Y, targetPoints[1].Y)));
+        if (destination.Width <= 0 || destination.Height <= 0)
+        {
+            throw new InvalidOperationException(
+                $"The {printerName} driver returned an empty device target for wristband page {pageNumber}.");
+        }
+
+        var raster = CreatePrinterRaster(image);
+        var bitmapInfo = new BitmapInfo
+        {
+            Header = new BitmapInfoHeader
+            {
+                Size = checked((uint)Marshal.SizeOf<BitmapInfoHeader>()),
+                Width = raster.Width,
+                // A negative height declares the byte array top-down so the
+                // printer receives the same row order that Windows rendered.
+                Height = -raster.Height,
+                Planes = 1,
+                BitCount = 24,
+                Compression = 0,
+                SizeImage = checked((uint)raster.Bits.Length),
+                XPelsPerMeter = (int)Math.Round(image.HorizontalResolution / 0.0254d),
+                YPelsPerMeter = (int)Math.Round(image.VerticalResolution / 0.0254d)
+            }
+        };
+
+        var hdc = graphics.GetHdc();
+        try
+        {
+            SetStretchBltMode(hdc, StretchHalftone);
+            SetBrushOrgEx(hdc, 0, 0, IntPtr.Zero);
+            var copiedLines = StretchDIBits(
+                hdc,
+                destination.X,
+                destination.Y,
+                destination.Width,
+                destination.Height,
+                0,
+                0,
+                raster.Width,
+                raster.Height,
+                raster.Bits,
+                ref bitmapInfo,
+                DibRgbColors,
+                SourceCopyRasterOperation);
+            if (copiedLines == 0 || copiedLines == GdiError)
+            {
+                throw new InvalidOperationException(
+                    $"The {printerName} driver rejected the device raster for wristband page {pageNumber}. " +
+                    $"Windows error: {Marshal.GetLastWin32Error()}.");
+            }
+            PosLog.Write(
+                $"Transferred wristband page {pageNumber} to {printerName} as a 24-bit device raster: " +
+                $"{raster.Width}x{raster.Height} source pixels to " +
+                $"{destination.Width}x{destination.Height} printer pixels; " +
+                $"GDI copied {copiedLines} line(s).");
+        }
+        finally
+        {
+            graphics.ReleaseHdc(hdc);
+        }
+    }
+
+    private sealed record PrinterRaster(int Width, int Height, int Stride, byte[] Bits);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfoHeader
+    {
+        public uint Size;
+        public int Width;
+        public int Height;
+        public ushort Planes;
+        public ushort BitCount;
+        public uint Compression;
+        public uint SizeImage;
+        public int XPelsPerMeter;
+        public int YPelsPerMeter;
+        public uint ColorsUsed;
+        public uint ColorsImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfo
+    {
+        public BitmapInfoHeader Header;
+        public uint FirstColor;
+    }
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern int SetStretchBltMode(IntPtr hdc, int mode);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool SetBrushOrgEx(IntPtr hdc, int x, int y, IntPtr previousPoint);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern int StretchDIBits(
+        IntPtr hdc,
+        int destinationX,
+        int destinationY,
+        int destinationWidth,
+        int destinationHeight,
+        int sourceX,
+        int sourceY,
+        int sourceWidth,
+        int sourceHeight,
+        byte[] bits,
+        ref BitmapInfo bitmapInfo,
+        uint colorUse,
+        uint rasterOperation);
 
     private static bool ActivateWristbandReturnLink(
         IntPtr firefoxWindow,

@@ -101,9 +101,16 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.12, Systems Controller version 1.15.5, and Mullet Hop POS
-version 1.7.11 are the matching package releases. Kiosk 2.11.12 retains the 2.11.11
-schedule behavior that treats a 12:00 AM
+Waiver Kiosk version 2.11.13, Systems Controller version 1.15.6, and Mullet Hop POS
+version 1.7.12 are the matching package releases. Kiosk 2.11.13 adds a subtle yellow
+lens-flare sweep inside the Need Assistance box every 45 seconds by default. Staff can
+change the interval from 10 to 300 seconds on the Waiver Station settings page. Systems
+Controller 1.15.6 and Kiosk 2.11.13 automatically set Last 1-Hour Jump to one hour before
+closing, preventing a full-hour wristband window from extending beyond closing while a
+separate final half-hour sale can still end at closing. POS 1.7.12 sends each wristband
+to the selected Windows printer as an opaque 24-bit device raster to address blank media
+output across WB printer drivers. Version 2.11.12 retains the 2.11.11 schedule behavior
+that treats a 12:00 AM
 closing as next-day midnight, plays the closure video at Last Jump Time Sold,
 blacks out one minute after closing, supports a separate Dark-mode switch time
 for every day, and defaults new installations to Light. Systems Controller 1.15.5
@@ -293,7 +300,9 @@ Selecting a machine already assigned elsewhere moves or swaps it automatically.
 The Application Startup checkbox can ask the Systems Controller to launch POS after
 its service is ready at Windows sign-in. This checkbox is off by default.
 
-Mullet Hop POS 1.7.11 flattens wristband pages into opaque printer-safe rasters, draws
+Mullet Hop POS 1.7.12 sends each rendered wristband through Windows GDI as an opaque
+24-bit device raster, bypassing printer-driver image records that can accept a job but
+advance blank media. Version 1.7.11 flattens wristband pages into opaque printer-safe rasters, draws
 inside the WB printer driver's actual printable surface, and stops before submission if
 Windows renders a page with no visible content. Version 1.7.10 retrieves the current authenticated wristband PDF from its dedicated
 Firefox session, renders it with Windows, and submits it directly to the selected WB-1

@@ -39,9 +39,14 @@ internal sealed class ControllerBusinessDayHours
         return lastJump;
     }
 
-    public bool HasValidTimes() =>
-        IsTimeOfDay(OpenTime) && IsTimeOfDay(CloseTime) &&
-        (CloseTime == TimeSpan.Zero || CloseTime > OpenTime);
+    public bool HasValidTimes()
+    {
+        if (!IsTimeOfDay(OpenTime) || !IsTimeOfDay(CloseTime) ||
+            (CloseTime != TimeSpan.Zero && CloseTime <= OpenTime))
+            return false;
+        var date = new DateTime(2000, 1, 3);
+        return ClosingOn(date) - OpeningOn(date) >= TimeSpan.FromHours(1);
+    }
 
     public bool HasValidLastJumpTime()
     {
@@ -51,7 +56,14 @@ internal sealed class ControllerBusinessDayHours
         var opening = OpeningOn(date);
         var closing = ClosingOn(date);
         var lastJump = LastJumpOn(date);
-        return lastJump > opening && lastJump <= closing;
+        return lastJump == closing - TimeSpan.FromHours(1) && lastJump >= opening;
+    }
+
+    public static TimeSpan CalculateLastJumpTimeSold(TimeSpan closeTime)
+    {
+        var value = (closeTime - TimeSpan.FromHours(1)).Ticks % TimeSpan.TicksPerDay;
+        if (value < 0) value += TimeSpan.TicksPerDay;
+        return TimeSpan.FromTicks(value);
     }
 
     private static bool IsTimeOfDay(TimeSpan value) =>
@@ -117,15 +129,13 @@ internal sealed class ControllerBusinessHours
         foreach (var day in Days)
         {
             day.OpenTime = NormalizeTime(day.OpenTime);
-            day.LastJumpTimeSold = NormalizeTime(day.LastJumpTimeSold);
             day.CloseTime = NormalizeTime(day.CloseTime);
             if (day.IsOpen && !day.HasValidTimes())
             {
                 day.OpenTime = TimeSpan.FromHours(10);
                 day.CloseTime = TimeSpan.FromHours(22);
             }
-            if (!day.HasValidLastJumpTime())
-                day.LastJumpTimeSold = day.CloseTime;
+            day.LastJumpTimeSold = ControllerBusinessDayHours.CalculateLastJumpTimeSold(day.CloseTime);
         }
         ClosedMessageMinutes = Math.Clamp(ClosedMessageMinutes, 1, 240);
         PreOpeningScreensaverMinutes = Math.Clamp(PreOpeningScreensaverMinutes, 0, 240);
@@ -248,7 +258,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
         weekly.Controls.AddRange([
             LabelAt("Day", 10, 28, 72, true), LabelAt("Open", 77, 28, 44, true),
             LabelAt("Opening", 120, 28, 120, true),
-            LabelAt("Last Jump Time Sold", 250, 28, 145, true),
+            LabelAt("Last 1-Hour Jump", 250, 28, 145, true),
             LabelAt("Closing", 405, 28, 140, true)
         ]);
         for (var index = 0; index < ControllerBusinessHours.OrderedDays.Length; index++)
@@ -258,10 +268,15 @@ internal sealed class ControllerBusinessHoursDialog : Form
             var y = 55 + index * 30;
             var open = new CheckBox { Checked = value.IsOpen, Bounds = new Rectangle(88, y + 2, 25, 25) };
             var starts = TimePicker(value.OpenTime, 120, y, 120);
-            var lastJump = TimePicker(value.LastJumpTimeSold, 250, y, 145);
+            var lastJump = TimePicker(
+                ControllerBusinessDayHours.CalculateLastJumpTimeSold(value.CloseTime),
+                250, y, 145);
             var ends = TimePicker(value.CloseTime, 405, y, 140);
             _days[day] = (open, starts, lastJump, ends);
             open.CheckedChanged += (_, _) => UpdateEnabledState();
+            ends.ValueChanged += (_, _) =>
+                lastJump.Value = DateTime.Today +
+                    ControllerBusinessDayHours.CalculateLastJumpTimeSold(ends.Value.TimeOfDay);
             weekly.Controls.AddRange([
                 LabelAt(day.ToString(), 10, y + 2, 72), open, starts, lastJump, ends]);
         }
@@ -271,7 +286,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
             Text = "Closed Display and Pre-Opening", Bounds = new Rectangle(10, 336, 590, 124),
             Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(117, 68, 154)
         };
-        _showClosedVideo.Text = "Show Closed Video at Last Jump time";
+        _showClosedVideo.Text = "Show Closed Video at final one-hour jump time";
         _showClosedVideo.Checked = profile.ShowClosedVideo;
         _showClosedVideo.AutoSize = true;
         _showClosedVideo.Location = new Point(18, 32);
@@ -368,7 +383,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
             ForeColor = Color.FromArgb(117, 68, 154)
         };
         var wristbandNote = LabelAt(
-            "Set the wristband color for every one-hour jump window. New windows begin every 30 minutes, from opening through Last Jump Time Sold. You can also assign the color currently loaded in WB-1 through WB-7.",
+            "Set the wristband color for every one-hour jump window. New windows begin every 30 minutes, from opening through the final full-hour jump that ends at closing. A separate half-hour sale can still end at closing. You can also assign the color currently loaded in WB-1 through WB-7.",
             20, 35, 548);
         wristbandNote.Height = 86;
         var editWristbands = ButtonAt(
@@ -496,24 +511,17 @@ internal sealed class ControllerBusinessHoursDialog : Form
                 Day = day,
                 IsOpen = controls.Open.Checked,
                 OpenTime = controls.Starts.Value.TimeOfDay,
-                LastJumpTimeSold = controls.LastJump.Value.TimeOfDay,
+                LastJumpTimeSold = ControllerBusinessDayHours.CalculateLastJumpTimeSold(
+                    controls.Ends.Value.TimeOfDay),
                 CloseTime = controls.Ends.Value.TimeOfDay
             };
             if (schedule.IsOpen && !schedule.HasValidTimes())
             {
                 MessageBox.Show(this,
-                    day + " closing time must be later than its opening time. " +
+                    day + " closing time must be at least one hour later than its opening time. " +
                     "A 12:00 AM closing is treated as midnight at the end of that business day.",
                     "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 controls.Ends.Focus();
-                return null;
-            }
-            if (schedule.IsOpen && !schedule.HasValidLastJumpTime())
-            {
-                MessageBox.Show(this,
-                    day + " Last Jump Time Sold must be later than opening and no later than closing.",
-                    "Business Hours", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                controls.LastJump.Focus();
                 return null;
             }
             profile.Days.Add(schedule);
@@ -562,7 +570,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
         {
             controls.Open.Enabled = _enabled.Checked;
             controls.Starts.Enabled = _enabled.Checked && controls.Open.Checked;
-            controls.LastJump.Enabled = _enabled.Checked && controls.Open.Checked;
+            controls.LastJump.Enabled = false;
             controls.Ends.Enabled = _enabled.Checked && controls.Open.Checked;
         }
         _showClosedVideo.Enabled = _enabled.Checked;
