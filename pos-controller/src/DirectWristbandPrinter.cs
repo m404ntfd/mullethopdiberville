@@ -4,6 +4,7 @@ using System.Drawing.Printing;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Text;
 using Accessibility;
 using Windows.Data.Pdf;
 using Windows.Storage.Streams;
@@ -154,6 +155,24 @@ internal static class DirectWristbandPrinter
                raster.Bits[1] == 0 &&
                raster.Bits[2] == 0 &&
                raster.Bits[3] == 255;
+    }
+
+    internal static bool NativeZplPackingPassesSmokeTest()
+    {
+        using var marked = new Bitmap(8, 1, PixelFormat.Format24bppRgb);
+        using (var graphics = Graphics.FromImage(marked))
+        {
+            graphics.Clear(Color.White);
+            graphics.FillRectangle(Brushes.Black, 0, 0, 1, 1);
+        }
+        var raster = CreateMonochromeRaster(marked);
+        var command = BuildZplCommand(raster);
+        return raster.Width == 8 &&
+               raster.Height == 1 &&
+               raster.BytesPerRow == 1 &&
+               raster.Bits.Length == 1 &&
+               raster.Bits[0] == 0x80 &&
+               command.Contains("^GFA,1,1,1,80", StringComparison.Ordinal);
     }
 
     private static PrintDestinationSelectionResult RenderAndPrintOnStaThread(
@@ -352,11 +371,245 @@ internal static class DirectWristbandPrinter
         return new PrinterRaster(width, height, destinationStride, bits);
     }
 
+    private static void PrintRenderedPagesAsZpl(
+        IReadOnlyList<Bitmap> pages,
+        string printerName,
+        CancellationToken cancellationToken)
+    {
+        var printerSettings = new PrinterSettings { PrinterName = printerName };
+        var pageSettings = printerSettings.DefaultPageSettings;
+        var paper = pageSettings.PaperSize;
+        var dpiX = pageSettings.PrinterResolution.X > 0
+            ? pageSettings.PrinterResolution.X
+            : 203;
+        var dpiY = pageSettings.PrinterResolution.Y > 0
+            ? pageSettings.PrinterResolution.Y
+            : dpiX;
+        var mediaWidthHundredths = Math.Min(paper.Width, paper.Height);
+        var mediaLengthHundredths = Math.Max(paper.Width, paper.Height);
+        var mediaWidth = Math.Clamp(
+            (int)Math.Round(mediaWidthHundredths * dpiX / 100d),
+            64,
+            4096);
+        var mediaLength = Math.Clamp(
+            (int)Math.Round(mediaLengthHundredths * dpiY / 100d),
+            64,
+            30_000);
+
+        PosLog.Write(
+            $"Native ZPL media for {printerName}: driver paper={paper.PaperName} " +
+            $"{paper.Width}x{paper.Height} hundredths-inch, resolution={dpiX}x{dpiY} dpi, " +
+            $"raster={mediaWidth}x{mediaLength} dots.");
+
+        foreach (var page in pages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var fitted = FitForNativeWristband(page, mediaWidth, mediaLength, dpiX, dpiY);
+            var raster = CreateMonochromeRaster(fitted);
+            SendRawPrinterBytes(
+                printerName,
+                Encoding.ASCII.GetBytes(BuildZplCommand(raster)),
+                "Mullet Hop Wristbands");
+            PosLog.Write(
+                $"Submitted a native ZPL wristband raster to {printerName}: " +
+                $"{raster.Width}x{raster.Height} dots, {raster.Bits.Length} raster bytes.");
+        }
+    }
+
+    private static Bitmap FitForNativeWristband(
+        Bitmap source,
+        int width,
+        int height,
+        int dpiX,
+        int dpiY)
+    {
+        Bitmap? rotated = null;
+        var oriented = source;
+        if ((source.Width > source.Height) != (width > height))
+        {
+            rotated = (Bitmap)source.Clone();
+            rotated.RotateFlip(RotateFlipType.Rotate90FlipNone);
+            oriented = rotated;
+        }
+
+        try
+        {
+            var output = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+            output.SetResolution(dpiX, dpiY);
+            using var graphics = Graphics.FromImage(output);
+            graphics.Clear(Color.White);
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.CompositingQuality = CompositingQuality.HighQuality;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.SmoothingMode = SmoothingMode.HighQuality;
+            var scale = Math.Min(width / (double)oriented.Width, height / (double)oriented.Height);
+            var targetWidth = Math.Max(1, (int)Math.Round(oriented.Width * scale));
+            var targetHeight = Math.Max(1, (int)Math.Round(oriented.Height * scale));
+            var targetX = (width - targetWidth) / 2;
+            var targetY = (height - targetHeight) / 2;
+            graphics.DrawImage(
+                oriented,
+                new Rectangle(targetX, targetY, targetWidth, targetHeight),
+                0,
+                0,
+                oriented.Width,
+                oriented.Height,
+                GraphicsUnit.Pixel);
+            return output;
+        }
+        finally
+        {
+            rotated?.Dispose();
+        }
+    }
+
+    private static MonochromeRaster CreateMonochromeRaster(Bitmap image)
+    {
+        var bytesPerRow = checked((image.Width + 7) / 8);
+        var bits = new byte[checked(bytesPerRow * image.Height)];
+        var bounds = new Rectangle(0, 0, image.Width, image.Height);
+        var data = image.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+        try
+        {
+            var sourceStride = Math.Abs(data.Stride);
+            var row = new byte[sourceStride];
+            for (var y = 0; y < image.Height; y++)
+            {
+                Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), row, 0, sourceStride);
+                var destinationOffset = y * bytesPerRow;
+                for (var x = 0; x < image.Width; x++)
+                {
+                    var sourceOffset = x * 3;
+                    var luminance =
+                        row[sourceOffset] * 0.114d +
+                        row[sourceOffset + 1] * 0.587d +
+                        row[sourceOffset + 2] * 0.299d;
+                    if (luminance < 245d)
+                        bits[destinationOffset + x / 8] |= (byte)(0x80 >> (x % 8));
+                }
+            }
+        }
+        finally
+        {
+            image.UnlockBits(data);
+        }
+        return new MonochromeRaster(image.Width, image.Height, bytesPerRow, bits);
+    }
+
+    private static string BuildZplCommand(MonochromeRaster raster)
+    {
+        var hexadecimal = Convert.ToHexString(raster.Bits);
+        return "^XA\n^CI28\n^PW" + raster.Width +
+               "\n^LL" + raster.Height +
+               "\n^LH0,0\n^FO0,0^GFA," + raster.Bits.Length + "," +
+               raster.Bits.Length + "," + raster.BytesPerRow + "," +
+               hexadecimal + "^FS\n^XZ\n";
+    }
+
+    private static bool IsNativeZplDriver(string driverName) =>
+        driverName.Contains("Zebra", StringComparison.OrdinalIgnoreCase) ||
+        driverName.Contains("ZDesigner", StringComparison.OrdinalIgnoreCase) ||
+        driverName.Contains("ZPL", StringComparison.OrdinalIgnoreCase) ||
+        driverName.Contains("ZD510", StringComparison.OrdinalIgnoreCase) ||
+        driverName.Contains("HC100", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryGetPrinterDriverName(string printerName, out string driverName)
+    {
+        driverName = string.Empty;
+        if (!OpenPrinter(printerName, out var printerHandle, IntPtr.Zero))
+            return false;
+        try
+        {
+            GetPrinter(printerHandle, 2, IntPtr.Zero, 0, out var requiredBytes);
+            if (requiredBytes == 0)
+                return false;
+            var buffer = Marshal.AllocHGlobal(checked((int)requiredBytes));
+            try
+            {
+                if (!GetPrinter(printerHandle, 2, buffer, requiredBytes, out _))
+                    return false;
+                var information = Marshal.PtrToStructure<PrinterInfo2>(buffer);
+                driverName = Marshal.PtrToStringUni(information.DriverName) ?? string.Empty;
+                return !string.IsNullOrWhiteSpace(driverName);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        finally
+        {
+            ClosePrinter(printerHandle);
+        }
+    }
+
+    private static void SendRawPrinterBytes(
+        string printerName,
+        byte[] bytes,
+        string documentName)
+    {
+        if (!OpenPrinter(printerName, out var printerHandle, IntPtr.Zero))
+            throw new InvalidOperationException(
+                $"Windows could not open {printerName} for native wristband output. " +
+                $"Error: {Marshal.GetLastWin32Error()}.");
+
+        var documentStarted = false;
+        var pageStarted = false;
+        try
+        {
+            var document = new DocInfo1
+            {
+                DocumentName = documentName,
+                DataType = "RAW"
+            };
+            if (StartDocPrinter(printerHandle, 1, document) == 0)
+                throw new InvalidOperationException(
+                    $"Windows rejected the native {printerName} wristband job. " +
+                    $"Error: {Marshal.GetLastWin32Error()}.");
+            documentStarted = true;
+            if (!StartPagePrinter(printerHandle))
+                throw new InvalidOperationException(
+                    $"Windows could not start the native {printerName} wristband page. " +
+                    $"Error: {Marshal.GetLastWin32Error()}.");
+            pageStarted = true;
+            if (!WritePrinter(printerHandle, bytes, checked((uint)bytes.Length), out var written) ||
+                written != bytes.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Windows wrote only {written} of {bytes.Length} native wristband bytes to " +
+                    $"{printerName}. Error: {Marshal.GetLastWin32Error()}.");
+            }
+        }
+        finally
+        {
+            if (pageStarted)
+                EndPagePrinter(printerHandle);
+            if (documentStarted)
+                EndDocPrinter(printerHandle);
+            ClosePrinter(printerHandle);
+        }
+    }
+
     private static void PrintRenderedPages(
         IReadOnlyList<Bitmap> pages,
         string printerName,
         CancellationToken cancellationToken)
     {
+        if (TryGetPrinterDriverName(printerName, out var driverName) &&
+            IsNativeZplDriver(driverName))
+        {
+            PosLog.Write(
+                $"Detected wristband driver '{driverName}' for {printerName}; " +
+                "using native ZPL raster output instead of the Windows graphics spool path.");
+            PrintRenderedPagesAsZpl(pages, printerName, cancellationToken);
+            return;
+        }
+
+        PosLog.Write(
+            $"Wristband printer {printerName} uses driver " +
+            $"'{(string.IsNullOrWhiteSpace(driverName) ? "unknown" : driverName)}'; " +
+            "using the Windows 24-bit device-raster fallback.");
         var pageIndex = 0;
         using var document = new PrintDocument
         {
@@ -509,6 +762,44 @@ internal static class DirectWristbandPrinter
     }
 
     private sealed record PrinterRaster(int Width, int Height, int Stride, byte[] Bits);
+    private sealed record MonochromeRaster(int Width, int Height, int BytesPerRow, byte[] Bits);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct PrinterInfo2
+    {
+        public IntPtr ServerName;
+        public IntPtr PrinterName;
+        public IntPtr ShareName;
+        public IntPtr PortName;
+        public IntPtr DriverName;
+        public IntPtr Comment;
+        public IntPtr Location;
+        public IntPtr DevMode;
+        public IntPtr SeparatorFile;
+        public IntPtr PrintProcessor;
+        public IntPtr DataType;
+        public IntPtr Parameters;
+        public IntPtr SecurityDescriptor;
+        public uint Attributes;
+        public uint Priority;
+        public uint DefaultPriority;
+        public uint StartTime;
+        public uint UntilTime;
+        public uint Status;
+        public uint JobCount;
+        public uint AveragePagesPerMinute;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private sealed class DocInfo1
+    {
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string DocumentName = string.Empty;
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string? OutputFile;
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string DataType = "RAW";
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BitmapInfoHeader
@@ -554,6 +845,48 @@ internal static class DirectWristbandPrinter
         ref BitmapInfo bitmapInfo,
         uint colorUse,
         uint rasterOperation);
+
+    [DllImport("winspool.drv", EntryPoint = "OpenPrinterW", CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    private static extern bool OpenPrinter(
+        string printerName,
+        out IntPtr printerHandle,
+        IntPtr defaults);
+
+    [DllImport("winspool.drv", EntryPoint = "GetPrinterW", CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    private static extern bool GetPrinter(
+        IntPtr printerHandle,
+        uint level,
+        IntPtr printerInformation,
+        uint bufferSize,
+        out uint requiredBytes);
+
+    [DllImport("winspool.drv", SetLastError = true)]
+    private static extern bool ClosePrinter(IntPtr printerHandle);
+
+    [DllImport("winspool.drv", EntryPoint = "StartDocPrinterW", CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    private static extern int StartDocPrinter(
+        IntPtr printerHandle,
+        int level,
+        [In] DocInfo1 documentInformation);
+
+    [DllImport("winspool.drv", SetLastError = true)]
+    private static extern bool StartPagePrinter(IntPtr printerHandle);
+
+    [DllImport("winspool.drv", SetLastError = true)]
+    private static extern bool WritePrinter(
+        IntPtr printerHandle,
+        [In] byte[] bytes,
+        uint byteCount,
+        out uint bytesWritten);
+
+    [DllImport("winspool.drv", SetLastError = true)]
+    private static extern bool EndPagePrinter(IntPtr printerHandle);
+
+    [DllImport("winspool.drv", SetLastError = true)]
+    private static extern bool EndDocPrinter(IntPtr printerHandle);
 
     private static bool ActivateWristbandReturnLink(
         IntPtr firefoxWindow,

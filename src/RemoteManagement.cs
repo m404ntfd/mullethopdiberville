@@ -248,6 +248,7 @@ internal sealed partial class KioskForm
             var oldEnabled = _settings.BusinessHoursEnabled;
             var oldShowClosedVideo = _settings.ShowClosedVideo;
             var oldBlackoutAtClosingTime = _settings.BlackoutAtClosingTime;
+            var oldBusinessClosedLeadMinutes = _settings.BusinessClosedLeadMinutes;
             var oldPreOpening = _settings.PreOpeningScreensaverMinutes;
             var oldDays = _settings.BusinessHours;
             var oldThemeMode = _settings.ThemeMode;
@@ -265,6 +266,8 @@ internal sealed partial class KioskForm
                 {
                     _settings.ShowClosedVideo = package.ShowClosedVideo;
                     _settings.BlackoutAtClosingTime = package.BlackoutAtClosingTime;
+                    _settings.BusinessClosedLeadMinutes = Math.Clamp(
+                        package.BusinessClosedLeadMinutes, 1, 240);
                 }
                 _settings.PreOpeningScreensaverMinutes = Math.Clamp(package.PreOpeningScreensaverMinutes, 0, 240);
                 if (package.IncludesAppearanceSettings)
@@ -299,6 +302,7 @@ internal sealed partial class KioskForm
                 _settings.BusinessHoursEnabled = oldEnabled;
                 _settings.ShowClosedVideo = oldShowClosedVideo;
                 _settings.BlackoutAtClosingTime = oldBlackoutAtClosingTime;
+                _settings.BusinessClosedLeadMinutes = oldBusinessClosedLeadMinutes;
                 _settings.PreOpeningScreensaverMinutes = oldPreOpening;
                 _settings.BusinessHours = oldDays;
                 _settings.ThemeMode = oldThemeMode;
@@ -811,6 +815,7 @@ internal sealed class BusinessHoursSyncPackage
     public bool IncludesClosureSettings { get; set; }
     public bool ShowClosedVideo { get; set; }
     public bool BlackoutAtClosingTime { get; set; }
+    public int BusinessClosedLeadMinutes { get; set; } = 30;
     // Kept for wire compatibility with older controllers.
     public int ClosedMessageMinutes { get; set; }
     public int PreOpeningScreensaverMinutes { get; set; }

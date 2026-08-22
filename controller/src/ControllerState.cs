@@ -557,6 +557,7 @@ internal sealed class ControllerState
                 IncludesClosureSettings = true,
                 ShowClosedVideo = _data.BusinessHours.ShowClosedVideo,
                 BlackoutAtClosingTime = _data.BusinessHours.BlackoutAtClosingTime,
+                BusinessClosedLeadMinutes = _data.BusinessHours.BusinessClosedLeadMinutes,
                 ClosedMessageMinutes = _data.BusinessHours.ClosedMessageMinutes,
                 PreOpeningScreensaverMinutes = _data.BusinessHours.PreOpeningScreensaverMinutes,
                 IncludesAppearanceSettings = true,
@@ -1227,6 +1228,9 @@ internal sealed class ControllerState
                 BlackoutAtClosingTime = package.IncludesClosureSettings
                     ? package.BlackoutAtClosingTime
                     : _data.BusinessHours.BlackoutAtClosingTime,
+                BusinessClosedLeadMinutes = package.IncludesClosureSettings
+                    ? package.BusinessClosedLeadMinutes
+                    : _data.BusinessHours.BusinessClosedLeadMinutes,
                 ClosedMessageMinutes = package.ClosedMessageMinutes,
                 PreOpeningScreensaverMinutes = package.PreOpeningScreensaverMinutes,
                 ThemeMode = package.IncludesAppearanceSettings && package.ThemeMode is >= 0 and <= 2

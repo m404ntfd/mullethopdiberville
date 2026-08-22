@@ -128,7 +128,10 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.12 transfers
+restarts without changing the user's normal Firefox profile. Version 1.7.13 detects
+Zebra/ZDesigner wristband drivers and sends the rendered band as a native monochrome ZPL
+raster directly to the printer, bypassing Windows graphics records that can advance blank
+media. Other drivers retain the Windows raster fallback. Version 1.7.12 transfers
 each rendered wristband through Windows GDI as an opaque 24-bit device raster instead of
 using a printer-driver image record that may advance blank media. Version 1.7.11 flattens PDF
 pages into opaque printer-safe rasters, fits them to the WB printer driver's actual
