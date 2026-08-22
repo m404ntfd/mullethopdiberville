@@ -167,7 +167,10 @@ internal sealed class PosControllerForm : Form
             !FirefoxPrintDestinationSelector.TextIdentifiesPrinterForSmokeTest(
                 "Destination: WB-1 (ready)",
                 "WB-1") ||
-            FirefoxPrintDestinationSelector.TextIdentifiesPrinterForSmokeTest("WB-10", "WB-1"))
+            FirefoxPrintDestinationSelector.TextIdentifiesPrinterForSmokeTest("WB-10", "WB-1") ||
+            !FirefoxPrintDestinationSelector.TextIdentifiesPrintActionForSmokeTest("Print") ||
+            FirefoxPrintDestinationSelector.TextIdentifiesPrintActionForSmokeTest(
+                "Print using the system dialog"))
         {
             throw new InvalidOperationException(
                 "The wristband printer selector did not preserve the WB-1 through WB-7 range.");
@@ -776,14 +779,14 @@ internal sealed class PosControllerForm : Form
 
             var printerName = dialog.SelectedPrinterName;
             PosLog.Write($"The user selected {printerName} for the current wristband print job.");
-            var result = await _firefoxHost.SelectPrintDestinationAsync(printerName);
+            var result = await _firefoxHost.PrintCurrentPreviewAsync(printerName);
             if (!result.Success)
             {
                 PosLog.Write(result.Message);
                 MessageBox.Show(
                     this,
                     result.Message + "\n\nThe POS-X Thermal Printer remains the default receipt printer.",
-                    "Select Wristband Printer",
+                    "Print Wristbands",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
@@ -793,10 +796,10 @@ internal sealed class PosControllerForm : Form
             PosLog.Write("Wristband printer prompt error: " + ex);
             MessageBox.Show(
                 this,
-                "The wristband printer could not be selected automatically. " +
-                "Choose WB-1 through WB-7 manually in Firefox's Destination list.\n\n" +
+                "The wristband print could not be completed automatically. " +
+                "Choose WB-1 through WB-7 and select Print manually in Firefox.\n\n" +
                 ex.Message,
-                "Select Wristband Printer",
+                "Print Wristbands",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }

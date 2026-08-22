@@ -226,7 +226,7 @@ internal sealed class FirefoxHost : IDisposable
             FocusEmbeddedWindow("browser mode enabled");
     }
 
-    public Task<PrintDestinationSelectionResult> SelectPrintDestinationAsync(
+    public Task<PrintDestinationSelectionResult> PrintCurrentPreviewAsync(
         string printerName,
         CancellationToken cancellationToken = default)
     {
@@ -236,7 +236,7 @@ internal sealed class FirefoxHost : IDisposable
                 "The embedded Firefox window is not available."));
         }
 
-        return FirefoxPrintDestinationSelector.SelectAsync(
+        return FirefoxPrintDestinationSelector.SelectAndPrintAsync(
             _firefoxWindow,
             printerName,
             cancellationToken);

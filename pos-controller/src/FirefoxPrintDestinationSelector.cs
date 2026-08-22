@@ -7,16 +7,16 @@ namespace MulletHopPosController;
 internal readonly record struct PrintDestinationSelectionResult(bool Success, string Message)
 {
     public static PrintDestinationSelectionResult Succeeded(string printerName) =>
-        new(true, $"Firefox is using {printerName} for this wristband print job.");
+        new(true, $"The current wristband print preview was sent to {printerName}.");
 
     public static PrintDestinationSelectionResult Failed(string message) =>
         new(false, message);
 }
 
 /// <summary>
-/// Selects one destination in Firefox's currently open print-preview UI without
-/// changing the Windows default printer. Firefox exposes its chrome controls to
-/// Microsoft Active Accessibility, including its Destination picker.
+/// Selects one destination in Firefox's currently open print-preview UI and
+/// activates its Print button without changing the Windows default printer.
+/// Firefox exposes its chrome controls to Microsoft Active Accessibility.
 /// </summary>
 internal static class FirefoxPrintDestinationSelector
 {
@@ -28,7 +28,7 @@ internal static class FirefoxPrintDestinationSelector
     private static readonly Guid AccessibleInterfaceId =
         new("618736E0-3C3D-11CF-810C-00AA00389B71");
 
-    public static Task<PrintDestinationSelectionResult> SelectAsync(
+    public static Task<PrintDestinationSelectionResult> SelectAndPrintAsync(
         IntPtr firefoxWindow,
         string printerName,
         CancellationToken cancellationToken = default)
@@ -51,7 +51,7 @@ internal static class FirefoxPrintDestinationSelector
         {
             try
             {
-                completion.TrySetResult(SelectOnStaThread(
+                completion.TrySetResult(SelectAndPrintOnStaThread(
                     firefoxWindow,
                     printerName,
                     cancellationToken));
@@ -62,9 +62,9 @@ internal static class FirefoxPrintDestinationSelector
             }
             catch (Exception ex)
             {
-                PosLog.Write("Firefox wristband printer selection failed: " + ex);
+                PosLog.Write("Firefox wristband print automation failed: " + ex);
                 completion.TrySetResult(PrintDestinationSelectionResult.Failed(
-                    "Windows could not control Firefox's print destination: " + ex.Message));
+                    "Windows could not control Firefox's current print preview: " + ex.Message));
             }
         })
         {
@@ -82,14 +82,18 @@ internal static class FirefoxPrintDestinationSelector
     internal static bool TextIdentifiesPrinterForSmokeTest(string? value, string printerName) =>
         TextIdentifiesPrinter(value, printerName);
 
-    private static PrintDestinationSelectionResult SelectOnStaThread(
+    internal static bool TextIdentifiesPrintActionForSmokeTest(string? value) =>
+        TextIdentifiesPrintAction(value);
+
+    private static PrintDestinationSelectionResult SelectAndPrintOnStaThread(
         IntPtr firefoxWindow,
         string printerName,
         CancellationToken cancellationToken)
     {
         AccessibleNode? lastDestinationControl = null;
         string? lastAccessibilitySummary = null;
-        for (var attempt = 0; attempt < 32; attempt++)
+        var destinationSelected = false;
+        for (var attempt = 0; attempt < 48; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!IsWindow(firefoxWindow))
@@ -105,7 +109,21 @@ internal static class FirefoxPrintDestinationSelector
                 (TextIdentifiesPrinter(node.Name, printerName) ||
                  TextIdentifiesPrinter(node.Value, printerName)));
             if (currentDestination is not null)
-                return PrintDestinationSelectionResult.Succeeded(printerName);
+                destinationSelected = true;
+
+            if (destinationSelected)
+            {
+                var printAction = nodes.FirstOrDefault(IsPrintAction);
+                if (printAction is not null && TryActivate(printAction))
+                {
+                    PosLog.Write(
+                        $"Firefox submitted the current wristband print preview to {printerName}.");
+                    return PrintDestinationSelectionResult.Succeeded(printerName);
+                }
+
+                Thread.Sleep(250);
+                continue;
+            }
 
             var target = nodes.FirstOrDefault(node =>
                 (node.Role is AccessibleRole.ListItem or
@@ -117,8 +135,9 @@ internal static class FirefoxPrintDestinationSelector
             if (target is not null && TryActivate(target))
             {
                 PosLog.Write(
-                    $"Firefox print destination was changed to {printerName} for the current job.");
-                return PrintDestinationSelectionResult.Succeeded(printerName);
+                    $"Firefox was asked to change the current print destination to {printerName}.");
+                Thread.Sleep(250);
+                continue;
             }
 
             lastDestinationControl = nodes.FirstOrDefault(IsDestinationControl) ??
@@ -130,8 +149,14 @@ internal static class FirefoxPrintDestinationSelector
         }
 
         PosLog.Write(
-            "Firefox print destination accessibility summary: " +
+            "Firefox print-preview accessibility summary: " +
             (lastAccessibilitySummary ?? "no printer controls were exposed"));
+        if (destinationSelected)
+        {
+            return PrintDestinationSelectionResult.Failed(
+                $"Firefox selected {printerName}, but its Print button was not available. " +
+                "Select Print manually in the current Firefox print panel.");
+        }
         return lastDestinationControl is null
             ? PrintDestinationSelectionResult.Failed(
                 "Firefox's Destination control was not available. " +
@@ -221,6 +246,7 @@ internal static class FirefoxPrintDestinationSelector
         string? name = null;
         string? value = null;
         AccessibleRole role = AccessibleRole.None;
+        AccessibleStates state = AccessibleStates.None;
         try { name = accessible.get_accName(childId); }
         catch (COMException) { }
         try { value = accessible.get_accValue(childId); }
@@ -239,7 +265,21 @@ internal static class FirefoxPrintDestinationSelector
         {
             // Some Firefox accessibility nodes omit their role while the UI updates.
         }
-        return new AccessibleNode(accessible, childId, name, value, role);
+        try
+        {
+            var stateValue = accessible.get_accState(childId);
+            if (stateValue is not null)
+            {
+                state = (AccessibleStates)Convert.ToInt32(
+                    stateValue,
+                    CultureInfo.InvariantCulture);
+            }
+        }
+        catch (Exception ex) when (ex is COMException or FormatException or InvalidCastException)
+        {
+            // Controls can briefly omit state information while the preview changes.
+        }
+        return new AccessibleNode(accessible, childId, name, value, role, state);
     }
 
     private static bool IsDestinationControl(AccessibleNode node)
@@ -252,11 +292,20 @@ internal static class FirefoxPrintDestinationSelector
         if (!isInteractive)
             return false;
 
-        return Contains(node.Name, "Destination") ||
-               Contains(node.Value, "Destination") ||
-               LooksLikePrinterName(node.Name) ||
-               LooksLikePrinterName(node.Value);
+        if (Contains(node.Name, "Destination") || Contains(node.Value, "Destination"))
+            return true;
+
+        // A selected destination is normally a combo/drop-down whose value is the
+        // printer name. Do not treat a printer option rendered as a push button as
+        // proof that it was selected.
+        return node.Role != AccessibleRole.PushButton &&
+               (LooksLikePrinterName(node.Name) || LooksLikePrinterName(node.Value));
     }
+
+    private static bool IsPrintAction(AccessibleNode node) =>
+        node.Role == AccessibleRole.PushButton &&
+        !node.State.HasFlag(AccessibleStates.Unavailable) &&
+        (TextIdentifiesPrintAction(node.Name) || TextIdentifiesPrintAction(node.Value));
 
     private static bool TryActivate(AccessibleNode node)
     {
@@ -310,6 +359,14 @@ internal static class FirefoxPrintDestinationSelector
         return false;
     }
 
+    private static bool TextIdentifiesPrintAction(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        var normalized = value.Trim().Replace("&", string.Empty, StringComparison.Ordinal);
+        return string.Equals(normalized, "Print", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool LooksLikePrinterName(string? value) =>
         Contains(value, "POS-X Thermal Printer") ||
         Contains(value, "Save to PDF") ||
@@ -324,7 +381,8 @@ internal static class FirefoxPrintDestinationSelector
                 Contains(node.Name, "Destination") ||
                 Contains(node.Value, "Destination") ||
                 LooksLikePrinterName(node.Name) ||
-                LooksLikePrinterName(node.Value))
+                LooksLikePrinterName(node.Value) ||
+                IsPrintAction(node))
             .Take(20)
             .Select(node =>
                 $"{node.Role} name='{node.Name ?? ""}' value='{node.Value ?? ""}'")
@@ -340,7 +398,8 @@ internal static class FirefoxPrintDestinationSelector
         object ChildId,
         string? Name,
         string? Value,
-        AccessibleRole Role);
+        AccessibleRole Role,
+        AccessibleStates State);
 
     [DllImport("oleacc.dll")]
     private static extern int AccessibleObjectFromWindow(

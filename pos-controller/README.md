@@ -83,14 +83,14 @@ remove, activate, or deactivate colors, and the printer section records the colo
 currently loaded in WB-1 through WB-7. The master Systems Controller stores these
 settings and synchronizes them to the other controllers and POS applications.
 
-The selected WB printer is applied only to the currently open Firefox print
-preview. The user can review the destination and select Print normally. **Return /
+Each button maps directly to its matching Windows printer name: WB-1 selects WB-1,
+WB-2 selects WB-2, and so on through WB-7. Pressing a button selects that printer in
+the current Firefox print preview and then activates Firefox's Print button. **Return /
 Cancel Print** closes the selector and sends Escape to the current print preview.
-If Firefox does not expose its Destination control to Windows, the application
-asks the user to select the chosen WB printer manually instead of interrupting
-the sale. The application does not change the Windows default printer, and its
-dedicated Firefox profile keeps **POS-X Thermal Printer** as the normal receipt
-and cash-drawer destination for later print jobs.
+If Firefox cannot confirm the destination or expose its Print button, it leaves the
+preview open and asks the user to complete the job manually. The application does not
+change the Windows default printer, and its dedicated Firefox profile keeps **POS-X
+Thermal Printer** as the normal receipt and cash-drawer destination for later jobs.
 
 ## Installation
 
@@ -126,7 +126,9 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.7 adds the
+restarts without changing the user's normal Firefox profile. Version 1.7.8 maps each
+wristband button to the identically named Windows printer and automatically submits the
+current Firefox print preview after confirming the selected destination. Version 1.7.7 adds the
 synchronized color catalog, daily jump-time schedule, current WB-1 through WB-7 color
 assignments, and color-labeled wristband printer buttons. Version 1.7.6 detects
 LilyPad wristband print pages, prompts for WB-1 through WB-7, and applies the selected
