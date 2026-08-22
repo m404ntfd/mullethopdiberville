@@ -318,7 +318,9 @@ NETWORK NOTES
   address and securely reconnect using their saved pairing key.
 * Open/close commands normally appear on a kiosk within five seconds.
 
-Systems Controller version 1.15.3 adds the shared wristband color catalog, day/time
+Systems Controller version 1.15.4 adds explicit Add Color, Delete Color, Make Active,
+and Make Inactive controls to the shared wristband editor used by Systems Controller
+and POS. Version 1.15.3 adds the shared wristband color catalog, day/time
 schedule, WB-1 through WB-7 assignments, master storage, controller replication, and POS
 synchronization. Version 1.15.2 starts elevated at Windows sign-in, remains in
 the system tray after its service is ready, and launches Mullet Hop POS only when
