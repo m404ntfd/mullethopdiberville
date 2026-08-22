@@ -101,8 +101,11 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.14, Systems Controller version 1.15.7, and Mullet Hop POS
-version 1.7.13 are the matching package releases. Kiosk 2.11.14 keeps waivers available
+Waiver Kiosk version 2.11.15, Systems Controller version 1.15.8, and Mullet Hop POS
+version 1.7.14 are the matching package releases. POS 1.7.14 forces native Zebra output
+onto the physical one-inch by eleven-inch wristband canvas and aligns artwork with the
+feed edge, preventing the driver default from clipping nearly the entire raster. Kiosk
+2.11.14 keeps waivers available
 until the configurable Business Closed message window, which defaults to 30 minutes before
 closing. The kiosk and Systems Controller both expose and synchronize that 1–240 minute
 setting. POS 1.7.13 detects Zebra/ZDesigner wristband drivers and sends a native monochrome

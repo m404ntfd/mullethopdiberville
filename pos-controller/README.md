@@ -128,7 +128,10 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.13 detects
+restarts without changing the user's normal Firefox profile. Version 1.7.14 forces
+native Zebra output onto the physical 1 × 11-inch wristband canvas and aligns artwork
+with the feed edge instead of using the driver's wider default label size, which could
+clip almost the entire image. Version 1.7.13 detects
 Zebra/ZDesigner wristband drivers and sends the rendered band as a native monochrome ZPL
 raster directly to the printer, bypassing Windows graphics records that can advance blank
 media. Other drivers retain the Windows raster fallback. Version 1.7.12 transfers
