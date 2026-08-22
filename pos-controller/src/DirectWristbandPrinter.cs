@@ -118,6 +118,21 @@ internal static class DirectWristbandPrinter
         string? name,
         string? value) => TextIdentifiesWristbandReturnLink(name, value);
 
+    internal static bool InkMeasurementPassesSmokeTest()
+    {
+        using var blank = new Bitmap(32, 32, PixelFormat.Format24bppRgb);
+        using (var graphics = Graphics.FromImage(blank))
+            graphics.Clear(Color.White);
+        using var marked = new Bitmap(32, 32, PixelFormat.Format24bppRgb);
+        using (var graphics = Graphics.FromImage(marked))
+        {
+            graphics.Clear(Color.White);
+            graphics.FillRectangle(Brushes.Black, 8, 8, 16, 16);
+        }
+        return MeasureVisibleInkPercentage(blank) == 0 &&
+               MeasureVisibleInkPercentage(marked) > 0;
+    }
+
     private static PrintDestinationSelectionResult RenderAndPrintOnStaThread(
         IntPtr firefoxWindow,
         byte[] pdfBytes,
@@ -212,15 +227,33 @@ internal static class DirectWristbandPrinter
                 rendered.Seek(0);
                 using var imageStream = rendered.AsStreamForRead();
                 using var decoded = new Bitmap(imageStream);
+                // Thermal-printer drivers are commonly backed by older GDI renderers.
+                // Keep the page fully opaque so the spool file contains a normal RGB
+                // raster instead of an alpha-blended EMF record that some drivers
+                // accept but output as a blank wristband.
                 var detached = new Bitmap(
                     decoded.Width,
                     decoded.Height,
-                    PixelFormat.Format32bppPArgb);
+                    PixelFormat.Format24bppRgb);
                 detached.SetResolution((float)RenderDpi, (float)RenderDpi);
                 using (var graphics = Graphics.FromImage(detached))
                 {
                     graphics.Clear(Color.White);
+                    graphics.CompositingMode = CompositingMode.SourceOver;
+                    graphics.CompositingQuality = CompositingQuality.HighQuality;
                     graphics.DrawImageUnscaled(decoded, 0, 0);
+                }
+                var inkPercentage = MeasureVisibleInkPercentage(detached);
+                PosLog.Write(
+                    $"Rendered wristband PDF page {pageNumber + 1}: " +
+                    $"{detached.Width}x{detached.Height} pixels, " +
+                    $"{inkPercentage:0.###}% visible ink.");
+                if (inkPercentage <= 0)
+                {
+                    detached.Dispose();
+                    throw new InvalidDataException(
+                        $"Windows rendered wristband PDF page {pageNumber + 1} as blank. " +
+                        "No print job was sent.");
                 }
                 pages.Add(detached);
             }
@@ -231,6 +264,41 @@ internal static class DirectWristbandPrinter
             foreach (var page in pages)
                 page.Dispose();
             throw;
+        }
+    }
+
+    private static double MeasureVisibleInkPercentage(Bitmap image)
+    {
+        var bounds = new Rectangle(0, 0, image.Width, image.Height);
+        var data = image.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+        try
+        {
+            // Sample at most about one million pixels. This is dense enough to catch
+            // fine barcode/text strokes without delaying the front-desk print flow.
+            var xStep = Math.Max(1, image.Width / 1024);
+            var yStep = Math.Max(1, image.Height / 1024);
+            var rowLength = checked(Math.Abs(data.Stride));
+            var row = new byte[rowLength];
+            long samples = 0;
+            long inkSamples = 0;
+            for (var y = 0; y < image.Height; y += yStep)
+            {
+                Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), row, 0, rowLength);
+                for (var x = 0; x < image.Width; x += xStep)
+                {
+                    var offset = x * 3;
+                    if (offset + 2 >= row.Length)
+                        break;
+                    samples++;
+                    if (row[offset] < 250 || row[offset + 1] < 250 || row[offset + 2] < 250)
+                        inkSamples++;
+                }
+            }
+            return samples == 0 ? 0 : inkSamples * 100d / samples;
+        }
+        finally
+        {
+            image.UnlockBits(data);
         }
     }
 
@@ -264,26 +332,46 @@ internal static class DirectWristbandPrinter
             if (imageIsWide != paperIsWide)
                 eventArgs.PageSettings.Landscape = !eventArgs.PageSettings.Landscape;
             eventArgs.PageSettings.Margins = new Margins(0, 0, 0, 0);
+            eventArgs.PageSettings.Color = false;
         };
         document.PrintPage += (_, eventArgs) =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             var image = pages[pageIndex];
-            var pageWidth = eventArgs.PageBounds.Width;
-            var pageHeight = eventArgs.PageBounds.Height;
-            var scale = Math.Min(pageWidth / (float)image.Width, pageHeight / (float)image.Height);
-            var targetWidth = image.Width * scale;
-            var targetHeight = image.Height * scale;
-            var targetX = (pageWidth - targetWidth) / 2f;
-            var targetY = (pageHeight - targetHeight) / 2f;
             var graphics = eventArgs.Graphics ?? throw new InvalidOperationException(
                 "Windows did not provide a graphics surface for the wristband printer.");
-            graphics.TranslateTransform(
-                -eventArgs.PageSettings.HardMarginX,
-                -eventArgs.PageSettings.HardMarginY);
+            var printableBounds = graphics.VisibleClipBounds;
+            if (!float.IsFinite(printableBounds.Width) ||
+                !float.IsFinite(printableBounds.Height) ||
+                printableBounds.Width <= 1 ||
+                printableBounds.Height <= 1)
+            {
+                printableBounds = new RectangleF(
+                    0,
+                    0,
+                    Math.Max(1, eventArgs.MarginBounds.Width),
+                    Math.Max(1, eventArgs.MarginBounds.Height));
+            }
+            var scale = Math.Min(
+                printableBounds.Width / image.Width,
+                printableBounds.Height / image.Height);
+            var targetWidth = image.Width * scale;
+            var targetHeight = image.Height * scale;
+            var targetX = printableBounds.Left + (printableBounds.Width - targetWidth) / 2f;
+            var targetY = printableBounds.Top + (printableBounds.Height - targetHeight) / 2f;
+            PosLog.Write(
+                $"Printing wristband page {pageIndex + 1} to {printerName}: " +
+                $"paper={eventArgs.PageBounds.Width}x{eventArgs.PageBounds.Height}, " +
+                $"printable={printableBounds.X:0.##},{printableBounds.Y:0.##}," +
+                $"{printableBounds.Width:0.##}x{printableBounds.Height:0.##}, " +
+                $"target={targetX:0.##},{targetY:0.##},{targetWidth:0.##}x{targetHeight:0.##}.");
             graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            graphics.DrawImage(image, targetX, targetY, targetWidth, targetHeight);
+            graphics.DrawImage(
+                image,
+                new RectangleF(targetX, targetY, targetWidth, targetHeight),
+                new RectangleF(0, 0, image.Width, image.Height),
+                GraphicsUnit.Pixel);
             pageIndex++;
             eventArgs.HasMorePages = pageIndex < pages.Count;
         };
