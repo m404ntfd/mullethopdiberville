@@ -130,6 +130,10 @@ internal static class ControllerMasterElection
             new MasterPriorityEntry { ControllerId = second }
         };
         return WristbandSettingsPackage.SmokeTest() &&
+               ControllerBusinessDayHours.CalculateLastJumpTimeSold(TimeSpan.FromHours(22)) ==
+                   TimeSpan.FromHours(21) &&
+               ControllerBusinessDayHours.CalculateLastJumpTimeSold(TimeSpan.Zero) ==
+                   TimeSpan.FromHours(23) &&
                SelectWinner(priority, new[] { first, second })?.ControllerId == first &&
                SelectWinner(priority, new[] { second })?.ControllerId == second &&
                SelectWinner(priority, Array.Empty<string>()) is null;
