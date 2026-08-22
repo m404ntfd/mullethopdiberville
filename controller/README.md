@@ -215,8 +215,9 @@ Business Closure before they queue a Close command, ensuring the kiosk reports t
 intended red or blue state.
 Business Hours profiles include opening, an automatically calculated Last 1-Hour Jump,
 and closing times for each day. The final full-hour jump always ends at closing, while a
-separate half-hour sale can still end at closing. Profiles also include Show Closed Video
-at the final one-hour jump time, blackout one minute after
+separate half-hour sale can still end at closing. Profiles also include a configurable
+Business Closed message lead time (30 minutes before closing by default), whether to play
+the closed video during that window, blackout one minute after
 closing, and the existing pre-opening screensaver setting. A 12:00 AM closing is
 midnight at the end of that business day, not the beginning of it.
 
@@ -276,8 +277,8 @@ MANAGE HOURS AND KIOSK APPEARANCE
 
 Select Hours & Wristbands in the Systems Controller Program section. The Business Hours tab
 sets each day's opening and closing time and displays the automatically calculated final
-one-hour jump start; whether to show
-the Business Closed video at the Last Jump cutoff; whether to black out one minute after
+one-hour jump start; how many minutes before closing the Business Closed message appears;
+whether to play the Business Closed video during that window; whether to black out one minute after
 closing; and the pre-opening screensaver time. The Business Closed video displays
 the next opening day and time from this synced schedule. Closing at 12:00 AM is
 understood as midnight following that day's operating hours. The Kiosk Appearance

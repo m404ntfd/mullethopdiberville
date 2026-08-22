@@ -240,7 +240,7 @@ internal enum BusinessHoursMode
 {
     Disabled,
     Open,
-    LastJumpSold,
+    ClosingMessage,
     Closed,
     PreOpening
 }
@@ -300,8 +300,9 @@ internal static class BusinessHoursCalculator
                 {
                     Schedule = schedule,
                     Opening = schedule.OpeningOn(date),
-                    LastJump = schedule.LastJumpOn(date),
-                    Closing = schedule.ClosingOn(date)
+                    Closing = schedule.ClosingOn(date),
+                    ClosingMessageStart = schedule.ClosingOn(date) - TimeSpan.FromMinutes(
+                        Math.Clamp(settings.BusinessClosedLeadMinutes, 1, 240))
                 };
             })
             .Where(period => period.Schedule.IsOpen &&
@@ -310,7 +311,7 @@ internal static class BusinessHoursCalculator
             .OrderByDescending(period => period.Opening)
             .FirstOrDefault();
 
-        if (activePeriod is not null && now < activePeriod.LastJump)
+        if (activePeriod is not null && now < activePeriod.ClosingMessageStart)
         {
             return new BusinessHoursStatus(
                 BusinessHoursMode.Open,
@@ -323,7 +324,7 @@ internal static class BusinessHoursCalculator
         if (activePeriod is not null)
         {
             return new BusinessHoursStatus(
-                BusinessHoursMode.LastJumpSold,
+                BusinessHoursMode.ClosingMessage,
                 nextOpening,
                 activePeriod.Closing);
         }
@@ -349,6 +350,7 @@ internal static class BusinessHoursSmokeTest
         var settings = new KioskSettings
         {
             BusinessHoursEnabled = true,
+            BusinessClosedLeadMinutes = 30,
             PreOpeningScreensaverMinutes = 30
         };
         foreach (var schedule in settings.BusinessHours)
@@ -364,17 +366,23 @@ internal static class BusinessHoursSmokeTest
 
         var businessDate = new DateTime(2024, 1, 1);
         return BusinessHoursCalculator.Evaluate(
-                   settings, businessDate.AddHours(20).AddMinutes(59)).Mode ==
+                   settings, businessDate.AddHours(23).AddMinutes(29)).Mode ==
                BusinessHoursMode.Open &&
                BusinessHoursCalculator.Evaluate(
-                   settings, businessDate.AddHours(21)).Mode ==
-               BusinessHoursMode.LastJumpSold &&
+                   settings, businessDate.AddHours(23).AddMinutes(30)).Mode ==
+               BusinessHoursMode.ClosingMessage &&
                BusinessHoursCalculator.Evaluate(
                    settings, businessDate.AddDays(1).AddSeconds(59)).Mode ==
-               BusinessHoursMode.LastJumpSold &&
+               BusinessHoursMode.ClosingMessage &&
                BusinessHoursCalculator.Evaluate(
                    settings, businessDate.AddDays(1).AddMinutes(1)).Mode ==
                BusinessHoursMode.Closed &&
+               BusinessHoursCalculator.Evaluate(
+                   settings, businessDate.AddDays(1).AddHours(21).AddMinutes(29)).Mode ==
+               BusinessHoursMode.Open &&
+               BusinessHoursCalculator.Evaluate(
+                   settings, businessDate.AddDays(1).AddHours(21).AddMinutes(30)).Mode ==
+               BusinessHoursMode.ClosingMessage &&
                BusinessHoursCalculator.Evaluate(
                    settings, businessDate.AddDays(1).AddHours(9).AddMinutes(30)).Mode ==
                BusinessHoursMode.PreOpening &&
@@ -382,7 +390,8 @@ internal static class BusinessHoursSmokeTest
                KioskBusinessDayHours.CalculateLastJumpTimeSold(TimeSpan.FromHours(22)) ==
                    TimeSpan.FromHours(21) &&
                KioskBusinessDayHours.CalculateLastJumpTimeSold(TimeSpan.Zero) ==
-                   TimeSpan.FromHours(23);
+                   TimeSpan.FromHours(23) &&
+               new KioskSettings().BusinessClosedLeadMinutes == 30;
     }
 }
 
@@ -1275,7 +1284,7 @@ internal sealed partial class KioskForm : Form
             return;
         }
 
-        if (status.Mode == BusinessHoursMode.LastJumpSold)
+        if (status.Mode == BusinessHoursMode.ClosingMessage)
         {
             ShowBusinessClosedPage(status.NextOpening, _settings.ShowClosedVideo);
             return;
@@ -1350,7 +1359,7 @@ internal sealed partial class KioskForm : Form
 
             var shouldBlackOut = status.Mode == BusinessHoursMode.Closed &&
                 _settings.BlackoutAtClosingTime;
-            var shouldPlayVideo = status.Mode == BusinessHoursMode.LastJumpSold &&
+            var shouldPlayVideo = status.Mode == BusinessHoursMode.ClosingMessage &&
                 _settings.ShowClosedVideo;
             var displayedOpeningChanged = _showingBusinessClosedPage &&
                 _businessClosedDisplayedOpeningTicks != status.NextOpening?.Ticks;
@@ -4299,6 +4308,7 @@ internal sealed class KioskSettings
     public bool BusinessHoursEnabled { get; set; }
     public bool ShowClosedVideo { get; set; } = true;
     public bool BlackoutAtClosingTime { get; set; } = true;
+    public int BusinessClosedLeadMinutes { get; set; } = 30;
     // Retained so older settings and controllers can still be read during upgrades.
     public int BusinessClosedMessageMinutes { get; set; } = 5;
     public int PreOpeningScreensaverMinutes { get; set; } = 30;
@@ -4478,6 +4488,7 @@ internal sealed class KioskSettings
         ScreensaverTimeoutMinutes = Math.Clamp(ScreensaverTimeoutMinutes, 1, 240);
         CompletionResetSeconds = Math.Clamp(CompletionResetSeconds, 12, 60);
         AssistanceFlareIntervalSeconds = Math.Clamp(AssistanceFlareIntervalSeconds, 10, 300);
+        BusinessClosedLeadMinutes = Math.Clamp(BusinessClosedLeadMinutes, 1, 240);
         BusinessClosedMessageMinutes = Math.Clamp(BusinessClosedMessageMinutes, 1, 240);
         PreOpeningScreensaverMinutes = Math.Clamp(PreOpeningScreensaverMinutes, 0, 240);
     }
@@ -4627,6 +4638,7 @@ internal sealed class StaffSettingsDialog : Form
     private readonly CheckBox _businessHoursEnabled = new();
     private readonly CheckBox _showClosedVideo = new();
     private readonly CheckBox _blackoutAtClosingTime = new();
+    private readonly NumericUpDown _businessClosedLeadMinutes = new();
     private readonly NumericUpDown _preOpeningScreensaverMinutes = new();
     private readonly Button _businessHoursSaveButton = new();
     private readonly Label _businessHoursStatus = new();
@@ -5272,7 +5284,7 @@ internal sealed class StaffSettingsDialog : Form
             ForeColor = Color.FromArgb(117, 68, 154),
             Bounds = new Rectangle(15, 353, 590, 118)
         };
-        _showClosedVideo.Text = "Show Closed Video at final one-hour jump time";
+        _showClosedVideo.Text = "Play the Business Closed video";
         _showClosedVideo.Checked = _settings.ShowClosedVideo;
         _showClosedVideo.AutoSize = true;
         _showClosedVideo.ForeColor = Color.FromArgb(16, 24, 32);
@@ -5286,10 +5298,30 @@ internal sealed class StaffSettingsDialog : Form
         _blackoutAtClosingTime.Location = new Point(300, 30);
         _blackoutAtClosingTime.CheckedChanged += (_, _) =>
             _businessHoursSaveButton.Text = "Save Business Hours";
+        var closedLeadLabel = new Label
+        {
+            Text = "Show closed message:", AutoSize = false,
+            Bounds = new Rectangle(18, 55, 150, 27),
+            ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
+        };
+        _businessClosedLeadMinutes.Minimum = 1;
+        _businessClosedLeadMinutes.Maximum = 240;
+        _businessClosedLeadMinutes.Value = Math.Clamp(
+            _settings.BusinessClosedLeadMinutes, 1, 240);
+        _businessClosedLeadMinutes.TextAlign = HorizontalAlignment.Center;
+        _businessClosedLeadMinutes.Bounds = new Rectangle(170, 53, 65, 28);
+        _businessClosedLeadMinutes.ValueChanged += (_, _) =>
+            _businessHoursSaveButton.Text = "Save Business Hours";
+        var closedLeadSuffix = new Label
+        {
+            Text = "minutes before closing", AutoSize = false,
+            Bounds = new Rectangle(243, 55, 190, 27),
+            ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
+        };
         var preOpeningLabel = new Label
         {
             Text = "Start the screensaver before opening:", AutoSize = false,
-            Bounds = new Rectangle(18, 72, 225, 28),
+            Bounds = new Rectangle(18, 82, 225, 27),
             ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
         };
         _preOpeningScreensaverMinutes.Minimum = 0;
@@ -5297,17 +5329,18 @@ internal sealed class StaffSettingsDialog : Form
         _preOpeningScreensaverMinutes.Value = Math.Clamp(
             _settings.PreOpeningScreensaverMinutes, 0, 240);
         _preOpeningScreensaverMinutes.TextAlign = HorizontalAlignment.Center;
-        _preOpeningScreensaverMinutes.Bounds = new Rectangle(246, 71, 70, 30);
+        _preOpeningScreensaverMinutes.Bounds = new Rectangle(246, 81, 70, 27);
         _preOpeningScreensaverMinutes.ValueChanged += (_, _) =>
             _businessHoursSaveButton.Text = "Save Business Hours";
         var preOpeningSuffix = new Label
         {
             Text = "minutes before opening (0 = off)", AutoSize = false,
-            Bounds = new Rectangle(324, 72, 250, 28),
+            Bounds = new Rectangle(324, 82, 250, 27),
             ForeColor = Color.FromArgb(16, 24, 32), TextAlign = ContentAlignment.MiddleLeft
         };
         automationGroup.Controls.AddRange([
             _showClosedVideo, _blackoutAtClosingTime,
+            closedLeadLabel, _businessClosedLeadMinutes, closedLeadSuffix,
             preOpeningLabel, _preOpeningScreensaverMinutes, preOpeningSuffix]);
 
         _businessHoursSaveButton.Text = "Save Business Hours";
@@ -5565,6 +5598,7 @@ internal sealed class StaffSettingsDialog : Form
 
         _showClosedVideo.Enabled = _businessHoursEnabled.Checked;
         _blackoutAtClosingTime.Enabled = _businessHoursEnabled.Checked;
+        _businessClosedLeadMinutes.Enabled = _businessHoursEnabled.Checked;
         _preOpeningScreensaverMinutes.Enabled = _businessHoursEnabled.Checked;
     }
 
@@ -5573,6 +5607,7 @@ internal sealed class StaffSettingsDialog : Form
         var previousEnabled = _settings.BusinessHoursEnabled;
         var previousShowClosedVideo = _settings.ShowClosedVideo;
         var previousBlackoutAtClosingTime = _settings.BlackoutAtClosingTime;
+        var previousBusinessClosedLeadMinutes = _settings.BusinessClosedLeadMinutes;
         var previousPreOpeningMinutes = _settings.PreOpeningScreensaverMinutes;
         var previousSchedules = _settings.BusinessHours
             .Select(schedule => new KioskBusinessDayHours
@@ -5616,6 +5651,7 @@ internal sealed class StaffSettingsDialog : Form
             _settings.BusinessHoursEnabled = _businessHoursEnabled.Checked;
             _settings.ShowClosedVideo = _showClosedVideo.Checked;
             _settings.BlackoutAtClosingTime = _blackoutAtClosingTime.Checked;
+            _settings.BusinessClosedLeadMinutes = (int)_businessClosedLeadMinutes.Value;
             _settings.PreOpeningScreensaverMinutes = (int)_preOpeningScreensaverMinutes.Value;
             _settings.BusinessHours = schedules;
             _settings.Save();
@@ -5631,6 +5667,7 @@ internal sealed class StaffSettingsDialog : Form
             _settings.BusinessHoursEnabled = previousEnabled;
             _settings.ShowClosedVideo = previousShowClosedVideo;
             _settings.BlackoutAtClosingTime = previousBlackoutAtClosingTime;
+            _settings.BusinessClosedLeadMinutes = previousBusinessClosedLeadMinutes;
             _settings.PreOpeningScreensaverMinutes = previousPreOpeningMinutes;
             _settings.BusinessHours = previousSchedules;
             _businessHoursSaveButton.Text = "Save Business Hours";
@@ -5650,9 +5687,9 @@ internal sealed class StaffSettingsDialog : Form
             BusinessHoursMode.Disabled =>
                 "Automatic business hours are OFF. The kiosk remains available.",
             BusinessHoursMode.Open =>
-                "OPEN NOW — waivers remain available until the last jump cutoff.",
-            BusinessHoursMode.LastJumpSold when status.NextOpening.HasValue =>
-                "LAST JUMP SOLD — next opening is " +
+                "OPEN NOW — waivers remain available until the closing-message window.",
+            BusinessHoursMode.ClosingMessage when status.NextOpening.HasValue =>
+                "CLOSING SOON — next opening is " +
                 status.NextOpening.Value.ToString("dddd 'at' h:mm tt") + ".",
             BusinessHoursMode.PreOpening =>
                 "PRE-OPENING — screensaver window for " +

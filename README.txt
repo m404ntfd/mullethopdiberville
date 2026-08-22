@@ -101,15 +101,19 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.13, Systems Controller version 1.15.6, and Mullet Hop POS
-version 1.7.12 are the matching package releases. Kiosk 2.11.13 adds a subtle yellow
-lens-flare sweep inside the Need Assistance box every 45 seconds by default. Staff can
-change the interval from 10 to 300 seconds on the Waiver Station settings page. Systems
-Controller 1.15.6 and Kiosk 2.11.13 automatically set Last 1-Hour Jump to one hour before
-closing, preventing a full-hour wristband window from extending beyond closing while a
-separate final half-hour sale can still end at closing. POS 1.7.12 sends each wristband
-to the selected Windows printer as an opaque 24-bit device raster to address blank media
-output across WB printer drivers. Version 2.11.12 retains the 2.11.11 schedule behavior
+Waiver Kiosk version 2.11.14, Systems Controller version 1.15.7, and Mullet Hop POS
+version 1.7.13 are the matching package releases. Kiosk 2.11.14 keeps waivers available
+until the configurable Business Closed message window, which defaults to 30 minutes before
+closing. The kiosk and Systems Controller both expose and synchronize that 1–240 minute
+setting. POS 1.7.13 detects Zebra/ZDesigner wristband drivers and sends a native monochrome
+ZPL raster directly to the printer, bypassing the Windows graphics path that continued to
+advance blank wristbands. Other drivers keep the 24-bit Windows raster fallback. Version
+2.11.13 adds a subtle yellow lens-flare sweep inside the Need Assistance box every 45
+seconds by default. Staff can change the interval from 10 to 300 seconds on the Waiver
+Station settings page. Systems Controller 1.15.6 and Kiosk 2.11.13 automatically set Last
+1-Hour Jump to one hour before closing, preventing a full-hour wristband window from
+extending beyond closing while a separate final half-hour sale can still end at closing.
+Version 2.11.12 retains the 2.11.11 schedule behavior
 that treats a 12:00 AM
 closing as next-day midnight, plays the closure video at Last Jump Time Sold,
 blacks out one minute after closing, supports a separate Dark-mode switch time
@@ -362,9 +366,11 @@ Misc pages.
 * Schedule Dark mode for selected days and a selected time. When the underlying
   appearance is Light, the kiosk remains dark overnight and returns to Light or
   Auto at the next configured business opening.
-* Set opening, Last Jump Time Sold, and closing times for every business day.
-* Start the Business Closed video automatically at Last Jump Time Sold, optionally
-  black out the screen at closing, and keep the pre-opening screensaver window.
+* Set opening and closing times for every business day; the final one-hour jump
+  is calculated automatically so it ends at closing.
+* Set the Business Closed message to appear 1–240 minutes before closing (30 minutes
+  by default), optionally play the closed video, black out after closing, and keep
+  the pre-opening screensaver window.
 * Preview the Staff Closure screen or the next-business-day closed video. Press
   Esc to leave the closed-video preview and return to Staff Settings.
 * Add, edit, enable, disable, or delete scheduled JPG advertisements.
@@ -377,12 +383,12 @@ Misc pages.
 * Select how many minutes of guest inactivity pass before the video screensaver
   begins. The default is 3 minutes, and the saved delay is retained after the
   kiosk or computer restarts.
-* Enable automatic business hours and set opening, Last Jump Time Sold, and
-  closing times independently
+* Enable automatic business hours and set opening and closing times independently
   for every day of the week. Automatic business hours are off until staff enable
   them, so updating an existing kiosk does not unexpectedly close it.
-* Choose whether the looping Business Closed video begins at Last Jump Time Sold
-  and whether the display becomes fully black at closing. The live message says
+* Choose how many minutes before closing the Business Closed message appears,
+  whether its looping video plays, and whether the display becomes fully black
+  after closing. The live message says
   that no jump times remain today and shows the next opening day and time from
   the saved Business Hours schedule.
 * Select how many minutes before the next scheduled opening the normal video
@@ -511,13 +517,13 @@ WHAT THE KIOSK DOES
   closed pages. The password dialog opens in the foreground with its entry field
   focused so staff can type immediately. Staff Settings also controls the
   screensaver delay, and Return to Kiosk reloads a clean waiver starting page.
-* Supports an optional weekly business-hours schedule. At closing time, the kiosk
-  clears the guest session and shows a branded, looping Business Closed video for
-  the saved period (5 minutes by default). Live text above the video says that no
+* Supports an optional weekly business-hours schedule. At the configured lead time
+  before closing (30 minutes by default), the kiosk clears the guest session and
+  shows the branded Business Closed message and optional looping video. Live text says that no
   jump times remain today and calculates the next opening day and time from the
   kiosk's saved Business Hours. A local edit or controller sync refreshes that
-  opening time while the screen is displayed. The kiosk then disables browser
-  input on a completely black display. Only the staff shortcut and password can
+  opening time while the screen is displayed. After closing, the kiosk can disable
+  browser input on a completely black display. Only the staff shortcut and password can
   open Staff Settings while the display is black.
 * Automatically changes the black display to the packaged video screensaver at
   the staff-selected lead time before the next opening. From that point the video

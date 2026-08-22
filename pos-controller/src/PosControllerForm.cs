@@ -190,6 +190,7 @@ internal sealed class PosControllerForm : Form
             DirectWristbandPrinter.HasPdfSignatureForSmokeTest("<!DOC"u8.ToArray()) ||
             !DirectWristbandPrinter.InkMeasurementPassesSmokeTest() ||
             !DirectWristbandPrinter.PrinterRasterPackingPassesSmokeTest() ||
+            !DirectWristbandPrinter.NativeZplPackingPassesSmokeTest() ||
             !DirectWristbandPrinter.TextIdentifiesWristbandReturnLinkForSmokeTest(
                 "Mullet Hop logo",
                 null) ||

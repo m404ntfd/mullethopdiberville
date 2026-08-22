@@ -75,6 +75,7 @@ internal sealed class ControllerBusinessHours
     public bool Enabled { get; set; }
     public bool ShowClosedVideo { get; set; } = true;
     public bool BlackoutAtClosingTime { get; set; } = true;
+    public int BusinessClosedLeadMinutes { get; set; } = 30;
     // Retained so profiles created by older releases still deserialize cleanly.
     public int ClosedMessageMinutes { get; set; } = 5;
     public int PreOpeningScreensaverMinutes { get; set; } = 30;
@@ -105,6 +106,7 @@ internal sealed class ControllerBusinessHours
         Enabled = Enabled,
         ShowClosedVideo = ShowClosedVideo,
         BlackoutAtClosingTime = BlackoutAtClosingTime,
+        BusinessClosedLeadMinutes = BusinessClosedLeadMinutes,
         ClosedMessageMinutes = ClosedMessageMinutes,
         PreOpeningScreensaverMinutes = PreOpeningScreensaverMinutes,
         ThemeMode = ThemeMode,
@@ -137,6 +139,7 @@ internal sealed class ControllerBusinessHours
             }
             day.LastJumpTimeSold = ControllerBusinessDayHours.CalculateLastJumpTimeSold(day.CloseTime);
         }
+        BusinessClosedLeadMinutes = Math.Clamp(BusinessClosedLeadMinutes, 1, 240);
         ClosedMessageMinutes = Math.Clamp(ClosedMessageMinutes, 1, 240);
         PreOpeningScreensaverMinutes = Math.Clamp(PreOpeningScreensaverMinutes, 0, 240);
         if (!Enum.IsDefined(ThemeMode)) ThemeMode = ControllerKioskThemeMode.Light;
@@ -168,6 +171,7 @@ internal sealed class BusinessHoursSyncPackage
     public bool IncludesClosureSettings { get; set; }
     public bool ShowClosedVideo { get; set; }
     public bool BlackoutAtClosingTime { get; set; }
+    public int BusinessClosedLeadMinutes { get; set; } = 30;
     public int ClosedMessageMinutes { get; set; }
     public int PreOpeningScreensaverMinutes { get; set; }
     public bool IncludesAppearanceSettings { get; set; }
@@ -200,6 +204,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
     private readonly CheckBox _enabled = new();
     private readonly CheckBox _showClosedVideo = new();
     private readonly CheckBox _blackoutAtClosingTime = new();
+    private readonly NumericUpDown _businessClosedLeadMinutes = new();
     private readonly NumericUpDown _preOpeningMinutes = new();
     private readonly ComboBox _kioskThemeMode = new();
     private readonly CheckBox _scheduledDarkEnabled = new();
@@ -286,7 +291,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
             Text = "Closed Display and Pre-Opening", Bounds = new Rectangle(10, 336, 590, 124),
             Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(117, 68, 154)
         };
-        _showClosedVideo.Text = "Show Closed Video at final one-hour jump time";
+        _showClosedVideo.Text = "Play the Business Closed video";
         _showClosedVideo.Checked = profile.ShowClosedVideo;
         _showClosedVideo.AutoSize = true;
         _showClosedVideo.Location = new Point(18, 32);
@@ -294,12 +299,18 @@ internal sealed class ControllerBusinessHoursDialog : Form
         _blackoutAtClosingTime.Checked = profile.BlackoutAtClosingTime;
         _blackoutAtClosingTime.AutoSize = true;
         _blackoutAtClosingTime.Location = new Point(300, 32);
-        _preOpeningMinutes.SetBounds(250, 73, 72, 30);
+        _businessClosedLeadMinutes.SetBounds(170, 57, 65, 27);
+        _businessClosedLeadMinutes.Minimum = 1;
+        _businessClosedLeadMinutes.Maximum = 240;
+        _businessClosedLeadMinutes.Value = profile.BusinessClosedLeadMinutes;
+        _preOpeningMinutes.SetBounds(250, 87, 72, 27);
         _preOpeningMinutes.Minimum = 0; _preOpeningMinutes.Maximum = 240; _preOpeningMinutes.Value = profile.PreOpeningScreensaverMinutes;
         display.Controls.AddRange([
             _showClosedVideo, _blackoutAtClosingTime,
-            LabelAt("Start the screensaver before opening:", 18, 74, 225), _preOpeningMinutes,
-            LabelAt("minutes before opening (0 = off)", 334, 74, 260)
+            LabelAt("Show closed message:", 18, 58, 150), _businessClosedLeadMinutes,
+            LabelAt("minutes before closing", 243, 58, 190),
+            LabelAt("Start the screensaver before opening:", 18, 88, 225), _preOpeningMinutes,
+            LabelAt("minutes before opening (0 = off)", 334, 88, 250)
         ]);
 
         hoursPage.Controls.AddRange([_enabled, weekly, display]);
@@ -488,6 +499,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
             Enabled = _enabled.Checked,
             ShowClosedVideo = _showClosedVideo.Checked,
             BlackoutAtClosingTime = _blackoutAtClosingTime.Checked,
+            BusinessClosedLeadMinutes = (int)_businessClosedLeadMinutes.Value,
             PreOpeningScreensaverMinutes = (int)_preOpeningMinutes.Value,
             ThemeMode = _kioskThemeMode.SelectedIndex switch
             {
@@ -575,6 +587,7 @@ internal sealed class ControllerBusinessHoursDialog : Form
         }
         _showClosedVideo.Enabled = _enabled.Checked;
         _blackoutAtClosingTime.Enabled = _enabled.Checked;
+        _businessClosedLeadMinutes.Enabled = _enabled.Checked;
         _preOpeningMinutes.Enabled = _enabled.Checked;
     }
 
