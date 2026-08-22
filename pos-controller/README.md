@@ -128,7 +128,10 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.14 forces
+restarts without changing the user's normal Firefox profile. Version 1.7.15 reads the
+selected WB printer's paper size, orientation, resolution, and driver model from Windows.
+For a ZD411 raw job, it centers the configured one-inch media on the model's 2.2-inch
+printhead and does not override the printer's saved thermal mode or speed. Version 1.7.14 forces
 native Zebra output onto the physical 1 × 11-inch wristband canvas and aligns artwork
 with the feed edge instead of using the driver's wider default label size, which could
 clip almost the entire image. Version 1.7.13 detects

@@ -9,7 +9,7 @@
     <RootNamespace>MulletHopKioskController</RootNamespace>
     <AssemblyTitle>Mullet Hop Systems Controller</AssemblyTitle>
     <ApplicationIcon>..\..\assets\MulletHopFish.ico</ApplicationIcon>
-    <Version>1.15.8</Version>
+    <Version>1.15.9</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop Systems Controller</Product>
     <Description>Local-network dashboard for Mullet Hop waiver kiosks and POS workstations.</Description>
