@@ -47,6 +47,7 @@ internal static class DirectWristbandPrinter
     private const int SelectTakeFocus = 0x1;
     private const int SelectTakeSelection = 0x2;
     private const int StretchHalftone = 4;
+    private const int StretchColorOnColor = 3;
     private const double NativeWristbandWidthInches = 1d;
     private const double NativeWristbandLengthInches = 11d;
     private const double Zd411PrintheadWidthMillimeters203Dpi = 56d;
@@ -142,23 +143,24 @@ internal static class DirectWristbandPrinter
                MeasureVisibleInkPercentage(marked) > 0;
     }
 
-    internal static bool PrinterRasterPackingPassesSmokeTest()
+    internal static bool WindowsMonochromeRasterPackingPassesSmokeTest()
     {
-        using var marked = new Bitmap(4, 3, PixelFormat.Format24bppRgb);
+        using var marked = new Bitmap(8, 1, PixelFormat.Format24bppRgb);
         using (var graphics = Graphics.FromImage(marked))
         {
             graphics.Clear(Color.White);
             graphics.FillRectangle(Brushes.Black, 0, 0, 1, 1);
         }
-        var raster = CreatePrinterRaster(marked);
-        return raster.Width == 4 &&
-               raster.Height == 3 &&
-               raster.Stride == 12 &&
-               raster.Bits.Length == 36 &&
-               raster.Bits[0] == 0 &&
-               raster.Bits[1] == 0 &&
-               raster.Bits[2] == 0 &&
-               raster.Bits[3] == 255;
+        var raster = CreateWindowsMonochromeRaster(marked);
+        return raster.Width == 8 &&
+               raster.Height == 1 &&
+               raster.Stride == 4 &&
+               raster.Bits.Length == 4 &&
+               raster.Bits[0] == 0x7F &&
+               raster.Bits[1] == 0xFF &&
+               raster.Bits[2] == 0xFF &&
+               raster.Bits[3] == 0xFF &&
+               raster.BlackPixelCount == 1;
     }
 
     internal static bool NativeZplPackingPassesSmokeTest()
@@ -390,6 +392,53 @@ internal static class DirectWristbandPrinter
             image.UnlockBits(data);
         }
         return new PrinterRaster(width, height, destinationStride, bits);
+    }
+
+    private static WindowsMonochromeRaster CreateWindowsMonochromeRaster(Bitmap image)
+    {
+        var width = image.Width;
+        var height = image.Height;
+        // Windows DIB scanlines are aligned to a four-byte boundary. Palette
+        // index 0 is black and index 1 is white, so start with an all-white page
+        // and clear one bit for every printable pixel.
+        var destinationStride = checked(((width + 31) / 32) * 4);
+        var bits = new byte[checked(destinationStride * height)];
+        Array.Fill(bits, (byte)0xFF);
+        long blackPixelCount = 0;
+        var bounds = new Rectangle(0, 0, width, height);
+        var data = image.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+        try
+        {
+            var sourceStride = Math.Abs(data.Stride);
+            var row = new byte[sourceStride];
+            for (var y = 0; y < height; y++)
+            {
+                Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), row, 0, sourceStride);
+                var destinationOffset = y * destinationStride;
+                for (var x = 0; x < width; x++)
+                {
+                    var sourceOffset = x * 3;
+                    var luminance =
+                        row[sourceOffset] * 0.114d +
+                        row[sourceOffset + 1] * 0.587d +
+                        row[sourceOffset + 2] * 0.299d;
+                    if (luminance >= 245d)
+                        continue;
+                    bits[destinationOffset + x / 8] &= (byte)~(0x80 >> (x % 8));
+                    blackPixelCount++;
+                }
+            }
+        }
+        finally
+        {
+            image.UnlockBits(data);
+        }
+        return new WindowsMonochromeRaster(
+            width,
+            height,
+            destinationStride,
+            bits,
+            blackPixelCount);
     }
 
     private static void PrintRenderedPagesAsZpl(
@@ -678,20 +727,11 @@ internal static class DirectWristbandPrinter
         string printerName,
         CancellationToken cancellationToken)
     {
-        if (TryGetPrinterDriverName(printerName, out var driverName) &&
-            IsNativeZplDriver(driverName))
-        {
-            PosLog.Write(
-                $"Detected wristband driver '{driverName}' for {printerName}; " +
-                "using native ZPL raster output instead of the Windows graphics spool path.");
-            PrintRenderedPagesAsZpl(pages, printerName, driverName, cancellationToken);
-            return;
-        }
-
+        TryGetPrinterDriverName(printerName, out var driverName);
         PosLog.Write(
             $"Wristband printer {printerName} uses driver " +
             $"'{(string.IsNullOrWhiteSpace(driverName) ? "unknown" : driverName)}'; " +
-            "using the Windows 24-bit device-raster fallback.");
+            "using a 1-bit device raster through its configured Windows print path.");
         var pageIndex = 0;
         using var document = new PrintDocument
         {
@@ -787,8 +827,33 @@ internal static class DirectWristbandPrinter
                 $"The {printerName} driver returned an empty device target for wristband page {pageNumber}.");
         }
 
-        var raster = CreatePrinterRaster(image);
-        var bitmapInfo = new BitmapInfo
+        var deviceDpiX = graphics.DpiX;
+        var deviceDpiY = graphics.DpiY;
+        using var deviceImage = new Bitmap(
+            destination.Width,
+            destination.Height,
+            PixelFormat.Format24bppRgb);
+        deviceImage.SetResolution(deviceDpiX, deviceDpiY);
+        using (var deviceGraphics = Graphics.FromImage(deviceImage))
+        {
+            deviceGraphics.Clear(Color.White);
+            deviceGraphics.CompositingMode = CompositingMode.SourceCopy;
+            deviceGraphics.CompositingQuality = CompositingQuality.HighQuality;
+            deviceGraphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            deviceGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            deviceGraphics.SmoothingMode = SmoothingMode.HighQuality;
+            deviceGraphics.DrawImage(
+                image,
+                new Rectangle(0, 0, deviceImage.Width, deviceImage.Height),
+                0,
+                0,
+                image.Width,
+                image.Height,
+                GraphicsUnit.Pixel);
+        }
+
+        var raster = CreateWindowsMonochromeRaster(deviceImage);
+        var bitmapInfo = new BitmapInfo1Bit
         {
             Header = new BitmapInfoHeader
             {
@@ -798,20 +863,24 @@ internal static class DirectWristbandPrinter
                 // printer receives the same row order that Windows rendered.
                 Height = -raster.Height,
                 Planes = 1,
-                BitCount = 24,
+                BitCount = 1,
                 Compression = 0,
                 SizeImage = checked((uint)raster.Bits.Length),
-                XPelsPerMeter = (int)Math.Round(image.HorizontalResolution / 0.0254d),
-                YPelsPerMeter = (int)Math.Round(image.VerticalResolution / 0.0254d)
-            }
+                XPelsPerMeter = (int)Math.Round(deviceDpiX / 0.0254d),
+                YPelsPerMeter = (int)Math.Round(deviceDpiY / 0.0254d),
+                ColorsUsed = 2,
+                ColorsImportant = 2
+            },
+            Black = 0x00000000,
+            White = 0x00FFFFFF
         };
 
         var hdc = graphics.GetHdc();
         try
         {
-            SetStretchBltMode(hdc, StretchHalftone);
+            SetStretchBltMode(hdc, StretchColorOnColor);
             SetBrushOrgEx(hdc, 0, 0, IntPtr.Zero);
-            var copiedLines = StretchDIBits(
+            var copiedLines = StretchDIBitsMonochrome(
                 hdc,
                 destination.X,
                 destination.Y,
@@ -831,10 +900,13 @@ internal static class DirectWristbandPrinter
                     $"The {printerName} driver rejected the device raster for wristband page {pageNumber}. " +
                     $"Windows error: {Marshal.GetLastWin32Error()}.");
             }
+            var inkPercentage = raster.Width == 0 || raster.Height == 0
+                ? 0
+                : raster.BlackPixelCount * 100d / (raster.Width * (double)raster.Height);
             PosLog.Write(
-                $"Transferred wristband page {pageNumber} to {printerName} as a 24-bit device raster: " +
-                $"{raster.Width}x{raster.Height} source pixels to " +
-                $"{destination.Width}x{destination.Height} printer pixels; " +
+                $"Transferred wristband page {pageNumber} to {printerName} as a pre-scaled " +
+                $"1-bit Windows device raster: {raster.Width}x{raster.Height} pixels, " +
+                $"{raster.BlackPixelCount} black dots ({inkPercentage:0.###}%); " +
                 $"GDI copied {copiedLines} line(s).");
         }
         finally
@@ -844,6 +916,12 @@ internal static class DirectWristbandPrinter
     }
 
     private sealed record PrinterRaster(int Width, int Height, int Stride, byte[] Bits);
+    private sealed record WindowsMonochromeRaster(
+        int Width,
+        int Height,
+        int Stride,
+        byte[] Bits,
+        long BlackPixelCount);
     private sealed record MonochromeRaster(int Width, int Height, int BytesPerRow, byte[] Bits);
     private sealed record NativeWristbandLayout(
         int MediaWidth,
@@ -911,6 +989,14 @@ internal static class DirectWristbandPrinter
         public uint FirstColor;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfo1Bit
+    {
+        public BitmapInfoHeader Header;
+        public uint Black;
+        public uint White;
+    }
+
     [DllImport("gdi32.dll", SetLastError = true)]
     private static extern int SetStretchBltMode(IntPtr hdc, int mode);
 
@@ -930,6 +1016,22 @@ internal static class DirectWristbandPrinter
         int sourceHeight,
         byte[] bits,
         ref BitmapInfo bitmapInfo,
+        uint colorUse,
+        uint rasterOperation);
+
+    [DllImport("gdi32.dll", EntryPoint = "StretchDIBits", SetLastError = true)]
+    private static extern int StretchDIBitsMonochrome(
+        IntPtr hdc,
+        int destinationX,
+        int destinationY,
+        int destinationWidth,
+        int destinationHeight,
+        int sourceX,
+        int sourceY,
+        int sourceWidth,
+        int sourceHeight,
+        byte[] bits,
+        ref BitmapInfo1Bit bitmapInfo,
         uint colorUse,
         uint rasterOperation);
 

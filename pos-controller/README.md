@@ -128,7 +128,11 @@ four kiosk assignments through the master controller.
 
 The application starts Firefox with a dedicated profile stored with the existing
 application data. This keeps the LilyPad login and Firefox site data available between
-restarts without changing the user's normal Firefox profile. Version 1.7.15 reads the
+restarts without changing the user's normal Firefox profile. Version 1.7.16 sends a
+pre-scaled one-bit monochrome raster through the configured Windows WB printer driver,
+allowing that driver to apply its saved media calibration, orientation, and alignment.
+The log records the raster dimensions and black-dot percentage for every submitted page.
+Version 1.7.15 reads the
 selected WB printer's paper size, orientation, resolution, and driver model from Windows.
 For a ZD411 raw job, it centers the configured one-inch media on the model's 2.2-inch
 printhead and does not override the printer's saved thermal mode or speed. Version 1.7.14 forces
