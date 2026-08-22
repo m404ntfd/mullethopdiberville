@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -9,7 +9,7 @@
     <RootNamespace>MulletHopPosController</RootNamespace>
     <AssemblyTitle>Mullet Hop POS</AssemblyTitle>
     <ApplicationIcon>..\..\assets\MulletHopStatusViewerFish.ico</ApplicationIcon>
-    <Version>1.7.9</Version>
+    <Version>1.7.10</Version>
     <Authors>Mullet Hop</Authors>
     <Product>Mullet Hop POS</Product>
     <Description>Full-screen LilyPad POS and front-desk controls for Mullet Hop waiver kiosks.</Description>

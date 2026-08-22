@@ -95,6 +95,28 @@ internal sealed class PosControllerForm : Form
         if (!WristbandSettingsPackage.SmokeTest())
             throw new InvalidOperationException("Wristband color settings failed their regression test.");
 
+        using (var wristbandSettings = new WristbandColorSettingsDialog(
+                   new WristbandSettingsPackage()))
+        {
+            wristbandSettings.CreateControl();
+            var actionLabels = Descendants(wristbandSettings)
+                .OfType<Button>()
+                .Select(button => button.Text)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var requiredActions = new[]
+            {
+                "Add Color", "Edit Color", "Remove Color", "Make Active", "Make Inactive"
+            };
+            var colorTabs = Descendants(wristbandSettings).OfType<TabControl>().ToArray();
+            if (requiredActions.Any(action => !actionLabels.Contains(action)) ||
+                colorTabs.Length != 1 ||
+                colorTabs[0].SelectedTab?.Text != "COLOR LIST")
+            {
+                throw new InvalidOperationException(
+                    "The wristband settings screen does not expose every color-list action on its first tab.");
+            }
+        }
+
         using var form = new PosControllerForm(new PosSettings());
         form.CreateControl();
         if (FirefoxHost.WindowThreadIdForSmokeTest(form.Handle) == 0)
@@ -162,26 +184,17 @@ internal sealed class PosControllerForm : Form
         var printerNames = WristbandPrinterDialog.PrinterNamesForSmokeTest;
         if (printerNames.Count != 7 ||
             !printerNames.SequenceEqual(Enumerable.Range(1, 7).Select(number => $"WB-{number}")) ||
-            !FirefoxPrintDestinationSelector.IsSupportedWristbandPrinterForSmokeTest("WB-7") ||
-            FirefoxPrintDestinationSelector.IsSupportedWristbandPrinterForSmokeTest("WB-8") ||
-            !FirefoxPrintDestinationSelector.TextIdentifiesPrinterForSmokeTest(
-                "Destination: WB-1 (ready)",
-                "WB-1") ||
-            FirefoxPrintDestinationSelector.TextIdentifiesPrinterForSmokeTest("WB-10", "WB-1") ||
-            !FirefoxPrintDestinationSelector.TextIdentifiesPrintActionForSmokeTest("Print") ||
-            FirefoxPrintDestinationSelector.TextIdentifiesPrintActionForSmokeTest(
-                "Print using the system dialog") ||
-            !FirefoxPrintDestinationSelector.TextIdentifiesSystemPrintDialogActionForSmokeTest(
-                "Print using the system dialog…") ||
-            FirefoxPrintDestinationSelector.TextIdentifiesSystemPrintDialogActionForSmokeTest(
-                "Print") ||
-            !FirefoxPrintDestinationSelector.TextIdentifiesWristbandReturnLinkForSmokeTest(
+            !DirectWristbandPrinter.IsSupportedWristbandPrinterForSmokeTest("WB-7") ||
+            DirectWristbandPrinter.IsSupportedWristbandPrinterForSmokeTest("WB-8") ||
+            !DirectWristbandPrinter.HasPdfSignatureForSmokeTest("%PDF-"u8.ToArray()) ||
+            DirectWristbandPrinter.HasPdfSignatureForSmokeTest("<!DOC"u8.ToArray()) ||
+            !DirectWristbandPrinter.TextIdentifiesWristbandReturnLinkForSmokeTest(
                 "Mullet Hop logo",
                 null) ||
-            !FirefoxPrintDestinationSelector.TextIdentifiesWristbandReturnLinkForSmokeTest(
+            !DirectWristbandPrinter.TextIdentifiesWristbandReturnLinkForSmokeTest(
                 null,
                 "https://mullet.lilypadpos.app/public/EditTrackerInSale.php?ArrayKey=0") ||
-            FirefoxPrintDestinationSelector.TextIdentifiesWristbandReturnLinkForSmokeTest(
+            DirectWristbandPrinter.TextIdentifiesWristbandReturnLinkForSmokeTest(
                 null,
                 wristbandPrintUrl))
         {
@@ -778,21 +791,13 @@ internal sealed class PosControllerForm : Form
             if (dialog.ShowDialog(this) != DialogResult.OK ||
                 string.IsNullOrWhiteSpace(dialog.SelectedPrinterName))
             {
-                if (!_firefoxHost.CancelPrintPreview())
-                {
-                    PosLog.Write(
-                        "The wristband printer prompt was cancelled, but Firefox did not accept Escape.");
-                }
-                else
-                {
-                    PosLog.Write("The wristband print preview was cancelled by the user.");
-                }
+                PosLog.Write("The wristband printer selection was cancelled; no print job was sent.");
                 return;
             }
 
             var printerName = dialog.SelectedPrinterName;
             PosLog.Write($"The user selected {printerName} for the current wristband print job.");
-            var result = await _firefoxHost.PrintCurrentPreviewAsync(printerName);
+            var result = await _firefoxHost.PrintCurrentPreviewAsync(printerName, e.PageUrl);
             if (!result.Success)
             {
                 PosLog.Write(result.Message);
@@ -821,8 +826,8 @@ internal sealed class PosControllerForm : Form
             PosLog.Write("Wristband printer prompt error: " + ex);
             MessageBox.Show(
                 this,
-                "The wristband print could not be completed automatically. " +
-                "Choose WB-1 through WB-7 and select Print manually in Firefox.\n\n" +
+                "The wristband print could not be submitted directly to Windows. " +
+                "No second print command was sent. Check the selected printer and try again.\n\n" +
                 ex.Message,
                 "Print Wristbands",
                 MessageBoxButtons.OK,

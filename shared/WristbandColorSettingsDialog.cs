@@ -23,6 +23,12 @@ internal sealed class WristbandColorSettingsDialog : Form
     private readonly ComboBox _dayPicker = new();
     private readonly DataGridView _scheduleGrid = new();
     private readonly Label _scheduleStatus = new();
+    private readonly TabControl _rightTabs = new();
+    private readonly ListBox _colorList = new();
+    private Button _editColor = null!;
+    private Button _removeColor = null!;
+    private Button _makeActive = null!;
+    private Button _makeInactive = null!;
     private readonly Dictionary<string, ComboBox> _printerChoices =
         new(StringComparer.OrdinalIgnoreCase);
     private DayOfWeek? _loadedDay;
@@ -34,8 +40,8 @@ internal sealed class WristbandColorSettingsDialog : Form
         _working.Normalize();
         Text = "Wristband Colors and Jump Times";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(850, 650);
-        ClientSize = new Size(940, 720);
+        MinimumSize = new Size(1000, 680);
+        ClientSize = new Size(1120, 760);
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(244, 248, 251);
 
@@ -82,10 +88,10 @@ internal sealed class WristbandColorSettingsDialog : Form
             Padding = new Padding(18),
             BackColor = BackColor
         };
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         body.Controls.Add(BuildSchedulePanel(), 0, 0);
-        body.Controls.Add(BuildPrinterPanel(), 1, 0);
+        body.Controls.Add(BuildRightPanel(), 1, 0);
 
         Controls.Add(body);
         Controls.Add(footer);
@@ -96,6 +102,7 @@ internal sealed class WristbandColorSettingsDialog : Form
         _dayPicker.Items.AddRange(OrderedDays.Select(day => new DayChoice(day)).ToArray());
         _dayPicker.SelectedIndexChanged += (_, _) => ChangeSelectedDay();
         RefreshColorChoices();
+        RefreshColorList();
         _dayPicker.SelectedIndex = Math.Max(0, Array.IndexOf(OrderedDays, DateTime.Today.DayOfWeek));
     }
 
@@ -125,8 +132,8 @@ internal sealed class WristbandColorSettingsDialog : Form
         _dayPicker.DropDownStyle = ComboBoxStyle.DropDownList;
         _dayPicker.Bounds = new Rectangle(62, 4, 185, 32);
         top.Controls.Add(_dayPicker);
-        var manage = MakeButton("Add / Delete / Activate Colors", Color.FromArgb(245, 130, 32));
-        manage.Bounds = new Rectangle(250, 3, 225, 35);
+        var manage = MakeButton("Show Color List Controls", Color.FromArgb(245, 130, 32));
+        manage.Bounds = new Rectangle(280, 3, 240, 35);
         manage.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         manage.Click += (_, _) => ManageColors();
         top.Controls.Add(manage);
@@ -176,6 +183,94 @@ internal sealed class WristbandColorSettingsDialog : Form
         group.Controls.Add(_scheduleGrid);
         group.Controls.Add(top);
         return group;
+    }
+
+    private Control BuildRightPanel()
+    {
+        _rightTabs.Dock = DockStyle.Fill;
+        _rightTabs.Margin = new Padding(9, 0, 0, 0);
+        _rightTabs.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+
+        var colorsTab = new TabPage("COLOR LIST")
+        {
+            BackColor = Color.FromArgb(244, 248, 251),
+            Padding = new Padding(10)
+        };
+        colorsTab.Controls.Add(BuildColorListPanel());
+
+        var printersTab = new TabPage("PRINTER COLORS")
+        {
+            BackColor = Color.FromArgb(244, 248, 251),
+            Padding = new Padding(4)
+        };
+        printersTab.Controls.Add(BuildPrinterPanel());
+        _rightTabs.TabPages.Add(colorsTab);
+        _rightTabs.TabPages.Add(printersTab);
+        _rightTabs.SelectedIndex = 0;
+        return _rightTabs;
+    }
+
+    private Control BuildColorListPanel()
+    {
+        var panel = new Panel { Dock = DockStyle.Fill };
+        var explanation = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 70,
+            Text = "Add or remove wristband colors here. Inactive colors remain on saved schedules but cannot be newly assigned.",
+            ForeColor = Color.FromArgb(52, 65, 76),
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Regular)
+        };
+
+        _colorList.Dock = DockStyle.Fill;
+        _colorList.DrawMode = DrawMode.OwnerDrawFixed;
+        _colorList.ItemHeight = 42;
+        _colorList.IntegralHeight = false;
+        _colorList.DrawItem += DrawColorListItem;
+        _colorList.DoubleClick += (_, _) => EditSelectedColor();
+        _colorList.SelectedIndexChanged += (_, _) => UpdateColorActionButtons();
+
+        var actions = new TableLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 112,
+            ColumnCount = 3,
+            RowCount = 2,
+            Padding = new Padding(0, 8, 0, 0)
+        };
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+        actions.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        actions.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+
+        var add = MakeButton("Add Color", Color.FromArgb(118, 196, 66));
+        _editColor = MakeButton("Edit Color", Color.FromArgb(105, 210, 236));
+        _removeColor = MakeButton("Remove Color", Color.FromArgb(187, 34, 46), Color.White);
+        _makeActive = MakeButton("Make Active", Color.FromArgb(245, 130, 32));
+        _makeInactive = MakeButton("Make Inactive", Color.FromArgb(98, 107, 117), Color.White);
+        foreach (var button in new[] { add, _editColor, _removeColor, _makeActive, _makeInactive })
+        {
+            button.Dock = DockStyle.Fill;
+            button.Margin = new Padding(4);
+        }
+        add.Click += (_, _) => AddColor();
+        _editColor.Click += (_, _) => EditSelectedColor();
+        _removeColor.Click += (_, _) => RemoveSelectedColor();
+        _makeActive.Click += (_, _) => SetSelectedColorActive(true);
+        _makeInactive.Click += (_, _) => SetSelectedColorActive(false);
+        actions.Controls.Add(add, 0, 0);
+        actions.Controls.Add(_editColor, 1, 0);
+        actions.Controls.Add(_removeColor, 2, 0);
+        actions.Controls.Add(_makeActive, 0, 1);
+        actions.SetColumnSpan(_makeActive, 1);
+        actions.Controls.Add(_makeInactive, 1, 1);
+        actions.SetColumnSpan(_makeInactive, 2);
+
+        panel.Controls.Add(_colorList);
+        panel.Controls.Add(actions);
+        panel.Controls.Add(explanation);
+        return panel;
     }
 
     private Control BuildPrinterPanel()
@@ -236,7 +331,7 @@ internal sealed class WristbandColorSettingsDialog : Form
             Dock = DockStyle.Fill,
             Text = "Each row is a one-hour jump window. New windows begin every 30 minutes. " +
                    "The first row uses that day's opening time and the final row uses Last Jump Time Sold from Business Hours.\n\n" +
-                   "Use Manage Color List to add or remove colors and to mark a color active or inactive.",
+                   "Use the Color List tab to add or remove colors and to mark a color active or inactive.",
             ForeColor = Color.FromArgb(52, 65, 76),
             Font = new Font("Segoe UI", 9.5f, FontStyle.Regular)
         });
@@ -368,13 +463,142 @@ internal sealed class WristbandColorSettingsDialog : Form
 
     private void ManageColors()
     {
-        CaptureLoadedDay();
-        CapturePrinterAssignments();
-        using var dialog = new WristbandColorManagerDialog(_working.Colors);
+        _rightTabs.SelectedIndex = 0;
+        _colorList.Focus();
+    }
+
+    private WristbandColorDefinition? SelectedColor =>
+        _colorList.SelectedItem as WristbandColorDefinition;
+
+    private void AddColor()
+    {
+        using var dialog = new WristbandColorEditDialog(null);
         if (dialog.ShowDialog(this) != DialogResult.OK)
             return;
-        _working.Colors = dialog.Colors.Select(color => color.Clone()).ToList();
+        if (_working.Colors.Any(color => string.Equals(
+                color.Name,
+                dialog.ColorDefinition.Name,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show(this, "A wristband color with that name already exists.", Text,
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        CaptureLoadedDay();
+        CapturePrinterAssignments();
+        _working.Colors.Add(dialog.ColorDefinition);
         RefreshColorChoices();
+        RefreshColorList(dialog.ColorDefinition.Id);
+    }
+
+    private void EditSelectedColor()
+    {
+        var selected = SelectedColor;
+        if (selected is null)
+            return;
+        using var dialog = new WristbandColorEditDialog(selected);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+        if (_working.Colors.Any(color => !ReferenceEquals(color, selected) && string.Equals(
+                color.Name,
+                dialog.ColorDefinition.Name,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show(this, "A wristband color with that name already exists.", Text,
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        selected.Name = dialog.ColorDefinition.Name;
+        selected.HexColor = dialog.ColorDefinition.HexColor;
+        selected.IsActive = dialog.ColorDefinition.IsActive;
+        RefreshColorChoices();
+        RefreshColorList(selected.Id);
+    }
+
+    private void RemoveSelectedColor()
+    {
+        var selected = SelectedColor;
+        if (selected is null)
+            return;
+        if (MessageBox.Show(
+                this,
+                $"Remove {selected.Name}? It will also be removed from saved jump-time and printer assignments.",
+                "Remove Wristband Color",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            return;
+        }
+        CaptureLoadedDay();
+        CapturePrinterAssignments();
+        _working.Colors.Remove(selected);
+        RefreshColorChoices();
+        RefreshColorList();
+    }
+
+    private void SetSelectedColorActive(bool active)
+    {
+        var selected = SelectedColor;
+        if (selected is null)
+            return;
+        selected.IsActive = active;
+        RefreshColorChoices();
+        RefreshColorList(selected.Id);
+    }
+
+    private void RefreshColorList(string? selectedId = null)
+    {
+        _colorList.BeginUpdate();
+        _colorList.Items.Clear();
+        foreach (var color in _working.Colors
+                     .OrderByDescending(color => color.IsActive)
+                     .ThenBy(color => color.Name, StringComparer.CurrentCultureIgnoreCase))
+        {
+            _colorList.Items.Add(color);
+        }
+        _colorList.EndUpdate();
+        if (!string.IsNullOrWhiteSpace(selectedId))
+        {
+            _colorList.SelectedItem = _colorList.Items.Cast<WristbandColorDefinition>()
+                .FirstOrDefault(color => color.Id == selectedId);
+        }
+        else if (_colorList.Items.Count > 0)
+        {
+            _colorList.SelectedIndex = 0;
+        }
+        UpdateColorActionButtons();
+        _colorList.Invalidate();
+    }
+
+    private void UpdateColorActionButtons()
+    {
+        var selected = SelectedColor;
+        _editColor.Enabled = selected is not null;
+        _removeColor.Enabled = selected is not null;
+        _makeActive.Enabled = selected is not null && !selected.IsActive;
+        _makeInactive.Enabled = selected is not null && selected.IsActive;
+    }
+
+    private void DrawColorListItem(object? sender, DrawItemEventArgs e)
+    {
+        e.DrawBackground();
+        if (e.Index < 0 || e.Index >= _colorList.Items.Count)
+            return;
+        var color = (WristbandColorDefinition)_colorList.Items[e.Index];
+        var swatch = new Rectangle(e.Bounds.X + 8, e.Bounds.Y + 7, 48, e.Bounds.Height - 14);
+        using var brush = new SolidBrush(ParseColor(color.HexColor));
+        e.Graphics.FillRectangle(brush, swatch);
+        e.Graphics.DrawRectangle(Pens.DimGray, swatch);
+        var status = color.IsActive ? "ACTIVE" : "INACTIVE";
+        var textColor = color.IsActive ? e.ForeColor : Color.FromArgb(130, 136, 142);
+        TextRenderer.DrawText(
+            e.Graphics,
+            $"{color.Name}   •   {status}",
+            e.Font ?? Font,
+            new Rectangle(e.Bounds.X + 68, e.Bounds.Y, e.Bounds.Width - 74, e.Bounds.Height),
+            textColor,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        e.DrawFocusRectangle();
     }
 
     private void SaveAndClose()
