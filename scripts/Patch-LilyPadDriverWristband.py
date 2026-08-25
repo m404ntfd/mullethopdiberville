@@ -1,3 +1,4 @@
+# Apply the LilyPad-documented Zebra Windows driver print path.
 from pathlib import Path
 
 path = Path('pos-controller/src/DirectWristbandPrinter.cs')
