@@ -163,6 +163,11 @@ internal static class DirectWristbandPrinter
                raster.BlackPixelCount == 1;
     }
 
+    internal static bool WristbandOrientationPassesSmokeTest() =>
+        ShouldRotateArtwork(2599, 237, 185, 2030) &&
+        !ShouldRotateArtwork(237, 2599, 185, 2030) &&
+        !ShouldRotateArtwork(2599, 237, 2030, 185);
+
     internal static bool NativeZplPackingPassesSmokeTest()
     {
         using var marked = new Bitmap(8, 1, PixelFormat.Format24bppRgb);
@@ -750,12 +755,10 @@ internal static class DirectWristbandPrinter
         };
         document.QueryPageSettings += (_, eventArgs) =>
         {
-            var image = pages[Math.Min(pageIndex, pages.Count - 1)];
-            var imageIsWide = image.Width > image.Height;
-            var paperBounds = eventArgs.PageSettings.Bounds;
-            var paperIsWide = paperBounds.Width > paperBounds.Height;
-            if (imageIsWide != paperIsWide)
-                eventArgs.PageSettings.Landscape = !eventArgs.PageSettings.Landscape;
+            // Preserve the WB printer's Windows orientation. A 1 x 10-inch
+            // wristband must remain portrait so its long dimension follows the
+            // media feed. The LilyPad PDF is normally wide; rotate the artwork
+            // in PrintPage instead of turning the printer page sideways.
             eventArgs.PageSettings.Margins = new Margins(0, 0, 0, 0);
             eventArgs.PageSettings.Color = false;
         };
@@ -777,11 +780,20 @@ internal static class DirectWristbandPrinter
                     Math.Max(1, eventArgs.MarginBounds.Width),
                     Math.Max(1, eventArgs.MarginBounds.Height));
             }
+            using var orientedImage = ShouldRotateArtwork(
+                    image.Width,
+                    image.Height,
+                    printableBounds.Width,
+                    printableBounds.Height)
+                ? (Bitmap)image.Clone()
+                : null;
+            orientedImage?.RotateFlip(RotateFlipType.Rotate90FlipNone);
+            var printImage = orientedImage ?? image;
             var scale = Math.Min(
-                printableBounds.Width / image.Width,
-                printableBounds.Height / image.Height);
-            var targetWidth = image.Width * scale;
-            var targetHeight = image.Height * scale;
+                printableBounds.Width / printImage.Width,
+                printableBounds.Height / printImage.Height);
+            var targetWidth = printImage.Width * scale;
+            var targetHeight = printImage.Height * scale;
             var targetX = printableBounds.Left + (printableBounds.Width - targetWidth) / 2f;
             var targetY = printableBounds.Top + (printableBounds.Height - targetHeight) / 2f;
             PosLog.Write(
@@ -789,10 +801,12 @@ internal static class DirectWristbandPrinter
                 $"paper={eventArgs.PageBounds.Width}x{eventArgs.PageBounds.Height}, " +
                 $"printable={printableBounds.X:0.##},{printableBounds.Y:0.##}," +
                 $"{printableBounds.Width:0.##}x{printableBounds.Height:0.##}, " +
-                $"target={targetX:0.##},{targetY:0.##},{targetWidth:0.##}x{targetHeight:0.##}.");
+                $"target={targetX:0.##},{targetY:0.##},{targetWidth:0.##}x{targetHeight:0.##}, " +
+                $"artworkRotated={orientedImage is not null}, " +
+                $"configuredLandscape={document.DefaultPageSettings.Landscape}.");
             TransferRasterToPrinter(
                 graphics,
-                image,
+                printImage,
                 new RectangleF(targetX, targetY, targetWidth, targetHeight),
                 printerName,
                 pageIndex + 1);
@@ -802,6 +816,13 @@ internal static class DirectWristbandPrinter
         cancellationToken.ThrowIfCancellationRequested();
         document.Print();
     }
+
+    private static bool ShouldRotateArtwork(
+        int imageWidth,
+        int imageHeight,
+        float targetWidth,
+        float targetHeight) =>
+        (imageWidth > imageHeight) != (targetWidth > targetHeight);
 
     private static void TransferRasterToPrinter(
         Graphics graphics,
