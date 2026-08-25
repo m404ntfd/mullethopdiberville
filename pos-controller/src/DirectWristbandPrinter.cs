@@ -52,6 +52,8 @@ internal static class DirectWristbandPrinter
     private const double NativeWristbandLengthInches = 11d;
     private const int Zd411PrintheadWidthDots203Dpi = 448;
     private const int Zd411PrintheadWidthDots300Dpi = 638;
+    private const string NativeWristbandGraphicName = "MHWBAND";
+    private const int MaximumZplGraphicFieldBytes = 99_999;
     private const uint DibRgbColors = 0;
     private const uint SourceCopyRasterOperation = 0x00CC0020;
     private const int GdiError = -1;
@@ -187,12 +189,14 @@ internal static class DirectWristbandPrinter
             sourceRaster,
             standardLayout.PrintheadWidth,
             standardLayout.LeftOffset);
-        var command = BuildZplCommand(
+        var command = BuildStoredGraphicZplCommand(
             paddedRaster,
             standardLayout.PrintheadWidth,
-            0);
+            NativeWristbandGraphicName);
         var expectedByte = standardLayout.LeftOffset / 8;
         var expectedMask = (byte)(0x80 >> (standardLayout.LeftOffset % 8));
+        var fullWristbandBytes = checked(
+            ((standardLayout.PrintheadWidth + 7) / 8) * standardLayout.MediaLength);
         return sourceRaster.Width == 8 &&
                sourceRaster.Height == 1 &&
                sourceRaster.BytesPerRow == 1 &&
@@ -207,10 +211,17 @@ internal static class DirectWristbandPrinter
                paddedRaster.BytesPerRow == 56 &&
                paddedRaster.Bits.Length == 56 &&
                paddedRaster.Bits[expectedByte] == expectedMask &&
-               command.Contains("^GFA,56,56,56,", StringComparison.Ordinal) &&
+               fullWristbandBytes == 125_048 &&
+               fullWristbandBytes > MaximumZplGraphicFieldBytes &&
+               command.StartsWith("~DGR:MHWBAND.GRF,56,56,", StringComparison.Ordinal) &&
+               command.Contains("^PON", StringComparison.Ordinal) &&
+               command.Contains("^FWN", StringComparison.Ordinal) &&
+               command.Contains("^LT0", StringComparison.Ordinal) &&
+               command.Contains("^LS0", StringComparison.Ordinal) &&
                command.Contains("^PW448", StringComparison.Ordinal) &&
-               command.Contains("^FO0,0", StringComparison.Ordinal) &&
-               !command.Contains("^LS", StringComparison.Ordinal) &&
+               command.Contains("^LL1", StringComparison.Ordinal) &&
+               command.Contains("^FO0,0^XGR:MHWBAND.GRF,1,1^FS", StringComparison.Ordinal) &&
+               !command.Contains("^GF", StringComparison.Ordinal) &&
                !command.Contains("^PR", StringComparison.Ordinal);
     }
 
@@ -243,7 +254,7 @@ internal static class DirectWristbandPrinter
             {
                 PosLog.Write(
                     $"Wristband printer {printerName} uses driver '{driverName}'; " +
-                    "bypassing the Windows GDI graphics path and sending the fitted wristband raster as RAW ZPL.");
+                    "bypassing the Windows GDI graphics path and using a downloaded GRF graphic with explicit Zebra orientation resets.");
                 PrintRenderedPagesAsZpl(
                     pages,
                     printerName,
@@ -484,7 +495,7 @@ internal static class DirectWristbandPrinter
         var printableArea = pageSettings.PrintableArea;
 
         PosLog.Write(
-            $"RAW ZPL wristband media for {printerName} from Windows driver '{driverName}': " +
+            $"Stored-GRF ZPL wristband media for {printerName} from Windows driver '{driverName}': " +
             $"configured paper={paper.PaperName} {paper.Width}x{paper.Height} hundredths-inch, " +
             $"landscape={pageSettings.Landscape}, " +
             $"printable={printableArea.X:0.##},{printableArea.Y:0.##}," +
@@ -504,20 +515,24 @@ internal static class DirectWristbandPrinter
                 layout.PrintheadWidth,
                 layout.LeftOffset);
             var ink = MeasureRasterInk(raster);
+            var command = BuildStoredGraphicZplCommand(
+                raster,
+                layout.PrintheadWidth,
+                NativeWristbandGraphicName);
+            var commandBytes = Encoding.ASCII.GetBytes(command);
             SendRawPrinterBytes(
                 printerName,
-                Encoding.ASCII.GetBytes(BuildZplCommand(
-                    raster,
-                    layout.PrintheadWidth,
-                    0)),
+                commandBytes,
                 "Mullet Hop Wristbands");
             PosLog.Write(
-                $"Submitted a centered full-printhead RAW ZPL raster to {printerName}: " +
+                $"Submitted a stored-GRF Zebra wristband to {printerName}: " +
                 $"artwork={artworkRaster.Width}x{artworkRaster.Height} dots, " +
-                $"wire raster={raster.Width}x{raster.Height} dots, {raster.Bits.Length} raster bytes, " +
+                $"stored graphic={raster.Width}x{raster.Height} dots, " +
+                $"graphic bytes={raster.Bits.Length}, RAW job bytes={commandBytes.Length}, " +
                 $"artwork x={layout.LeftOffset}..{layout.LeftOffset + artworkRaster.Width - 1}, " +
-                $"black dots={ink.Count}, black bounds={ink.MinX},{ink.MinY}..{ink.MaxX},{ink.MaxY}, " +
-                "^PW spans the complete printhead and ^FO is 0,0.");
+                $"black dots={ink.Count}, black bounds={ink.MinX},{ink.MinY}..{ink.MaxX},{ink.MaxY}; " +
+                $"downloaded as R:{NativeWristbandGraphicName}.GRF and recalled with " +
+                "^PON, ^FWN, ^LT0, ^LS0, ^PW full-printhead, and ^FO0,0.");
         }
     }
 
@@ -692,17 +707,55 @@ internal static class DirectWristbandPrinter
             : (count, minX, minY, maxX, maxY);
     }
 
-    private static string BuildZplCommand(
+    private static string BuildStoredGraphicZplCommand(
         MonochromeRaster raster,
         int printheadWidth,
-        int leftOffset)
+        string graphicName)
     {
+        if (raster.Width != printheadWidth)
+        {
+            throw new ArgumentException(
+                "The stored Zebra graphic must span the complete printhead.",
+                nameof(raster));
+        }
+        if (graphicName.Length is < 1 or > 8 ||
+            graphicName.Any(character => !char.IsLetterOrDigit(character)))
+        {
+            throw new ArgumentException(
+                "A Zebra GRF name must contain one to eight letters or digits.",
+                nameof(graphicName));
+        }
+
         var hexadecimal = Convert.ToHexString(raster.Bits);
-        return "^XA\n^CI28\n^PW" + printheadWidth +
-               "\n^LL" + raster.Height +
-               "\n^LH0,0\n^FO" + leftOffset + ",0^GFA," + raster.Bits.Length + "," +
-               raster.Bits.Length + "," + raster.BytesPerRow + "," +
-               hexadecimal + "^FS\n^XZ\n";
+        var command = new StringBuilder(hexadecimal.Length + 256);
+        command.Append("~DGR:")
+            .Append(graphicName)
+            .Append(".GRF,")
+            .Append(raster.Bits.Length)
+            .Append(',')
+            .Append(raster.BytesPerRow)
+            .Append(',')
+            .Append(hexadecimal)
+            .Append("
+^XA
+^CI28
+^PON
+^FWN
+^LH0,0
+^LT0
+^LS0
+^PW")
+            .Append(printheadWidth)
+            .Append("
+^LL")
+            .Append(raster.Height)
+            .Append("
+^FO0,0^XGR:")
+            .Append(graphicName)
+            .Append(".GRF,1,1^FS
+^XZ
+");
+        return command.ToString();
     }
 
     private static bool IsNativeZplDriver(string driverName) =>
