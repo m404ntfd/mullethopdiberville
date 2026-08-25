@@ -46,8 +46,8 @@ internal sealed class PosSettingsDialog : Form
         });
 
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 72, BackColor = Color.White };
-        var save = MakeButton("Save Settings", Color.FromArgb(117, 68, 154), Color.White);
-        save.Bounds = new Rectangle(520, 15, 145, 42);
+        var save = MakeButton("Save & Apply Changes", Color.FromArgb(117, 68, 154), Color.White);
+        save.Bounds = new Rectangle(470, 15, 195, 42);
         save.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         save.Click += (_, _) => SaveAndClose();
         var cancel = MakeButton("Cancel", Color.FromArgb(225, 231, 236), Color.FromArgb(16, 24, 32));
@@ -209,7 +209,7 @@ internal sealed class PosSettingsDialog : Form
 
     private GroupBox BuildWristbandPrintingGroup()
     {
-        var group = MakeGroup("Wristband Printing Mode", 164);
+        var group = MakeGroup("Wristband Printing Mode", 220);
         group.Dock = DockStyle.Top;
 
         _useCustomWristbandPrinterDialog.Text =
@@ -246,8 +246,16 @@ internal sealed class PosSettingsDialog : Form
         }
         _useCustomWristbandPrinterDialog.CheckedChanged += (_, _) => UpdateModeNote();
         UpdateModeNote();
+        var apply = MakeButton(
+            "Save & Apply Changes",
+            Color.FromArgb(117, 68, 154),
+            Color.White);
+        apply.Bounds = new Rectangle(545, 158, 205, 42);
+        apply.Click += (_, _) => SaveAndClose();
+
         group.Controls.Add(_useCustomWristbandPrinterDialog);
         group.Controls.Add(modeNote);
+        group.Controls.Add(apply);
         return group;
     }
 
