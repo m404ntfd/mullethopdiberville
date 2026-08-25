@@ -561,7 +561,7 @@ internal static class DirectWristbandPrinter
 
         // The 1.7.20 native coordinate test physically verified that the one-inch
         // wristband on the ZD411 is centered under the 448-dot 203-dpi printhead.
-        // Keep the entire ^GF wire raster at full printhead width and embed the
+        // Keep the entire stored GRF raster at full printhead width and embed the
         // artwork into the centered 203-dot window. This removes any dependency on
         // ^FO clipping or the driver's private media origin.
         return new NativeWristbandLayout(
@@ -736,25 +736,20 @@ internal static class DirectWristbandPrinter
             .Append(raster.BytesPerRow)
             .Append(',')
             .Append(hexadecimal)
-            .Append("
-^XA
-^CI28
-^PON
-^FWN
-^LH0,0
-^LT0
-^LS0
-^PW")
-            .Append(printheadWidth)
-            .Append("
-^LL")
-            .Append(raster.Height)
-            .Append("
-^FO0,0^XGR:")
+            .AppendLine();
+        command.AppendLine("^XA");
+        command.AppendLine("^CI28");
+        command.AppendLine("^PON");
+        command.AppendLine("^FWN");
+        command.AppendLine("^LH0,0");
+        command.AppendLine("^LT0");
+        command.AppendLine("^LS0");
+        command.Append("^PW").AppendLine(printheadWidth.ToString(CultureInfo.InvariantCulture));
+        command.Append("^LL").AppendLine(raster.Height.ToString(CultureInfo.InvariantCulture));
+        command.Append("^FO0,0^XGR:")
             .Append(graphicName)
-            .Append(".GRF,1,1^FS
-^XZ
-");
+            .AppendLine(".GRF,1,1^FS");
+        command.AppendLine("^XZ");
         return command.ToString();
     }
 
