@@ -18,6 +18,7 @@ internal sealed class WristbandPrinterDialog : Form
     private static readonly string[] ExpectedPrinterNames =
         Enumerable.Range(1, 7).Select(number => $"WB-{number}").ToArray();
     private readonly WristbandSettingsPackage _settings;
+    private readonly CheckBox _diagnosticMode = new();
 
     public WristbandPrinterDialog(WristbandSettingsPackage settings)
     {
@@ -26,7 +27,7 @@ internal sealed class WristbandPrinterDialog : Form
         Text = "Print Wristbands";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
-        ClientSize = new Size(820, 570);
+        ClientSize = new Size(820, 650);
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
@@ -38,7 +39,7 @@ internal sealed class WristbandPrinterDialog : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
             BackColor = BackColor
@@ -46,6 +47,7 @@ internal sealed class WristbandPrinterDialog : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 74));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 86));
         Controls.Add(layout);
@@ -74,9 +76,12 @@ internal sealed class WristbandPrinterDialog : Form
         };
         layout.Controls.Add(instructions, 0, 1);
 
+        ConfigureDiagnosticMode();
+        layout.Controls.Add(_diagnosticMode, 0, 2);
+
         var printers = BuildPrinterGrid();
         printers.Dock = DockStyle.Fill;
-        layout.Controls.Add(printers, 0, 2);
+        layout.Controls.Add(printers, 0, 3);
 
         var cancelPanel = new Panel
         {
@@ -96,13 +101,28 @@ internal sealed class WristbandPrinterDialog : Form
         };
         cancel.FlatAppearance.BorderSize = 0;
         cancelPanel.Controls.Add(cancel);
-        layout.Controls.Add(cancelPanel, 0, 3);
+        layout.Controls.Add(cancelPanel, 0, 4);
         CancelButton = cancel;
     }
 
     public string? SelectedPrinterName { get; private set; }
 
     internal static IReadOnlyList<string> PrinterNamesForSmokeTest => ExpectedPrinterNames;
+
+    private void ConfigureDiagnosticMode()
+    {
+        _diagnosticMode.Dock = DockStyle.Fill;
+        _diagnosticMode.Margin = new Padding(28, 8, 28, 8);
+        _diagnosticMode.Padding = new Padding(16, 0, 16, 0);
+        _diagnosticMode.Text =
+            "DIAGNOSTIC MODE — check this, then select a WB printer to print a native Zebra " +
+            "position test band only. The current LilyPad wristband will NOT print.";
+        _diagnosticMode.TextAlign = ContentAlignment.MiddleLeft;
+        _diagnosticMode.BackColor = Color.FromArgb(255, 238, 203);
+        _diagnosticMode.ForeColor = Color.FromArgb(93, 54, 4);
+        _diagnosticMode.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+        _diagnosticMode.Cursor = Cursors.Hand;
+    }
 
     private Control BuildPrinterGrid()
     {
@@ -187,10 +207,52 @@ internal sealed class WristbandPrinterDialog : Form
         }
     }
 
-    private void SelectPrinter(object? sender, EventArgs e)
+    private async void SelectPrinter(object? sender, EventArgs e)
     {
-        if (sender is not Button { Tag: string printerName })
+        if (sender is not Button { Tag: string printerName } button)
             return;
+
+        if (_diagnosticMode.Checked)
+        {
+            button.Enabled = false;
+            _diagnosticMode.Enabled = false;
+            UseWaitCursor = true;
+            try
+            {
+                PosLog.Write(
+                    $"The user selected {printerName} for a native Zebra wristband diagnostic; " +
+                    "the LilyPad wristband job was left untouched.");
+                var result = await ZebraWristbandDiagnostics.PrintPositionTestAsync(printerName);
+                PosLog.Write(result.Message);
+                MessageBox.Show(
+                    this,
+                    result.Message +
+                    (result.Success
+                        ? "\n\nPlease photograph the entire diagnostic band and keep the latest POS log. " +
+                          "Uncheck DIAGNOSTIC MODE when you are ready to print the actual LilyPad wristband."
+                        : string.Empty),
+                    result.Success ? "Zebra Diagnostic Printed" : "Zebra Diagnostic Failed",
+                    MessageBoxButtons.OK,
+                    result.Success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                PosLog.Write("Native Zebra wristband diagnostic failed: " + ex);
+                MessageBox.Show(
+                    this,
+                    "The Zebra diagnostic test band could not be sent.\n\n" + ex.Message,
+                    "Zebra Diagnostic Failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                UseWaitCursor = false;
+                _diagnosticMode.Enabled = true;
+                button.Enabled = true;
+            }
+            return;
+        }
 
         SelectedPrinterName = printerName;
         DialogResult = DialogResult.OK;
