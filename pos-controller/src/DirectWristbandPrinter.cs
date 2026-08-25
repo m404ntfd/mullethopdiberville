@@ -254,17 +254,9 @@ internal static class DirectWristbandPrinter
             {
                 PosLog.Write(
                     $"Wristband printer {printerName} uses driver '{driverName}'; " +
-                    "bypassing the Windows GDI graphics path and using a downloaded GRF graphic with explicit Zebra orientation resets.");
-                PrintRenderedPagesAsZpl(
-                    pages,
-                    printerName,
-                    driverName,
-                    cancellationToken);
+                    "using LilyPad-compatible Windows driver settings instead of RAW ZPL so the Zebra driver's configured Landscape, 180-degree rotation, 1x10 media, and mark sensing remain authoritative.");
             }
-            else
-            {
-                PrintRenderedPages(pages, printerName, cancellationToken);
-            }
+            PrintRenderedPagesWithConfiguredDriver(pages, printerName, cancellationToken);
         }
         finally
         {
@@ -835,6 +827,70 @@ internal static class DirectWristbandPrinter
                 EndDocPrinter(printerHandle);
             ClosePrinter(printerHandle);
         }
+    }
+
+    private static void PrintRenderedPagesWithConfiguredDriver(
+        IReadOnlyList<Bitmap> pages,
+        string printerName,
+        CancellationToken cancellationToken)
+    {
+        var pageIndex = 0;
+        using var document = new PrintDocument
+        {
+            DocumentName = "Mullet Hop Wristbands",
+            PrintController = new StandardPrintController(),
+            OriginAtMargins = false,
+            PrinterSettings = new PrinterSettings
+            {
+                PrinterName = printerName,
+                Copies = 1
+            }
+        };
+
+        document.PrintPage += (_, eventArgs) =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = pages[pageIndex];
+            var graphics = eventArgs.Graphics ?? throw new InvalidOperationException(
+                "Windows did not provide a graphics surface for the wristband printer.");
+            var bounds = graphics.VisibleClipBounds;
+            if (!float.IsFinite(bounds.Width) || !float.IsFinite(bounds.Height) ||
+                bounds.Width <= 1 || bounds.Height <= 1)
+            {
+                bounds = eventArgs.PageBounds;
+            }
+
+            var scale = Math.Min(bounds.Width / source.Width, bounds.Height / source.Height);
+            var targetWidth = source.Width * scale;
+            var targetHeight = source.Height * scale;
+            var targetX = bounds.Left + (bounds.Width - targetWidth) / 2f;
+            var targetY = bounds.Top + (bounds.Height - targetHeight) / 2f;
+
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.CompositingQuality = CompositingQuality.HighQuality;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.SmoothingMode = SmoothingMode.HighQuality;
+            graphics.DrawImage(
+                source,
+                new RectangleF(targetX, targetY, targetWidth, targetHeight),
+                new RectangleF(0, 0, source.Width, source.Height),
+                GraphicsUnit.Pixel);
+
+            PosLog.Write(
+                $"Submitted wristband page {pageIndex + 1} to {printerName} through the configured Zebra Windows driver: " +
+                $"paper={eventArgs.PageBounds.Width}x{eventArgs.PageBounds.Height}, " +
+                $"landscape={eventArgs.PageSettings.Landscape}, " +
+                $"printable={bounds.X:0.##},{bounds.Y:0.##},{bounds.Width:0.##}x{bounds.Height:0.##}, " +
+                $"source={source.Width}x{source.Height}, target={targetX:0.##},{targetY:0.##},{targetWidth:0.##}x{targetHeight:0.##}. " +
+                "No RAW ZPL, GRF download, forced media length, forced printhead width, or reconstructed media offset was used.");
+
+            pageIndex++;
+            eventArgs.HasMorePages = pageIndex < pages.Count;
+        };
+
+        cancellationToken.ThrowIfCancellationRequested();
+        document.Print();
     }
 
     private static void PrintRenderedPages(
