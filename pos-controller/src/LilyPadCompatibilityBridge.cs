@@ -49,6 +49,28 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
 
           if (/wristband/i.test(location.pathname) &&
               /(pdf|php)$/i.test(location.pathname)) {
+            let useCustomSelector = true;
+            try {
+              const stored = localStorage.getItem(
+                "mulletHopUseCustomWristbandPrinterDialog");
+              if (stored !== null) {
+                useCustomSelector = stored !== "0";
+              } else {
+                const cookie = document.cookie.match(
+                  /(?:^|;\s*)mulletHopUseCustomWristbandPrinterDialog=([01])/);
+                if (cookie) {
+                  useCustomSelector = cookie[1] !== "0";
+                }
+              }
+            } catch {
+            }
+            document.documentElement?.setAttribute(
+              "data-mullet-hop-wristband-print-mode",
+              useCustomSelector ? "custom" : "system");
+            if (!useCustomSelector) {
+              return;
+            }
+
             const suppressBrowserPrintDialog = () => {
               document.documentElement?.setAttribute(
                 "data-mullet-hop-direct-wristband-print",
@@ -173,6 +195,26 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
           pageTimeOrigin: Number.isFinite(performance.timeOrigin) ? performance.timeOrigin : 0
         })
         """;
+    private const string SetWristbandPrintModeFunction = """
+        (useCustomSelector) => {
+          const value = useCustomSelector ? "1" : "0";
+          try {
+            localStorage.setItem(
+              "mulletHopUseCustomWristbandPrinterDialog",
+              value);
+          } catch {
+          }
+          try {
+            document.cookie =
+              `mulletHopUseCustomWristbandPrinterDialog=${value}; Path=/; SameSite=Lax`;
+          } catch {
+          }
+          document.documentElement?.setAttribute(
+            "data-mullet-hop-wristband-print-mode",
+            useCustomSelector ? "custom" : "system");
+          return value;
+        }
+        """;
     private const string DownloadPdfFunction = """
         async (expectedUrl) => {
           const failure = message => JSON.stringify({ success: false, message });
@@ -233,6 +275,7 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
         new(JsonSerializerDefaults.Web);
 
     private readonly int _port;
+    private bool _useCustomWristbandPrinterDialog;
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _socketGate = new();
     private readonly SemaphoreSlim _commandGate = new(1, 1);
@@ -243,9 +286,12 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
 
     public event Action<LilyPadPageHealth>? PageHealthObserved;
 
-    public LilyPadCompatibilityBridge(int port)
+    public LilyPadCompatibilityBridge(
+        int port,
+        bool useCustomWristbandPrinterDialog = true)
     {
         _port = port;
+        _useCustomWristbandPrinterDialog = useCustomWristbandPrinterDialog;
     }
 
     public static int AllocateLoopbackPort()
@@ -267,6 +313,36 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         var cancellationToken = _stopping.Token;
         _worker ??= Task.Run(() => RunAsync(cancellationToken));
+    }
+
+    public void SetUseCustomWristbandPrinterDialog(bool enabled)
+    {
+        _useCustomWristbandPrinterDialog = enabled;
+        ClientWebSocket? socket;
+        lock (_socketGate)
+            socket = _socket;
+        if (socket is null || socket.State != WebSocketState.Open)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ApplyWristbandPrintModeAsync(socket, _stopping.Token);
+                PosLog.Write(
+                    enabled
+                        ? "Firefox wristband print mode changed to the Mullet Hop printer selector."
+                        : "Firefox wristband print mode changed to the normal LilyPad/system print screen.");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex) when (ex is WebSocketException or IOException or
+                                       InvalidDataException or JsonException)
+            {
+                PosLog.Write("Firefox wristband print-mode update skipped: " + ex.Message);
+            }
+        });
     }
 
     public async Task<LilyPadPdfDownloadResult> DownloadWristbandPdfAsync(
@@ -506,6 +582,55 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
                     functionDeclaration = CompatibilityFunction,
                     awaitPromise = false,
                     target = new { context = contextId.GetString() }
+                },
+                cancellationToken);
+        }
+
+        await ApplyWristbandPrintModeAsync(socket, cancellationToken);
+    }
+
+    private async Task ApplyWristbandPrintModeAsync(
+        ClientWebSocket socket,
+        CancellationToken cancellationToken)
+    {
+        var tree = await SendCommandAsync(
+            socket,
+            "browsingContext.getTree",
+            new { },
+            cancellationToken);
+        if (!tree.TryGetProperty("contexts", out var contexts) ||
+            contexts.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var context in EnumerateContexts(contexts))
+        {
+            if (!context.TryGetProperty("context", out var contextId) ||
+                contextId.ValueKind != JsonValueKind.String ||
+                !context.TryGetProperty("url", out var url) ||
+                url.ValueKind != JsonValueKind.String ||
+                !IsLilyPadUrl(url.GetString()))
+            {
+                continue;
+            }
+
+            await SendCommandAsync(
+                socket,
+                "script.callFunction",
+                new
+                {
+                    functionDeclaration = SetWristbandPrintModeFunction,
+                    awaitPromise = false,
+                    target = new { context = contextId.GetString() },
+                    arguments = new[]
+                    {
+                        new
+                        {
+                            type = "boolean",
+                            value = _useCustomWristbandPrinterDialog
+                        }
+                    }
                 },
                 cancellationToken);
         }

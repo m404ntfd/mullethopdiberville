@@ -61,7 +61,9 @@ internal sealed class PosControllerForm : Form
         Controls.Add(BuildSidebar());
         SetSidebarExpanded(expanded: true);
 
-        _firefoxHost = new FirefoxHost(_browserHostPanel);
+        _firefoxHost = new FirefoxHost(
+            _browserHostPanel,
+            _settings.UseCustomWristbandPrinterDialog);
         _firefoxHost.StatusChanged += (_, status) => SetBrowserStatus(status);
         _firefoxHost.CrashDetected += (_, message) => ShowFirefoxCrash(message);
         _firefoxHost.BrowserInteractionStarted += (_, _) => BeginBrowserInteraction();
@@ -206,8 +208,11 @@ internal sealed class PosControllerForm : Form
                 "The wristband printer selector did not preserve the WB-1 through WB-7 range.");
         }
 
-        if (new PosSettings().StartAutomatically)
+        var defaultSettings = new PosSettings();
+        if (defaultSettings.StartAutomatically)
             throw new InvalidOperationException("POS automatic startup is not off by default.");
+        if (!defaultSettings.UseCustomWristbandPrinterDialog)
+            throw new InvalidOperationException("The custom wristband printer selector is not enabled by default.");
 
         if (!FirefoxHost.ProfileLockDialogTitleIndicatesFailureForSmokeTest("Close Firefox") ||
             !FirefoxHost.ProfileLockDialogTitleIndicatesFailureForSmokeTest(
@@ -786,6 +791,17 @@ internal sealed class PosControllerForm : Form
             return;
         }
 
+        if (!_settings.UseCustomWristbandPrinterDialog)
+        {
+            PosLog.Write(
+                "The Mullet Hop wristband printer selector is disabled. " +
+                "LilyPad/Firefox system printing remains in control of this wristband job.");
+            _browserModeActive = true;
+            _firefoxHost.SetBrowserFocusPreferred(true);
+            _firefoxHost.FocusBrowser("system wristband printing mode");
+            return;
+        }
+
         _wristbandPrinterPromptOpen = true;
         _browserModeActive = false;
         _firefoxHost.SetBrowserFocusPreferred(false);
@@ -917,9 +933,21 @@ internal sealed class PosControllerForm : Form
             var result = dialog.ShowDialog(this);
             if (result != DialogResult.OK && dialog.AppliedSettings is null)
                 return;
+            var previousWristbandPrintMode =
+                _settings.UseCustomWristbandPrinterDialog;
             _settings.CopyFrom(result == DialogResult.OK
                 ? dialog.Settings
                 : dialog.AppliedSettings!);
+            _firefoxHost?.SetUseCustomWristbandPrinterDialog(
+                _settings.UseCustomWristbandPrinterDialog);
+            if (previousWristbandPrintMode !=
+                _settings.UseCustomWristbandPrinterDialog)
+            {
+                PosLog.Write(
+                    _settings.UseCustomWristbandPrinterDialog
+                        ? "Mullet Hop wristband printer selector enabled in POS settings."
+                        : "Mullet Hop wristband printer selector disabled; system printing fallback enabled.");
+            }
             UpdateUnlinkedCards();
             _ = RefreshStatusesAsync();
         }
