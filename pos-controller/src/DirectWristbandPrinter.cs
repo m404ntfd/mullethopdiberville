@@ -50,6 +50,8 @@ internal static class DirectWristbandPrinter
     private const int StretchColorOnColor = 3;
     private const double NativeWristbandWidthInches = 1d;
     private const double NativeWristbandLengthInches = 11d;
+    private const int Zd411PrintheadWidthDots203Dpi = 448;
+    private const int Zd411PrintheadWidthDots300Dpi = 638;
     private const uint DibRgbColors = 0;
     private const uint SourceCopyRasterOperation = 0x00CC0020;
     private const int GdiError = -1;
@@ -174,31 +176,42 @@ internal static class DirectWristbandPrinter
             graphics.Clear(Color.White);
             graphics.FillRectangle(Brushes.Black, 0, 0, 1, 1);
         }
-        var raster = CreateMonochromeRaster(marked);
+        var sourceRaster = CreateMonochromeRaster(marked);
         var configuredPaper = new PaperSize("Custom", 100, 1000);
         var standardLayout = CalculateNativeWristbandLayout(
             203,
             203,
             configuredPaper,
             "ZDesigner ZD411-203dpi ZPL");
-        var command = BuildZplCommand(
-            raster,
+        var paddedRaster = PadRasterToPrinthead(
+            sourceRaster,
             standardLayout.PrintheadWidth,
             standardLayout.LeftOffset);
-        return raster.Width == 8 &&
-               raster.Height == 1 &&
-               raster.BytesPerRow == 1 &&
-               raster.Bits.Length == 1 &&
-               raster.Bits[0] == 0x80 &&
-               command.Contains("^GFA,1,1,1,80", StringComparison.Ordinal) &&
-               command.Contains("^PW203", StringComparison.Ordinal) &&
-               command.Contains("^FO0,0", StringComparison.Ordinal) &&
-               !command.Contains("^LS", StringComparison.Ordinal) &&
-               !command.Contains("^PR", StringComparison.Ordinal) &&
+        var command = BuildZplCommand(
+            paddedRaster,
+            standardLayout.PrintheadWidth,
+            0);
+        var expectedByte = standardLayout.LeftOffset / 8;
+        var expectedMask = (byte)(0x80 >> (standardLayout.LeftOffset % 8));
+        return sourceRaster.Width == 8 &&
+               sourceRaster.Height == 1 &&
+               sourceRaster.BytesPerRow == 1 &&
+               sourceRaster.Bits.Length == 1 &&
+               sourceRaster.Bits[0] == 0x80 &&
                standardLayout.MediaWidth == 203 &&
                standardLayout.MediaLength == 2233 &&
-               standardLayout.PrintheadWidth == 203 &&
-               standardLayout.LeftOffset == 0;
+               standardLayout.PrintheadWidth == 448 &&
+               standardLayout.LeftOffset == 122 &&
+               paddedRaster.Width == 448 &&
+               paddedRaster.Height == 1 &&
+               paddedRaster.BytesPerRow == 56 &&
+               paddedRaster.Bits.Length == 56 &&
+               paddedRaster.Bits[expectedByte] == expectedMask &&
+               command.Contains("^GFA,56,56,56,", StringComparison.Ordinal) &&
+               command.Contains("^PW448", StringComparison.Ordinal) &&
+               command.Contains("^FO0,0", StringComparison.Ordinal) &&
+               !command.Contains("^LS", StringComparison.Ordinal) &&
+               !command.Contains("^PR", StringComparison.Ordinal);
     }
 
     private static PrintDestinationSelectionResult RenderAndPrintOnStaThread(
@@ -476,26 +489,35 @@ internal static class DirectWristbandPrinter
             $"landscape={pageSettings.Landscape}, " +
             $"printable={printableArea.X:0.##},{printableArea.Y:0.##}," +
             $"{printableArea.Width:0.##}x{printableArea.Height:0.##}, " +
-            $"resolution={dpiX}x{dpiY} dpi; forcing physical wristband=" +
+            $"resolution={dpiX}x{dpiY} dpi; physical wristband=" +
             $"{NativeWristbandWidthInches:0.##}x{NativeWristbandLengthInches:0.##} inches, " +
-            $"raster={mediaWidth}x{mediaLength} dots, ^PW={layout.PrintheadWidth}, ^FO={layout.LeftOffset},0.");
+            $"artwork raster={mediaWidth}x{mediaLength} dots, printhead={layout.PrintheadWidth} dots, " +
+            $"validated centered wristband x={layout.LeftOffset}..{layout.LeftOffset + mediaWidth - 1}.");
 
         foreach (var page in pages)
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var fitted = FitForNativeWristband(page, mediaWidth, mediaLength, dpiX, dpiY);
-            var raster = CreateMonochromeRaster(fitted);
+            var artworkRaster = CreateMonochromeRaster(fitted);
+            var raster = PadRasterToPrinthead(
+                artworkRaster,
+                layout.PrintheadWidth,
+                layout.LeftOffset);
+            var ink = MeasureRasterInk(raster);
             SendRawPrinterBytes(
                 printerName,
                 Encoding.ASCII.GetBytes(BuildZplCommand(
                     raster,
                     layout.PrintheadWidth,
-                    layout.LeftOffset)),
+                    0)),
                 "Mullet Hop Wristbands");
             PosLog.Write(
-                $"Submitted a RAW ZPL wristband raster to {printerName}: " +
-                $"{raster.Width}x{raster.Height} dots, {raster.Bits.Length} raster bytes, " +
-                "origin=0,0 with no printhead-centering offset.");
+                $"Submitted a centered full-printhead RAW ZPL raster to {printerName}: " +
+                $"artwork={artworkRaster.Width}x{artworkRaster.Height} dots, " +
+                $"wire raster={raster.Width}x{raster.Height} dots, {raster.Bits.Length} raster bytes, " +
+                $"artwork x={layout.LeftOffset}..{layout.LeftOffset + artworkRaster.Width - 1}, " +
+                $"black dots={ink.Count}, black bounds={ink.MinX},{ink.MinY}..{ink.MaxX},{ink.MaxY}, " +
+                "^PW spans the complete printhead and ^FO is 0,0.");
         }
     }
 
@@ -506,7 +528,6 @@ internal static class DirectWristbandPrinter
         string driverName)
     {
         _ = paper;
-        _ = driverName;
         var mediaWidth = Math.Clamp(
             (int)Math.Round(NativeWristbandWidthInches * Math.Max(1, dpiX)),
             128,
@@ -515,17 +536,24 @@ internal static class DirectWristbandPrinter
             (int)Math.Round(NativeWristbandLengthInches * Math.Max(1, dpiY)),
             1408,
             13_200);
+        var printheadWidth = driverName.Contains("ZD411", StringComparison.OrdinalIgnoreCase)
+            ? (dpiX >= 250
+                ? Zd411PrintheadWidthDots300Dpi
+                : Zd411PrintheadWidthDots203Dpi)
+            : mediaWidth;
+        printheadWidth = Math.Max(printheadWidth, mediaWidth);
+        var leftOffset = Math.Max(0, (printheadWidth - mediaWidth) / 2);
 
-        // RAW ZPL bypasses the Windows driver's private media alignment. Treat the
-        // one-inch wristband itself as the entire ZPL coordinate system instead of
-        // centering it within the ZD411's wider physical printhead. This keeps x=0
-        // at the left edge of the actual band and prevents artwork from being shifted
-        // off the media by a reconstructed printhead offset.
+        // The 1.7.20 native coordinate test physically verified that the one-inch
+        // wristband on the ZD411 is centered under the 448-dot 203-dpi printhead.
+        // Keep the entire ^GF wire raster at full printhead width and embed the
+        // artwork into the centered 203-dot window. This removes any dependency on
+        // ^FO clipping or the driver's private media origin.
         return new NativeWristbandLayout(
             mediaWidth,
             mediaLength,
-            mediaWidth,
-            0);
+            printheadWidth,
+            leftOffset);
     }
 
     private static Bitmap FitForNativeWristband(
@@ -607,6 +635,61 @@ internal static class DirectWristbandPrinter
             image.UnlockBits(data);
         }
         return new MonochromeRaster(image.Width, image.Height, bytesPerRow, bits);
+    }
+
+    private static MonochromeRaster PadRasterToPrinthead(
+        MonochromeRaster source,
+        int printheadWidth,
+        int leftOffset)
+    {
+        if (printheadWidth < source.Width)
+            throw new ArgumentOutOfRangeException(nameof(printheadWidth));
+        if (leftOffset < 0 || leftOffset + source.Width > printheadWidth)
+            throw new ArgumentOutOfRangeException(nameof(leftOffset));
+
+        var bytesPerRow = checked((printheadWidth + 7) / 8);
+        var bits = new byte[checked(bytesPerRow * source.Height)];
+        for (var y = 0; y < source.Height; y++)
+        {
+            var sourceRow = y * source.BytesPerRow;
+            var destinationRow = y * bytesPerRow;
+            for (var x = 0; x < source.Width; x++)
+            {
+                if ((source.Bits[sourceRow + x / 8] & (0x80 >> (x % 8))) == 0)
+                    continue;
+                var destinationX = leftOffset + x;
+                bits[destinationRow + destinationX / 8] |=
+                    (byte)(0x80 >> (destinationX % 8));
+            }
+        }
+        return new MonochromeRaster(printheadWidth, source.Height, bytesPerRow, bits);
+    }
+
+    private static (long Count, int MinX, int MinY, int MaxX, int MaxY) MeasureRasterInk(
+        MonochromeRaster raster)
+    {
+        long count = 0;
+        var minX = raster.Width;
+        var minY = raster.Height;
+        var maxX = -1;
+        var maxY = -1;
+        for (var y = 0; y < raster.Height; y++)
+        {
+            var row = y * raster.BytesPerRow;
+            for (var x = 0; x < raster.Width; x++)
+            {
+                if ((raster.Bits[row + x / 8] & (0x80 >> (x % 8))) == 0)
+                    continue;
+                count++;
+                minX = Math.Min(minX, x);
+                minY = Math.Min(minY, y);
+                maxX = Math.Max(maxX, x);
+                maxY = Math.Max(maxY, y);
+            }
+        }
+        return count == 0
+            ? (0, -1, -1, -1, -1)
+            : (count, minX, minY, maxX, maxY);
     }
 
     private static string BuildZplCommand(
