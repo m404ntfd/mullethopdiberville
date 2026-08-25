@@ -5,239 +5,29 @@ on:
     branches:
       - fix/wristband-stored-grf-1.7.22
     paths:
-      - .github/workflows/patch-wristband-stored-grf.yml
+      - scripts/Patch-StoredGrfWristband.py
 
 permissions:
   contents: write
 
 jobs:
-  patch-source:
+  patch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out branch
+        uses: actions/checkout@v4
         with:
           ref: fix/wristband-stored-grf-1.7.22
           fetch-depth: 0
 
-      - name: Replace inline graphic field with stored GRF recall
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
+      - name: Patch source
+        run: python scripts/Patch-StoredGrfWristband.py
 
-          path = Path('pos-controller/src/DirectWristbandPrinter.cs')
-          text = path.read_text(encoding='utf-8')
-
-          constant_needle = '    private const int Zd411PrintheadWidthDots300Dpi = 638;\n'
-          constant_replacement = (
-              constant_needle +
-              '    private const string NativeWristbandGraphicName = "MHWBAND";\n' +
-              '    private const int MaximumZplGraphicFieldBytes = 99_999;\n'
-          )
-          assert text.count(constant_needle) == 1
-          text = text.replace(constant_needle, constant_replacement, 1)
-
-          text = text.replace(
-              'bypassing the Windows GDI graphics path and sending the fitted wristband raster as RAW ZPL.',
-              'bypassing the Windows GDI graphics path and using a downloaded GRF graphic with explicit Zebra orientation resets.',
-              1)
-
-          smoke = r'''    internal static bool NativeZplPackingPassesSmokeTest()
-    {
-        using var marked = new Bitmap(8, 1, PixelFormat.Format24bppRgb);
-        using (var graphics = Graphics.FromImage(marked))
-        {
-            graphics.Clear(Color.White);
-            graphics.FillRectangle(Brushes.Black, 0, 0, 1, 1);
-        }
-        var sourceRaster = CreateMonochromeRaster(marked);
-        var configuredPaper = new PaperSize("Custom", 100, 1000);
-        var standardLayout = CalculateNativeWristbandLayout(
-            203,
-            203,
-            configuredPaper,
-            "ZDesigner ZD411-203dpi ZPL");
-        var paddedRaster = PadRasterToPrinthead(
-            sourceRaster,
-            standardLayout.PrintheadWidth,
-            standardLayout.LeftOffset);
-        var command = BuildStoredGraphicZplCommand(
-            paddedRaster,
-            standardLayout.PrintheadWidth,
-            NativeWristbandGraphicName);
-        var expectedByte = standardLayout.LeftOffset / 8;
-        var expectedMask = (byte)(0x80 >> (standardLayout.LeftOffset % 8));
-        var fullWristbandBytes = checked(
-            ((standardLayout.PrintheadWidth + 7) / 8) * standardLayout.MediaLength);
-        return sourceRaster.Width == 8 &&
-               sourceRaster.Height == 1 &&
-               sourceRaster.BytesPerRow == 1 &&
-               sourceRaster.Bits.Length == 1 &&
-               sourceRaster.Bits[0] == 0x80 &&
-               standardLayout.MediaWidth == 203 &&
-               standardLayout.MediaLength == 2233 &&
-               standardLayout.PrintheadWidth == 448 &&
-               standardLayout.LeftOffset == 122 &&
-               paddedRaster.Width == 448 &&
-               paddedRaster.Height == 1 &&
-               paddedRaster.BytesPerRow == 56 &&
-               paddedRaster.Bits.Length == 56 &&
-               paddedRaster.Bits[expectedByte] == expectedMask &&
-               fullWristbandBytes == 125_048 &&
-               fullWristbandBytes > MaximumZplGraphicFieldBytes &&
-               command.StartsWith("~DGR:MHWBAND.GRF,56,56,", StringComparison.Ordinal) &&
-               command.Contains("^PON", StringComparison.Ordinal) &&
-               command.Contains("^FWN", StringComparison.Ordinal) &&
-               command.Contains("^LT0", StringComparison.Ordinal) &&
-               command.Contains("^LS0", StringComparison.Ordinal) &&
-               command.Contains("^PW448", StringComparison.Ordinal) &&
-               command.Contains("^LL1", StringComparison.Ordinal) &&
-               command.Contains("^FO0,0^XGR:MHWBAND.GRF,1,1^FS", StringComparison.Ordinal) &&
-               !command.Contains("^GF", StringComparison.Ordinal) &&
-               !command.Contains("^PR", StringComparison.Ordinal);
-    }
-'''
-          text, count = re.subn(
-              r'    internal static bool NativeZplPackingPassesSmokeTest\(\)\n    \{.*?\n    \}\n\n(?=    private static PrintDestinationSelectionResult)',
-              smoke + '\n',
-              text,
-              count=1,
-              flags=re.S)
-          assert count == 1
-
-          print_method = r'''    private static void PrintRenderedPagesAsZpl(
-        IReadOnlyList<Bitmap> pages,
-        string printerName,
-        string driverName,
-        CancellationToken cancellationToken)
-    {
-        var printerSettings = new PrinterSettings { PrinterName = printerName };
-        var pageSettings = printerSettings.DefaultPageSettings;
-        var paper = pageSettings.PaperSize;
-        var dpiX = pageSettings.PrinterResolution.X > 0
-            ? pageSettings.PrinterResolution.X
-            : 203;
-        var dpiY = pageSettings.PrinterResolution.Y > 0
-            ? pageSettings.PrinterResolution.Y
-            : dpiX;
-        var layout = CalculateNativeWristbandLayout(dpiX, dpiY, paper, driverName);
-        var mediaWidth = layout.MediaWidth;
-        var mediaLength = layout.MediaLength;
-        var printableArea = pageSettings.PrintableArea;
-
-        PosLog.Write(
-            $"Stored-GRF ZPL wristband media for {printerName} from Windows driver '{driverName}': " +
-            $"configured paper={paper.PaperName} {paper.Width}x{paper.Height} hundredths-inch, " +
-            $"landscape={pageSettings.Landscape}, " +
-            $"printable={printableArea.X:0.##},{printableArea.Y:0.##}," +
-            $"{printableArea.Width:0.##}x{printableArea.Height:0.##}, " +
-            $"resolution={dpiX}x{dpiY} dpi; physical wristband=" +
-            $"{NativeWristbandWidthInches:0.##}x{NativeWristbandLengthInches:0.##} inches, " +
-            $"artwork raster={mediaWidth}x{mediaLength} dots, printhead={layout.PrintheadWidth} dots, " +
-            $"validated centered wristband x={layout.LeftOffset}..{layout.LeftOffset + mediaWidth - 1}.");
-
-        foreach (var page in pages)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            using var fitted = FitForNativeWristband(page, mediaWidth, mediaLength, dpiX, dpiY);
-            var artworkRaster = CreateMonochromeRaster(fitted);
-            var raster = PadRasterToPrinthead(
-                artworkRaster,
-                layout.PrintheadWidth,
-                layout.LeftOffset);
-            var ink = MeasureRasterInk(raster);
-            var command = BuildStoredGraphicZplCommand(
-                raster,
-                layout.PrintheadWidth,
-                NativeWristbandGraphicName);
-            var commandBytes = Encoding.ASCII.GetBytes(command);
-            SendRawPrinterBytes(
-                printerName,
-                commandBytes,
-                "Mullet Hop Wristbands");
-            PosLog.Write(
-                $"Submitted a stored-GRF Zebra wristband to {printerName}: " +
-                $"artwork={artworkRaster.Width}x{artworkRaster.Height} dots, " +
-                $"stored graphic={raster.Width}x{raster.Height} dots, " +
-                $"graphic bytes={raster.Bits.Length}, RAW job bytes={commandBytes.Length}, " +
-                $"artwork x={layout.LeftOffset}..{layout.LeftOffset + artworkRaster.Width - 1}, " +
-                $"black dots={ink.Count}, black bounds={ink.MinX},{ink.MinY}..{ink.MaxX},{ink.MaxY}; " +
-                $"downloaded as R:{NativeWristbandGraphicName}.GRF and recalled with " +
-                "^PON, ^FWN, ^LT0, ^LS0, ^PW full-printhead, and ^FO0,0.");
-        }
-    }
-'''
-          text, count = re.subn(
-              r'    private static void PrintRenderedPagesAsZpl\(.*?\n    \}\n\n(?=    private static NativeWristbandLayout CalculateNativeWristbandLayout)',
-              print_method + '\n',
-              text,
-              count=1,
-              flags=re.S)
-          assert count == 1
-
-          builder = r'''    private static string BuildStoredGraphicZplCommand(
-        MonochromeRaster raster,
-        int printheadWidth,
-        string graphicName)
-    {
-        if (raster.Width != printheadWidth)
-        {
-            throw new ArgumentException(
-                "The stored Zebra graphic must span the complete printhead.",
-                nameof(raster));
-        }
-        if (graphicName.Length is < 1 or > 8 ||
-            graphicName.Any(character => !char.IsLetterOrDigit(character)))
-        {
-            throw new ArgumentException(
-                "A Zebra GRF name must contain one to eight letters or digits.",
-                nameof(graphicName));
-        }
-
-        var hexadecimal = Convert.ToHexString(raster.Bits);
-        var command = new StringBuilder(hexadecimal.Length + 256);
-        command.Append("~DGR:")
-            .Append(graphicName)
-            .Append(".GRF,")
-            .Append(raster.Bits.Length)
-            .Append(',')
-            .Append(raster.BytesPerRow)
-            .Append(',')
-            .Append(hexadecimal)
-            .Append("\n^XA\n^CI28\n^PON\n^FWN\n^LH0,0\n^LT0\n^LS0\n^PW")
-            .Append(printheadWidth)
-            .Append("\n^LL")
-            .Append(raster.Height)
-            .Append("\n^FO0,0^XGR:")
-            .Append(graphicName)
-            .Append(".GRF,1,1^FS\n^XZ\n");
-        return command.ToString();
-    }
-'''
-          text, count = re.subn(
-              r'    private static string BuildZplCommand\(.*?\n    \}\n\n(?=    private static bool IsNativeZplDriver)',
-              builder + '\n',
-              text,
-              count=1,
-              flags=re.S)
-          assert count == 1
-
-          path.write_text(text, encoding='utf-8')
-
-          project = Path('pos-controller/src/MulletHopPosController.csproj')
-          project_text = project.read_text(encoding='utf-8')
-          assert project_text.count('<Version>1.7.21</Version>') == 1
-          project.write_text(
-              project_text.replace('<Version>1.7.21</Version>', '<Version>1.7.22</Version>', 1),
-              encoding='utf-8')
-          PY
-
-      - name: Remove one-off workflow and commit patch
-        shell: bash
+      - name: Commit source patch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm scripts/Patch-StoredGrfWristband.py
           git rm .github/workflows/patch-wristband-stored-grf.yml
           git add pos-controller/src/DirectWristbandPrinter.cs pos-controller/src/MulletHopPosController.csproj
           git commit -m "Recall wristband raster as stored GRF with orientation reset"
