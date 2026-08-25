@@ -208,6 +208,20 @@ internal sealed class PosControllerForm : Form
                 "The wristband printer selector did not preserve the WB-1 through WB-7 range.");
         }
 
+        using (var settingsDialog = new PosSettingsDialog(new PosSettings()))
+        {
+            settingsDialog.CreateControl();
+            var saveAndApplyButtons = Descendants(settingsDialog)
+                .OfType<Button>()
+                .Count(button => string.Equals(
+                    button.Text,
+                    "Save & Apply Changes",
+                    StringComparison.Ordinal));
+            if (saveAndApplyButtons < 2)
+                throw new InvalidOperationException(
+                    "The POS settings menu is missing its Save & Apply Changes controls.");
+        }
+
         var defaultSettings = new PosSettings();
         if (defaultSettings.StartAutomatically)
             throw new InvalidOperationException("POS automatic startup is not off by default.");
