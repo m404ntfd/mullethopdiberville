@@ -13,6 +13,7 @@ internal sealed class PosSettingsDialog : Form
     private readonly TextBox _controllerUrl = new();
     private readonly TextBox _pairingKey = new();
     private readonly CheckBox _startAutomatically = new();
+    private readonly CheckBox _useCustomWristbandPrinterDialog = new();
     private readonly ComboBox[] _slots = [new(), new(), new(), new()];
     private readonly Label _connectionStatus = new();
     private readonly Label _assignmentStatus = new();
@@ -65,10 +66,12 @@ internal sealed class PosSettingsDialog : Form
         var connection = BuildConnectionGroup();
         var assignments = BuildAssignmentsGroup();
         var wristbands = BuildWristbandGroup();
+        var wristbandPrinting = BuildWristbandPrintingGroup();
         var startup = BuildStartupGroup();
         var security = BuildSecurityGroup();
         content.Controls.Add(security);
         content.Controls.Add(startup);
+        content.Controls.Add(wristbandPrinting);
         content.Controls.Add(wristbands);
         content.Controls.Add(assignments);
         content.Controls.Add(connection);
@@ -81,6 +84,8 @@ internal sealed class PosSettingsDialog : Form
         _controllerUrl.Text = _working.ControllerUrl;
         _pairingKey.Text = _working.PairingKey;
         _startAutomatically.Checked = _working.StartAutomatically;
+        _useCustomWristbandPrinterDialog.Checked =
+            _working.UseCustomWristbandPrinterDialog;
         PopulateSlots(_working.RememberedKioskStatuses());
         Shown += async (_, _) =>
         {
@@ -199,6 +204,50 @@ internal sealed class PosSettingsDialog : Form
             ForeColor = Color.FromArgb(83, 97, 109),
             Font = new Font("Segoe UI", 9, FontStyle.Regular)
         });
+        return group;
+    }
+
+    private GroupBox BuildWristbandPrintingGroup()
+    {
+        var group = MakeGroup("Wristband Printing Mode", 164);
+        group.Dock = DockStyle.Top;
+
+        _useCustomWristbandPrinterDialog.Text =
+            "Use the Mullet Hop wristband printer selector (WB-1 through WB-7)";
+        _useCustomWristbandPrinterDialog.Bounds = new Rectangle(20, 31, 720, 32);
+        _useCustomWristbandPrinterDialog.AutoSize = false;
+        _useCustomWristbandPrinterDialog.Font =
+            new Font("Segoe UI", 10, FontStyle.Bold);
+        _useCustomWristbandPrinterDialog.ForeColor = Color.FromArgb(16, 24, 32);
+
+        var modeNote = new Label
+        {
+            Bounds = new Rectangle(46, 67, 690, 78),
+            ForeColor = Color.FromArgb(83, 97, 109),
+            Font = new Font("Segoe UI", 9, FontStyle.Regular)
+        };
+        void UpdateModeNote()
+        {
+            if (_useCustomWristbandPrinterDialog.Checked)
+            {
+                modeNote.Text =
+                    "The POS displays the color-coded WB-1 through WB-7 buttons and uses " +
+                    "the current direct/background wristband printing path.";
+                modeNote.ForeColor = Color.FromArgb(83, 97, 109);
+            }
+            else
+            {
+                modeNote.Text =
+                    "TEMPORARY FALLBACK: the Mullet Hop selector is bypassed and LilyPad/Firefox " +
+                    "uses its normal system print screen. Staff must select the correct wristband " +
+                    "printer and complete the print manually.";
+                modeNote.ForeColor = Color.FromArgb(156, 87, 0);
+            }
+        }
+        _useCustomWristbandPrinterDialog.CheckedChanged += (_, _) => UpdateModeNote();
+        UpdateModeNote();
+        group.Controls.Add(_useCustomWristbandPrinterDialog);
+        group.Controls.Add(modeNote);
         return group;
     }
 
@@ -505,6 +554,8 @@ internal sealed class PosSettingsDialog : Form
         _working.PairingKey = _pairingKey.Text.Trim();
         _working.KioskSlots = assignments;
         _working.StartAutomatically = _startAutomatically.Checked;
+        _working.UseCustomWristbandPrinterDialog =
+            _useCustomWristbandPrinterDialog.Checked;
         try
         {
             _working.Save();

@@ -28,6 +28,7 @@ internal sealed class FirefoxHost : IDisposable
     private const uint SwpShowWindow = 0x0040;
 
     private readonly Control _host;
+    private bool _useCustomWristbandPrinterDialog;
     private readonly System.Windows.Forms.Timer _windowTimer = new() { Interval = 500 };
     private readonly System.Windows.Forms.Timer _browserInputTimer = new() { Interval = 30 };
     private Process? _process;
@@ -67,9 +68,12 @@ internal sealed class FirefoxHost : IDisposable
     public event EventHandler? BrowserInteractionCompleted;
     public event EventHandler<WristbandPrintRequestedEventArgs>? WristbandPrintRequested;
 
-    public FirefoxHost(Control host)
+    public FirefoxHost(
+        Control host,
+        bool useCustomWristbandPrinterDialog = true)
     {
         _host = host;
+        _useCustomWristbandPrinterDialog = useCustomWristbandPrinterDialog;
         _host.Resize += (_, _) => ResizeEmbeddedWindow();
         _windowTimer.Tick += (_, _) => FindAndAttachWindow();
         _browserInputTimer.Tick += (_, _) => ObserveBrowserPointerActivity();
@@ -145,7 +149,9 @@ internal sealed class FirefoxHost : IDisposable
             FirefoxProfileRecovery.RecordLaunchProcess(profilePath, _process, launchUrl);
             if (compatibilityPort.HasValue)
             {
-                _compatibilityBridge = new LilyPadCompatibilityBridge(compatibilityPort.Value);
+                _compatibilityBridge = new LilyPadCompatibilityBridge(
+                    compatibilityPort.Value,
+                    _useCustomWristbandPrinterDialog);
                 _compatibilityBridge.PageHealthObserved += HandlePageHealthObserved;
                 _compatibilityBridge.Start();
             }
@@ -226,6 +232,16 @@ internal sealed class FirefoxHost : IDisposable
         _browserFocusPreferred = preferred;
         if (preferred)
             FocusEmbeddedWindow("browser mode enabled");
+    }
+
+    public void SetUseCustomWristbandPrinterDialog(bool enabled)
+    {
+        _useCustomWristbandPrinterDialog = enabled;
+        _activeWristbandDocumentKey = null;
+        _activeWristbandDownloadUrl = null;
+        _activeWristbandDownload = null;
+        _wristbandPromptRaised = false;
+        _compatibilityBridge?.SetUseCustomWristbandPrinterDialog(enabled);
     }
 
     public async Task<PrintDestinationSelectionResult> PrintCurrentPreviewAsync(
@@ -562,6 +578,13 @@ internal sealed class FirefoxHost : IDisposable
             return;
 
         _wristbandPromptRaised = true;
+        if (!_useCustomWristbandPrinterDialog)
+        {
+            PosLog.Write(
+                "A LilyPad wristband print page opened while the POS system-print fallback was active. " +
+                "The custom WB-1 through WB-7 selector was not shown.");
+            return;
+        }
         PosLog.Write("A LilyPad wristband print page requested a wristband printer selection.");
         WristbandPrintRequested?.Invoke(
             this,
