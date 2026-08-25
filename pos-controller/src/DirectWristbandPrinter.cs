@@ -50,8 +50,6 @@ internal static class DirectWristbandPrinter
     private const int StretchColorOnColor = 3;
     private const double NativeWristbandWidthInches = 1d;
     private const double NativeWristbandLengthInches = 11d;
-    private const double Zd411PrintheadWidthMillimeters203Dpi = 56d;
-    private const double Zd411PrintheadWidthMillimeters300Dpi = 54d;
     private const uint DibRgbColors = 0;
     private const uint SourceCopyRasterOperation = 0x00CC0020;
     private const int GdiError = -1;
@@ -193,14 +191,14 @@ internal static class DirectWristbandPrinter
                raster.Bits.Length == 1 &&
                raster.Bits[0] == 0x80 &&
                command.Contains("^GFA,1,1,1,80", StringComparison.Ordinal) &&
-               command.Contains("^PW448", StringComparison.Ordinal) &&
-               command.Contains("^FO122,0", StringComparison.Ordinal) &&
+               command.Contains("^PW203", StringComparison.Ordinal) &&
+               command.Contains("^FO0,0", StringComparison.Ordinal) &&
                !command.Contains("^LS", StringComparison.Ordinal) &&
                !command.Contains("^PR", StringComparison.Ordinal) &&
                standardLayout.MediaWidth == 203 &&
-               standardLayout.MediaLength == 2030 &&
-               standardLayout.PrintheadWidth == 448 &&
-               standardLayout.LeftOffset == 122;
+               standardLayout.MediaLength == 2233 &&
+               standardLayout.PrintheadWidth == 203 &&
+               standardLayout.LeftOffset == 0;
     }
 
     private static PrintDestinationSelectionResult RenderAndPrintOnStaThread(
@@ -227,7 +225,22 @@ internal static class DirectWristbandPrinter
         }
         try
         {
-            PrintRenderedPages(pages, printerName, cancellationToken);
+            TryGetPrinterDriverName(printerName, out var driverName);
+            if (IsNativeZplDriver(driverName))
+            {
+                PosLog.Write(
+                    $"Wristband printer {printerName} uses driver '{driverName}'; " +
+                    "bypassing the Windows GDI graphics path and sending the fitted wristband raster as RAW ZPL.");
+                PrintRenderedPagesAsZpl(
+                    pages,
+                    printerName,
+                    driverName,
+                    cancellationToken);
+            }
+            else
+            {
+                PrintRenderedPages(pages, printerName, cancellationToken);
+            }
         }
         finally
         {
@@ -297,10 +310,6 @@ internal static class DirectWristbandPrinter
                 rendered.Seek(0);
                 using var imageStream = rendered.AsStreamForRead();
                 using var decoded = new Bitmap(imageStream);
-                // Thermal-printer drivers are commonly backed by older GDI renderers.
-                // Keep the page fully opaque so the spool file contains a normal RGB
-                // raster instead of an alpha-blended EMF record that some drivers
-                // accept but output as a blank wristband.
                 var detached = new Bitmap(
                     decoded.Width,
                     decoded.Height,
@@ -343,8 +352,6 @@ internal static class DirectWristbandPrinter
         var data = image.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
         try
         {
-            // Sample at most about one million pixels. This is dense enough to catch
-            // fine barcode/text strokes without delaying the front-desk print flow.
             var xStep = Math.Max(1, image.Width / 1024);
             var yStep = Math.Max(1, image.Height / 1024);
             var rowLength = checked(Math.Abs(data.Stride));
@@ -403,9 +410,6 @@ internal static class DirectWristbandPrinter
     {
         var width = image.Width;
         var height = image.Height;
-        // Windows DIB scanlines are aligned to a four-byte boundary. Palette
-        // index 0 is black and index 1 is white, so start with an all-white page
-        // and clear one bit for every printable pixel.
         var destinationStride = checked(((width + 31) / 32) * 4);
         var bits = new byte[checked(destinationStride * height)];
         Array.Fill(bits, (byte)0xFF);
@@ -467,13 +471,14 @@ internal static class DirectWristbandPrinter
         var printableArea = pageSettings.PrintableArea;
 
         PosLog.Write(
-            $"Native ZPL media for {printerName} from Windows driver '{driverName}': " +
-            $"paper={paper.PaperName} {paper.Width}x{paper.Height} hundredths-inch, " +
+            $"RAW ZPL wristband media for {printerName} from Windows driver '{driverName}': " +
+            $"configured paper={paper.PaperName} {paper.Width}x{paper.Height} hundredths-inch, " +
             $"landscape={pageSettings.Landscape}, " +
             $"printable={printableArea.X:0.##},{printableArea.Y:0.##}," +
             $"{printableArea.Width:0.##}x{printableArea.Height:0.##}, " +
-            $"resolution={dpiX}x{dpiY} dpi, raster={mediaWidth}x{mediaLength} dots, " +
-            $"printhead={layout.PrintheadWidth} dots, centered left offset={layout.LeftOffset} dots.");
+            $"resolution={dpiX}x{dpiY} dpi; forcing physical wristband=" +
+            $"{NativeWristbandWidthInches:0.##}x{NativeWristbandLengthInches:0.##} inches, " +
+            $"raster={mediaWidth}x{mediaLength} dots, ^PW={layout.PrintheadWidth}, ^FO={layout.LeftOffset},0.");
 
         foreach (var page in pages)
         {
@@ -488,8 +493,9 @@ internal static class DirectWristbandPrinter
                     layout.LeftOffset)),
                 "Mullet Hop Wristbands");
             PosLog.Write(
-                $"Submitted a native ZPL wristband raster to {printerName}: " +
-                $"{raster.Width}x{raster.Height} dots, {raster.Bits.Length} raster bytes.");
+                $"Submitted a RAW ZPL wristband raster to {printerName}: " +
+                $"{raster.Width}x{raster.Height} dots, {raster.Bits.Length} raster bytes, " +
+                "origin=0,0 with no printhead-centering offset.");
         }
     }
 
@@ -499,51 +505,27 @@ internal static class DirectWristbandPrinter
         PaperSize paper,
         string driverName)
     {
-        var configuredWidthInches = Math.Min(paper.Width, paper.Height) / 100d;
-        var configuredLengthInches = Math.Max(paper.Width, paper.Height) / 100d;
-        if (configuredWidthInches <= 0)
-            configuredWidthInches = NativeWristbandWidthInches;
-        if (configuredLengthInches <= 0)
-            configuredLengthInches = NativeWristbandLengthInches;
+        _ = paper;
+        _ = driverName;
         var mediaWidth = Math.Clamp(
-            (int)Math.Round(configuredWidthInches * Math.Max(1, dpiX)),
+            (int)Math.Round(NativeWristbandWidthInches * Math.Max(1, dpiX)),
             128,
             1200);
         var mediaLength = Math.Clamp(
-            (int)Math.Round(configuredLengthInches * Math.Max(1, dpiY)),
+            (int)Math.Round(NativeWristbandLengthInches * Math.Max(1, dpiY)),
             1408,
             13_200);
-        var printheadWidth = CalculateNativePrintheadWidth(
-            driverName,
-            dpiX,
-            mediaWidth);
+
+        // RAW ZPL bypasses the Windows driver's private media alignment. Treat the
+        // one-inch wristband itself as the entire ZPL coordinate system instead of
+        // centering it within the ZD411's wider physical printhead. This keeps x=0
+        // at the left edge of the actual band and prevents artwork from being shifted
+        // off the media by a reconstructed printhead offset.
         return new NativeWristbandLayout(
             mediaWidth,
             mediaLength,
-            printheadWidth,
-            Math.Max(0, (printheadWidth - mediaWidth) / 2));
-    }
-
-    private static int CalculateNativePrintheadWidth(
-        string driverName,
-        int dpiX,
-        int mediaWidth)
-    {
-        // Windows exposes the selected paper and resolution through PageSettings,
-        // but a RAW ZPL job bypasses the driver's private media-centering command.
-        // Use the model named by the installed Windows driver to reconstruct only
-        // that missing physical alignment. Zebra specifies the ZD411 print width
-        // as 56 mm at 203 dpi and 54 mm at 300 dpi.
-        if (!driverName.Contains("ZD411", StringComparison.OrdinalIgnoreCase))
-            return mediaWidth;
-
-        var millimeters = dpiX >= 250
-            ? Zd411PrintheadWidthMillimeters300Dpi
-            : Zd411PrintheadWidthMillimeters203Dpi;
-        return Math.Clamp(
-            (int)Math.Round(millimeters / 25.4d * Math.Max(1, dpiX)),
             mediaWidth,
-            4800);
+            0);
     }
 
     private static Bitmap FitForNativeWristband(
@@ -577,9 +559,6 @@ internal static class DirectWristbandPrinter
             var targetWidth = Math.Max(1, (int)Math.Round(oriented.Width * scale));
             var targetHeight = Math.Max(1, (int)Math.Round(oriented.Height * scale));
             var targetX = (width - targetWidth) / 2;
-            // Wristband artwork begins near the feed edge. Center across the
-            // one-inch band, but do not move a shorter source image into the
-            // middle of the eleven-inch wristband.
             var targetY = 0;
             graphics.DrawImage(
                 oriented,
@@ -755,10 +734,6 @@ internal static class DirectWristbandPrinter
         };
         document.QueryPageSettings += (_, eventArgs) =>
         {
-            // GDI device coordinates are handed directly to the Zebra driver.
-            // Force a portrait device surface so the short axis stays across
-            // the one-inch band and the long axis follows the media feed. The
-            // artwork is rotated below when LilyPad supplies its usual wide PDF.
             eventArgs.PageSettings.Landscape = false;
             eventArgs.PageSettings.Margins = new Margins(0, 0, 0, 0);
             eventArgs.PageSettings.Color = false;
@@ -889,8 +864,6 @@ internal static class DirectWristbandPrinter
             {
                 Size = checked((uint)Marshal.SizeOf<BitmapInfoHeader>()),
                 Width = raster.Width,
-                // A negative height declares the byte array top-down so the
-                // printer receives the same row order that Windows rendered.
                 Height = -raster.Height,
                 Planes = 1,
                 BitCount = 1,
@@ -1223,7 +1196,6 @@ internal static class DirectWristbandPrinter
         }
         catch (Exception ex) when (ex is COMException or FormatException or InvalidCastException)
         {
-            // Firefox can update an accessibility node while it is being read.
         }
         try
         {
@@ -1237,7 +1209,6 @@ internal static class DirectWristbandPrinter
         }
         catch (Exception ex) when (ex is COMException or FormatException or InvalidCastException)
         {
-            // Firefox can update an accessibility node while it is being read.
         }
         return new AccessibleNode(accessible, childId, name, value, role, state);
     }
@@ -1252,7 +1223,6 @@ internal static class DirectWristbandPrinter
         }
         catch (COMException)
         {
-            // The default action can still work without selecting the link first.
         }
         try
         {
