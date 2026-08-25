@@ -755,10 +755,11 @@ internal static class DirectWristbandPrinter
         };
         document.QueryPageSettings += (_, eventArgs) =>
         {
-            // Preserve the WB printer's Windows orientation. A 1 x 10-inch
-            // wristband must remain portrait so its long dimension follows the
-            // media feed. The LilyPad PDF is normally wide; rotate the artwork
-            // in PrintPage instead of turning the printer page sideways.
+            // GDI device coordinates are handed directly to the Zebra driver.
+            // Force a portrait device surface so the short axis stays across
+            // the one-inch band and the long axis follows the media feed. The
+            // artwork is rotated below when LilyPad supplies its usual wide PDF.
+            eventArgs.PageSettings.Landscape = false;
             eventArgs.PageSettings.Margins = new Margins(0, 0, 0, 0);
             eventArgs.PageSettings.Color = false;
         };
@@ -803,7 +804,7 @@ internal static class DirectWristbandPrinter
                 $"{printableBounds.Width:0.##}x{printableBounds.Height:0.##}, " +
                 $"target={targetX:0.##},{targetY:0.##},{targetWidth:0.##}x{targetHeight:0.##}, " +
                 $"artworkRotated={orientedImage is not null}, " +
-                $"configuredLandscape={document.DefaultPageSettings.Landscape}.");
+                $"pageLandscape={eventArgs.PageSettings.Landscape}.");
             TransferRasterToPrinter(
                 graphics,
                 printImage,
@@ -846,6 +847,14 @@ internal static class DirectWristbandPrinter
         {
             throw new InvalidOperationException(
                 $"The {printerName} driver returned an empty device target for wristband page {pageNumber}.");
+        }
+        if (destination.Width >= destination.Height)
+        {
+            throw new InvalidOperationException(
+                $"The {printerName} driver returned a sideways device target " +
+                $"{destination.Width}x{destination.Height} for wristband page {pageNumber}. " +
+                "No wristband was printed. The device target must be narrow across the band " +
+                "and long in the media-feed direction.");
         }
 
         var deviceDpiX = graphics.DpiX;
