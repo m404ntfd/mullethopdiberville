@@ -101,8 +101,11 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.18, Systems Controller version 1.15.11, and Mullet Hop POS
-version 1.7.17 are the matching package releases. POS 1.7.17 preserves the Windows
+Waiver Kiosk version 2.11.19, Systems Controller version 1.15.12, and Mullet Hop POS
+version 1.7.18 are the matching package releases. POS 1.7.18 forces a portrait Windows
+device surface for wristbands, rotates LilyPad's wide artwork before rasterization, and
+refuses to submit any device raster whose long axis runs across the printhead instead of
+along the media feed. POS 1.7.17 was the previous package release. POS 1.7.17 preserves the Windows
 printer's configured portrait wristband orientation and rotates LilyPad's wide PDF
 artwork before rasterization, so the 10-inch dimension follows the media feed instead
 of being mapped across the printhead. POS 1.7.16 was the previous package release. POS 1.7.16 submits a pre-scaled,
