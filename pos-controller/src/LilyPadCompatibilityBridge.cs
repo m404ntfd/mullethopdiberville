@@ -49,6 +49,93 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
 
           if (/wristband/i.test(location.pathname) &&
               /(pdf|php)$/i.test(location.pathname)) {
+            const originalPrintKey = "__mulletHopOriginalWristbandPrint";
+            const applyPrintModeKey = "__mulletHopApplyWristbandPrintMode";
+            const showSystemPrintKey = "__mulletHopShowSystemWristbandPrintDialog";
+            const systemPrintRequestedKey = "__mulletHopSystemWristbandPrintRequested";
+            if (typeof window[originalPrintKey] !== "function" &&
+                typeof window.print === "function") {
+              Object.defineProperty(window, originalPrintKey, {
+                configurable: false,
+                enumerable: false,
+                writable: false,
+                value: window.print.bind(window)
+              });
+            }
+
+            const replaceWindowPrint = replacement => {
+              try {
+                Object.defineProperty(window, "print", {
+                  configurable: true,
+                  writable: false,
+                  value: replacement
+                });
+              } catch {
+                window.print = replacement;
+              }
+            };
+
+            const applyPrintMode = useCustomSelector => {
+              document.documentElement?.setAttribute(
+                "data-mullet-hop-wristband-print-mode",
+                useCustomSelector ? "custom" : "system");
+
+              if (useCustomSelector) {
+                const suppressBrowserPrintDialog = () => {
+                  document.documentElement?.setAttribute(
+                    "data-mullet-hop-direct-wristband-print",
+                    "1");
+                };
+                replaceWindowPrint(suppressBrowserPrintDialog);
+                return "custom";
+              }
+
+              if (typeof window[systemPrintRequestedKey] !== "boolean") {
+                window[systemPrintRequestedKey] = false;
+              }
+              const showSystemPrintDialog = () => {
+                if (window[systemPrintRequestedKey]) {
+                  return "already-requested";
+                }
+                const originalPrint = window[originalPrintKey];
+                if (typeof originalPrint !== "function") {
+                  return "native-print-unavailable";
+                }
+
+                window[systemPrintRequestedKey] = true;
+                document.documentElement?.setAttribute(
+                  "data-mullet-hop-system-print-requested",
+                  "1");
+                window.setTimeout(() => originalPrint(), 0);
+                return "scheduled";
+              };
+              Object.defineProperty(window, showSystemPrintKey, {
+                configurable: true,
+                enumerable: false,
+                writable: false,
+                value: showSystemPrintDialog
+              });
+              replaceWindowPrint(showSystemPrintDialog);
+
+              const ensureSystemPrintDialog = () =>
+                window.setTimeout(showSystemPrintDialog, 350);
+              if (document.readyState === "loading") {
+                document.addEventListener(
+                  "DOMContentLoaded",
+                  ensureSystemPrintDialog,
+                  { once: true });
+              } else {
+                ensureSystemPrintDialog();
+              }
+              return "system";
+            };
+            Object.defineProperty(window, applyPrintModeKey, {
+              configurable: true,
+              enumerable: false,
+              writable: false,
+              value: applyPrintMode
+            });
+
             let useCustomSelector = true;
             try {
               const stored = localStorage.getItem(
@@ -64,27 +151,7 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
               }
             } catch {
             }
-            document.documentElement?.setAttribute(
-              "data-mullet-hop-wristband-print-mode",
-              useCustomSelector ? "custom" : "system");
-            if (!useCustomSelector) {
-              return;
-            }
-
-            const suppressBrowserPrintDialog = () => {
-              document.documentElement?.setAttribute(
-                "data-mullet-hop-direct-wristband-print",
-                "1");
-            };
-            try {
-              Object.defineProperty(window, "print", {
-                configurable: true,
-                writable: false,
-                value: suppressBrowserPrintDialog
-              });
-            } catch {
-              window.print = suppressBrowserPrintDialog;
-            }
+            applyPrintMode(useCustomSelector);
             return;
           }
 
@@ -212,6 +279,11 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
           document.documentElement?.setAttribute(
             "data-mullet-hop-wristband-print-mode",
             useCustomSelector ? "custom" : "system");
+          if (/wristband/i.test(location.pathname) &&
+              /(pdf|php)$/i.test(location.pathname) &&
+              typeof window.__mulletHopApplyWristbandPrintMode === "function") {
+            window.__mulletHopApplyWristbandPrintMode(useCustomSelector);
+          }
           return value;
         }
         """;
@@ -285,6 +357,25 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
     private bool _disposed;
 
     public event Action<LilyPadPageHealth>? PageHealthObserved;
+
+    internal static bool SystemPrintFallbackPassesSmokeTest()
+    {
+        return CompatibilityFunction.Contains(
+                   "__mulletHopOriginalWristbandPrint",
+                   StringComparison.Ordinal) &&
+               CompatibilityFunction.Contains(
+                   "__mulletHopShowSystemWristbandPrintDialog",
+                   StringComparison.Ordinal) &&
+               CompatibilityFunction.Contains(
+                   "window.setTimeout(() => originalPrint(), 0)",
+                   StringComparison.Ordinal) &&
+               CompatibilityFunction.Contains(
+                   "window.setTimeout(showSystemPrintDialog, 350)",
+                   StringComparison.Ordinal) &&
+               SetWristbandPrintModeFunction.Contains(
+                   "__mulletHopApplyWristbandPrintMode",
+                   StringComparison.Ordinal);
+    }
 
     public LilyPadCompatibilityBridge(
         int port,

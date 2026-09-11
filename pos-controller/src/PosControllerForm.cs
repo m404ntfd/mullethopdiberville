@@ -227,6 +227,12 @@ internal sealed class PosControllerForm : Form
             throw new InvalidOperationException("POS automatic startup is not off by default.");
         if (!defaultSettings.UseCustomWristbandPrinterDialog)
             throw new InvalidOperationException("The custom wristband printer selector is not enabled by default.");
+        if (!LilyPadCompatibilityBridge.SystemPrintFallbackPassesSmokeTest())
+            throw new InvalidOperationException(
+                "The system wristband printing fallback does not guarantee one native Firefox print prompt.");
+        if (!FirefoxHost.DefaultReceiptPrinterPassesSmokeTest())
+            throw new InvalidOperationException(
+                "The dedicated Firefox profile does not preserve POS-X Thermal Printer as its receipt default.");
 
         if (!FirefoxHost.ProfileLockDialogTitleIndicatesFailureForSmokeTest("Close Firefox") ||
             !FirefoxHost.ProfileLockDialogTitleIndicatesFailureForSmokeTest(

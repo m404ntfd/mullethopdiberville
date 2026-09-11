@@ -239,8 +239,9 @@ internal sealed class PosSettingsDialog : Form
             {
                 modeNote.Text =
                     "TEMPORARY FALLBACK: the Mullet Hop selector is bypassed and LilyPad/Firefox " +
-                    "uses its normal system print screen. Staff must select the correct wristband " +
-                    "printer and complete the print manually.";
+                    "opens its normal print dialog once for each wristband job. Staff must select " +
+                    "the correct wristband printer and complete the print manually. POS-X Thermal " +
+                    "Printer remains the default receipt printer.";
                 modeNote.ForeColor = Color.FromArgb(156, 87, 0);
             }
         }

@@ -11,6 +11,7 @@ namespace MulletHopPosController;
 internal sealed class FirefoxHost : IDisposable
 {
     public const string HomePage = "https://mullet.lilypadpos.app/public/Login.php";
+    public const string DefaultReceiptPrinterName = "POS-X Thermal Printer";
 
     private const int GwlStyle = -16;
     private const long WsCaption = 0x00C00000L;
@@ -582,7 +583,8 @@ internal sealed class FirefoxHost : IDisposable
         {
             PosLog.Write(
                 "A LilyPad wristband print page opened while the POS system-print fallback was active. " +
-                "The custom WB-1 through WB-7 selector was not shown.");
+                "Firefox's native print dialog was requested and the custom WB-1 through WB-7 " +
+                "selector was not shown. POS-X Thermal Printer remains the receipt default.");
             return;
         }
         PosLog.Write("A LilyPad wristband print page requested a wristband printer selection.");
@@ -935,7 +937,12 @@ internal sealed class FirefoxHost : IDisposable
     private static void PrepareFirefoxProfile(string profilePath)
     {
         Directory.CreateDirectory(profilePath);
-        var preferences = $$"""
+        var preferences = BuildFirefoxPreferences();
+        File.WriteAllText(Path.Combine(profilePath, "user.js"), preferences);
+        EnsureFirefoxMenuBar(profilePath);
+    }
+
+    private static string BuildFirefoxPreferences() => $$"""
             user_pref("browser.shell.checkDefaultBrowser", false);
             user_pref("browser.aboutwelcome.enabled", false);
             user_pref("browser.startup.homepage", "{{HomePage}}");
@@ -948,13 +955,21 @@ internal sealed class FirefoxHost : IDisposable
             user_pref("browser.cache.offline.enable", false);
             user_pref("network.http.use-cache", false);
             user_pref("print.save_print_settings", false);
-            user_pref("print_printer", "POS-X Thermal Printer");
+            user_pref("print_printer", "{{DefaultReceiptPrinterName}}");
             user_pref("datareporting.policy.dataSubmissionEnabled", false);
             user_pref("datareporting.healthreport.uploadEnabled", false);
             user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
             """;
-        File.WriteAllText(Path.Combine(profilePath, "user.js"), preferences);
-        EnsureFirefoxMenuBar(profilePath);
+
+    internal static bool DefaultReceiptPrinterPassesSmokeTest()
+    {
+        var preferences = BuildFirefoxPreferences();
+        return preferences.Contains(
+                   $"user_pref(\"print_printer\", \"{DefaultReceiptPrinterName}\");",
+                   StringComparison.Ordinal) &&
+               preferences.Contains(
+                   "user_pref(\"print.save_print_settings\", false);",
+                   StringComparison.Ordinal);
     }
 
     private static void ClearFirefoxSessionState(string profilePath)

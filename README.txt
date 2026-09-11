@@ -338,6 +338,14 @@ only the current Firefox print-preview destination, leaving Windows and the dedi
 Firefox profile set to use the POS-X Thermal Printer for normal receipts and cash-drawer
 operation.
 
+Mullet Hop POS 1.7.26 guarantees that when the Mullet Hop wristband printer selector
+is disabled in POS Settings, Firefox
+opens its native print dialog exactly once for each newly loaded LilyPad wristband
+document. The fallback also prompts after the document loads if LilyPad does not issue
+its own print request. The dedicated Firefox profile keeps POS-X Thermal Printer as the
+default receipt printer and does not save a manually selected wristband printer as the
+receipt default.
+
 Version 1.7.5 records the exact POS Firefox process, detects the Windows process that
 owns a stale dedicated-profile lock, and terminates only that verified orphaned POS
 Firefox tree. It retains the last healthy LilyPad URL for up to four hours for one
