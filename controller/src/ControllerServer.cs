@@ -643,7 +643,8 @@ internal sealed class ControllerServer : IDisposable
         (type == CommandTypes.SetClosed ||
          type == CommandTypes.SetBusinessClosed ||
          type == CommandTypes.ResetStart ||
-         type == CommandTypes.AcknowledgeAssistance) &&
+         type == CommandTypes.AcknowledgeAssistance ||
+         type == CommandTypes.ClearAssistance) &&
         ((type != CommandTypes.SetClosed && type != CommandTypes.SetBusinessClosed) ||
          closed.HasValue);
 
@@ -654,7 +655,8 @@ internal sealed class ControllerServer : IDisposable
          type == CommandTypes.CheckUpdate ||
          type == CommandTypes.InstallUpdate ||
          type == CommandTypes.SyncBusinessHours ||
-         type == CommandTypes.AcknowledgeAssistance) &&
+         type == CommandTypes.AcknowledgeAssistance ||
+         type == CommandTypes.ClearAssistance) &&
         ((type != CommandTypes.SetClosed && type != CommandTypes.SetBusinessClosed) ||
          closed.HasValue);
 

@@ -206,6 +206,9 @@ column flashes yellow with HELP. Mullet Hop POS can acknowledge the call;
 the controller row then displays On the way. In Mullet Hop POS, the Answered
 button stays gray and disabled while its status dot continues flashing yellow.
 The call remains active until it is cleared at the kiosk.
+Mullet Hop POS also provides **Clear Call**: the kiosk shows the on-the-way notice
+for 15 seconds, the POS and controller display the temporary orange clearing
+state, and the kiosk then clears the call automatically.
 
 An online kiosk that is showing its scheduled Business Closed video/page or the
 business-hours blackout screen is reported with a blue Business Closed indicator

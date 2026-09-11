@@ -14,6 +14,7 @@ internal static class CommandTypes
     public const string InstallUpdate = "install-update";
     public const string SyncBusinessHours = "sync-business-hours";
     public const string AcknowledgeAssistance = "acknowledge-assistance";
+    public const string ClearAssistance = "clear-assistance";
 }
 
 internal sealed class KioskCheckInRequest
@@ -28,6 +29,7 @@ internal sealed class KioskCheckInRequest
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
     public bool AssistanceAcknowledged { get; set; }
+    public bool AssistanceClearing { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public string LastCommandId { get; set; } = string.Empty;
     public bool LastCommandSuccess { get; set; }
@@ -73,6 +75,7 @@ internal sealed class ManagedKiosk
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
     public bool AssistanceAcknowledged { get; set; }
+    public bool AssistanceClearing { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public DateTime LastSeenUtc { get; set; }
     public string LastIpAddress { get; set; } = string.Empty;
@@ -98,6 +101,7 @@ internal sealed class ManagedKiosk
         HasError = HasError,
         AssistanceRequested = AssistanceRequested,
         AssistanceAcknowledged = AssistanceAcknowledged,
+        AssistanceClearing = AssistanceClearing,
         StatusMessage = StatusMessage,
         LastSeenUtc = LastSeenUtc,
         LastIpAddress = LastIpAddress,
@@ -123,6 +127,7 @@ internal sealed class PosKioskStatus
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
     public bool AssistanceAcknowledged { get; set; }
+    public bool AssistanceClearing { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public DateTime LastSeenUtc { get; set; }
 }
@@ -942,6 +947,7 @@ internal sealed class ControllerState
                     HasError = kiosk.HasError,
                     AssistanceRequested = kiosk.AssistanceRequested,
                     AssistanceAcknowledged = kiosk.AssistanceAcknowledged,
+                    AssistanceClearing = kiosk.AssistanceClearing,
                     StatusMessage = kiosk.StatusMessage,
                     LastSeenUtc = kiosk.LastSeenUtc
                 })
@@ -1039,7 +1045,10 @@ internal sealed class ControllerState
             kiosk.AvailableForGuests = request.AvailableForGuests;
             kiosk.HasError = request.HasError;
             kiosk.AssistanceRequested = request.AssistanceRequested;
-            kiosk.AssistanceAcknowledged = request.AssistanceRequested && request.AssistanceAcknowledged;
+            kiosk.AssistanceAcknowledged = request.AssistanceRequested &&
+                                             (request.AssistanceAcknowledged ||
+                                              request.AssistanceClearing);
+            kiosk.AssistanceClearing = request.AssistanceRequested && request.AssistanceClearing;
             kiosk.StatusMessage = Clean(
                 request.StatusMessage,
                 request.AvailableForGuests ? "Online and open to guests." : "Not available to guests.",
@@ -1413,6 +1422,7 @@ internal sealed class ControllerState
         CommandTypes.InstallUpdate => "Update installation queued.",
         CommandTypes.SyncBusinessHours => "Business Hours sync queued.",
         CommandTypes.AcknowledgeAssistance => "Assistance response queued.",
+        CommandTypes.ClearAssistance => "Assistance clear queued.",
         _ => "Command queued."
     };
 

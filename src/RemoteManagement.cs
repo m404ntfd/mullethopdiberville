@@ -134,6 +134,7 @@ internal sealed partial class KioskForm
             return;
         }
 
+        var commandExecuted = false;
         _remoteCheckInProgress = true;
         try
         {
@@ -151,6 +152,7 @@ internal sealed partial class KioskForm
                 !string.Equals(response.Command.Id, _settings.RemoteLastCommandId, StringComparison.Ordinal))
             {
                 await ExecuteRemoteCommandAsync(response.Command);
+                commandExecuted = true;
             }
 
             if (!string.IsNullOrWhiteSpace(response.AdvertisementRevision) &&
@@ -178,6 +180,11 @@ internal sealed partial class KioskForm
         {
             _remoteCheckInProgress = false;
         }
+
+        if (commandExecuted && !IsDisposed && IsHandleCreated)
+        {
+            BeginInvoke(new Action(() => _ = CheckInWithControllerAsync()));
+        }
     }
 
     private KioskCheckInRequest CreateCheckInRequest() => new()
@@ -192,6 +199,7 @@ internal sealed partial class KioskForm
         HasError = IsInErrorState(),
         AssistanceRequested = _settings.AssistanceRequested,
         AssistanceAcknowledged = _settings.AssistanceAcknowledged,
+        AssistanceClearing = _settings.AssistanceClearing,
         StatusMessage = CurrentPosStatusMessage(),
         LastCommandId = _settings.RemoteLastCommandId,
         LastCommandSuccess = _settings.RemoteLastCommandSuccess,
@@ -623,6 +631,24 @@ internal sealed partial class KioskForm
                     }
                     break;
 
+                case RemoteCommandTypes.ClearAssistance:
+                    if (_settings.AssistanceRequested)
+                    {
+                        StartAssistanceClearCountdown();
+                        SaveRemoteCommandResult(
+                            command.Id,
+                            true,
+                            "The guest was told that help is on the way; the call will clear after 15 seconds.");
+                    }
+                    else
+                    {
+                        SaveRemoteCommandResult(
+                            command.Id,
+                            true,
+                            "The assistance call had already been cleared at the kiosk.");
+                    }
+                    break;
+
                 default:
                     SaveRemoteCommandResult(command.Id, false, "The controller sent an unsupported command.");
                     break;
@@ -743,6 +769,7 @@ internal static class RemoteCommandTypes
     public const string InstallUpdate = "install-update";
     public const string SyncBusinessHours = "sync-business-hours";
     public const string AcknowledgeAssistance = "acknowledge-assistance";
+    public const string ClearAssistance = "clear-assistance";
 }
 
 internal sealed class KioskCheckInRequest
@@ -757,6 +784,7 @@ internal sealed class KioskCheckInRequest
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
     public bool AssistanceAcknowledged { get; set; }
+    public bool AssistanceClearing { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public string LastCommandId { get; set; } = string.Empty;
     public bool LastCommandSuccess { get; set; }

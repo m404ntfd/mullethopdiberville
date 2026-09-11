@@ -391,12 +391,19 @@ internal static class BusinessHoursSmokeTest
                    TimeSpan.FromHours(21) &&
                KioskBusinessDayHours.CalculateLastJumpTimeSold(TimeSpan.Zero) ==
                    TimeSpan.FromHours(23) &&
+               KioskForm.AssistanceClearNoticeSeconds == 15 &&
+               string.Equals(
+                   RemoteCommandTypes.ClearAssistance,
+                   "clear-assistance",
+                   StringComparison.Ordinal) &&
                new KioskSettings().BusinessClosedLeadMinutes == 30;
     }
 }
 
 internal sealed partial class KioskForm : Form
 {
+    internal const int AssistanceClearNoticeSeconds = 15;
+
     private static readonly HttpClient ConnectionCheckClient = new()
     {
         Timeout = TimeSpan.FromSeconds(12)
@@ -425,6 +432,7 @@ internal sealed partial class KioskForm : Form
     private readonly System.Windows.Forms.Timer _completionTimer = new();
     private readonly System.Windows.Forms.Timer _retryTimer = new() { Interval = 60000 };
     private readonly System.Windows.Forms.Timer _businessHoursTimer = new() { Interval = 1000 };
+    private readonly System.Windows.Forms.Timer _assistanceClearTimer = new() { Interval = 250 };
 
     private DateTime _lastActivityUtc = DateTime.UtcNow;
     private bool _allowExit;
@@ -500,6 +508,21 @@ internal sealed partial class KioskForm : Form
         Controls.Add(_previewBanner);
         _banner.BringToFront();
         _previewBanner.BringToFront();
+
+        _assistanceClearTimer.Tick += (_, _) =>
+        {
+            if (!_settings.AssistanceClearing)
+            {
+                _assistanceClearTimer.Stop();
+                return;
+            }
+            if (!_settings.AssistanceClearDeadlineUtc.HasValue ||
+                DateTime.UtcNow >= _settings.AssistanceClearDeadlineUtc.Value)
+            {
+                CompleteAssistanceClearCountdown();
+            }
+        };
+        ResumeAssistanceClearCountdown();
         UpdateAssistancePanelState();
 
         _idleTimer.Tick += IdleTimer_Tick;
@@ -551,8 +574,11 @@ internal sealed partial class KioskForm : Form
     {
         try
         {
+            _assistanceClearTimer.Stop();
             _settings.AssistanceRequested = true;
             _settings.AssistanceAcknowledged = false;
+            _settings.AssistanceClearing = false;
+            _settings.AssistanceClearDeadlineUtc = null;
             _settings.Save();
             UpdateAssistanceStateAfterChange();
             MarkActivity();
@@ -570,8 +596,11 @@ internal sealed partial class KioskForm : Form
     {
         try
         {
+            _assistanceClearTimer.Stop();
             _settings.AssistanceRequested = false;
             _settings.AssistanceAcknowledged = false;
+            _settings.AssistanceClearing = false;
+            _settings.AssistanceClearDeadlineUtc = null;
             _settings.Save();
             UpdateAssistanceStateAfterChange();
             MarkActivity();
@@ -585,6 +614,62 @@ internal sealed partial class KioskForm : Form
         }
     }
 
+    private void StartAssistanceClearCountdown()
+    {
+        _assistanceClearTimer.Stop();
+        _settings.AssistanceRequested = true;
+        _settings.AssistanceAcknowledged = true;
+        _settings.AssistanceClearing = true;
+        _settings.AssistanceClearDeadlineUtc =
+            DateTime.UtcNow.AddSeconds(AssistanceClearNoticeSeconds);
+        _settings.Save();
+        UpdateAssistanceStateAfterChange();
+        MarkActivity();
+        _assistanceClearTimer.Start();
+        KioskLog.Write(
+            "The POS started the 15-second assistance-clear notice for the guest.");
+    }
+
+    private void ResumeAssistanceClearCountdown()
+    {
+        if (!_settings.AssistanceClearing)
+            return;
+        if (!_settings.AssistanceClearDeadlineUtc.HasValue ||
+            DateTime.UtcNow >= _settings.AssistanceClearDeadlineUtc.Value)
+        {
+            CompleteAssistanceClearCountdown();
+            return;
+        }
+        _assistanceClearTimer.Start();
+    }
+
+    private void CompleteAssistanceClearCountdown()
+    {
+        _assistanceClearTimer.Stop();
+        if (!_settings.AssistanceClearing)
+            return;
+
+        _settings.AssistanceRequested = false;
+        _settings.AssistanceAcknowledged = false;
+        _settings.AssistanceClearing = false;
+        _settings.AssistanceClearDeadlineUtc = null;
+        try
+        {
+            _settings.Save();
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Write(
+                "The expired assistance call was cleared in memory but could not be saved: " +
+                ex.Message);
+        }
+        UpdateAssistanceStateAfterChange();
+        MarkActivity();
+        _ = CheckInWithControllerAsync();
+        KioskLog.Write(
+            "The POS assistance-clear notice ended after 15 seconds and the call was cleared.");
+    }
+
     private void UpdateAssistancePanelState()
     {
         if (!_browserReady || _webView.CoreWebView2 is null)
@@ -592,7 +677,8 @@ internal sealed partial class KioskForm : Form
 
         var requested = _settings.AssistanceRequested ? "true" : "false";
         var acknowledged = _settings.AssistanceAcknowledged ? "true" : "false";
-        _ = PushAssistanceStateToWaiverPageAsync(requested, acknowledged);
+        var clearing = _settings.AssistanceClearing ? "true" : "false";
+        _ = PushAssistanceStateToWaiverPageAsync(requested, acknowledged, clearing);
     }
 
     private void UpdateAssistanceStateAfterChange()
@@ -615,12 +701,15 @@ internal sealed partial class KioskForm : Form
         }
     }
 
-    private async Task PushAssistanceStateToWaiverPageAsync(string requested, string acknowledged)
+    private async Task PushAssistanceStateToWaiverPageAsync(
+        string requested,
+        string acknowledged,
+        string clearing)
     {
         try
         {
             await _webView.CoreWebView2.ExecuteScriptAsync(
-                $"window.__mulletHopSetAssistanceState?.({requested}, {acknowledged});");
+                $"window.__mulletHopSetAssistanceState?.({requested}, {acknowledged}, {clearing});");
         }
         catch (Exception ex)
         {
@@ -649,6 +738,8 @@ internal sealed partial class KioskForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _businessHoursTimer.Stop();
+        _assistanceClearTimer.Stop();
+        _assistanceClearTimer.Dispose();
         StopRemoteManagement();
         NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
         base.OnFormClosed(e);
@@ -725,6 +816,9 @@ internal sealed partial class KioskForm : Form
                 StringComparison.Ordinal).Replace(
                 "__MULLET_HOP_ASSISTANCE_ACKNOWLEDGED__",
                 _settings.AssistanceAcknowledged ? "true" : "false",
+                StringComparison.Ordinal).Replace(
+                "__MULLET_HOP_ASSISTANCE_CLEARING__",
+                _settings.AssistanceClearing ? "true" : "false",
                 StringComparison.Ordinal).Replace(
                 "__MULLET_HOP_ASSISTANCE_FLARE_INTERVAL_MS__",
                 (Math.Clamp(_settings.AssistanceFlareIntervalSeconds, 10, 300) * 1000).ToString(),
@@ -2859,6 +2953,7 @@ internal sealed partial class KioskForm : Form
           const assistanceSession = '__MULLET_HOP_ASSISTANCE_SESSION__';
           let assistanceRequested = __MULLET_HOP_ASSISTANCE_REQUESTED__;
           let assistanceAcknowledged = __MULLET_HOP_ASSISTANCE_ACKNOWLEDGED__;
+          let assistanceClearing = __MULLET_HOP_ASSISTANCE_CLEARING__;
           const assistanceFlareIntervalMs = __MULLET_HOP_ASSISTANCE_FLARE_INTERVAL_MS__;
           let assistanceFlareTimer = 0;
 
@@ -2885,6 +2980,7 @@ internal sealed partial class KioskForm : Form
             if (savedAssistance?.session === assistanceSession) {
               assistanceRequested = Boolean(savedAssistance.requested);
               assistanceAcknowledged = assistanceRequested && Boolean(savedAssistance.acknowledged);
+              assistanceClearing = assistanceRequested && Boolean(savedAssistance.clearing);
             }
           }
           catch { }
@@ -2898,6 +2994,7 @@ internal sealed partial class KioskForm : Form
 
             card.classList.toggle('is-requested', assistanceRequested);
             card.classList.toggle('is-acknowledged', assistanceRequested && assistanceAcknowledged);
+            card.classList.toggle('is-clearing', assistanceRequested && assistanceClearing);
             setAssistanceText(
               card.querySelector('h2'),
               assistanceRequested
@@ -2912,16 +3009,22 @@ internal sealed partial class KioskForm : Form
                 : 'Select the button below if you need help completing the waiver.');
             setAssistanceText(
               card.querySelector('button'),
-              assistanceRequested ? 'Clear Assistance Call' : 'Call for Assistance');
+              assistanceClearing
+                ? 'Help Is on the Way'
+                : assistanceRequested ? 'Clear Assistance Call' : 'Call for Assistance');
+            const button = card.querySelector('button');
+            if (button) button.disabled = assistanceClearing;
           };
-          window.__mulletHopSetAssistanceState = (requested, acknowledged) => {
+          window.__mulletHopSetAssistanceState = (requested, acknowledged, clearing = false) => {
             assistanceRequested = Boolean(requested);
             assistanceAcknowledged = assistanceRequested && Boolean(acknowledged);
+            assistanceClearing = assistanceRequested && Boolean(clearing);
             try {
               sessionStorage.setItem('mullet-hop-assistance-state', JSON.stringify({
                 session: assistanceSession,
                 requested: assistanceRequested,
-                acknowledged: assistanceAcknowledged
+                acknowledged: assistanceAcknowledged,
+                clearing: assistanceClearing
               }));
             }
             catch { }
@@ -2941,6 +3044,7 @@ internal sealed partial class KioskForm : Form
                 <button type='button' id='mullet-hop-assistance-button'>Call for Assistance</button>
               `;
               card.querySelector('button').addEventListener('click', () => {
+                if (assistanceClearing) return;
                 window.chrome.webview.postMessage(
                   assistanceRequested ? 'assistance-clear' : 'assistance-request');
               });
@@ -3679,6 +3783,10 @@ internal sealed partial class KioskForm : Form
               #mullet-hop-assistance-card.is-requested #mullet-hop-assistance-button {
                 background: #76c442 !important;
               }
+              #mullet-hop-assistance-card.is-clearing #mullet-hop-assistance-button {
+                cursor: default !important;
+                opacity: 1 !important;
+              }
               .mullet-hop-assistance-light {
                 display: none;
                 width: 34px;
@@ -4328,6 +4436,8 @@ internal sealed class KioskSettings
     public string StationName { get; set; } = Environment.MachineName;
     public bool AssistanceRequested { get; set; }
     public bool AssistanceAcknowledged { get; set; }
+    public bool AssistanceClearing { get; set; }
+    public DateTime? AssistanceClearDeadlineUtc { get; set; }
     public string RemoteLastCommandId { get; set; } = string.Empty;
     public bool RemoteLastCommandSuccess { get; set; }
     public string RemoteLastCommandMessage { get; set; } = string.Empty;
@@ -4469,7 +4579,34 @@ internal sealed class KioskSettings
             ? Environment.MachineName
             : StationName.Trim();
         if (!AssistanceRequested)
+        {
             AssistanceAcknowledged = false;
+            AssistanceClearing = false;
+            AssistanceClearDeadlineUtc = null;
+        }
+        else if (AssistanceClearing)
+        {
+            AssistanceAcknowledged = true;
+            var now = DateTime.UtcNow;
+            if (!AssistanceClearDeadlineUtc.HasValue ||
+                AssistanceClearDeadlineUtc.Value <= now)
+            {
+                AssistanceRequested = false;
+                AssistanceAcknowledged = false;
+                AssistanceClearing = false;
+                AssistanceClearDeadlineUtc = null;
+            }
+            else if (AssistanceClearDeadlineUtc.Value >
+                     now.AddSeconds(KioskForm.AssistanceClearNoticeSeconds))
+            {
+                AssistanceClearDeadlineUtc =
+                    now.AddSeconds(KioskForm.AssistanceClearNoticeSeconds);
+            }
+        }
+        else
+        {
+            AssistanceClearDeadlineUtc = null;
+        }
         if (StationClosed)
             ManualBusinessBlackout = false;
         RemoteLastCommandId ??= string.Empty;

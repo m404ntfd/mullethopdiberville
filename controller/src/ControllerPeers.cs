@@ -134,6 +134,10 @@ internal static class ControllerMasterElection
                    TimeSpan.FromHours(21) &&
                ControllerBusinessDayHours.CalculateLastJumpTimeSold(TimeSpan.Zero) ==
                    TimeSpan.FromHours(23) &&
+               string.Equals(
+                   CommandTypes.ClearAssistance,
+                   "clear-assistance",
+                   StringComparison.Ordinal) &&
                new ControllerBusinessHours().BusinessClosedLeadMinutes == 30 &&
                SelectWinner(priority, new[] { first, second })?.ControllerId == first &&
                SelectWinner(priority, new[] { second })?.ControllerId == second &&

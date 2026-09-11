@@ -101,8 +101,10 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.19, Systems Controller version 1.15.12, and Mullet Hop POS
-version 1.7.18 are the matching package releases. POS 1.7.18 forces a portrait Windows
+Waiver Kiosk version 2.11.20, Systems Controller version 1.15.13, and Mullet Hop POS
+version 1.7.28 are the matching package releases. These versions add the POS Clear Call
+command, the kiosk's 15-second help-is-on-the-way notice and automatic call clearing,
+and the temporary orange clearing indicator. POS 1.7.18 forces a portrait Windows
 device surface for wristbands, rotates LilyPad's wide artwork before rasterization, and
 refuses to submit any device raster whose long axis runs across the printhead instead of
 along the media feed. POS 1.7.17 was the previous package release. POS 1.7.17 preserves the Windows
@@ -182,6 +184,9 @@ in the Systems Controller and in the kiosk's assigned Mullet Hop POS panel.
 Selecting Acknowledge in Mullet Hop POS acknowledges the call and changes the kiosk
 message to tell the guest that assistance is coming. The kiosk continues flashing
 until the guest or assisting staff member selects Clear Assistance Call.
+Selecting Clear Call in Mullet Hop POS gives the guest the same on-the-way message for
+15 seconds, flashes that kiosk's POS status light orange, and then clears the assistance
+call automatically.
 
 Download the controller package from:
 
@@ -281,8 +286,8 @@ uses Mozilla Firefox installed on the computer to load:
 https://mullet.lilypadpos.app/public/Login.php
 
 LilyPad POS fills the main area. A docked right sidebar displays Kiosk 1 through
-Kiosk 4. The button at the top collapses the sidebar to one status dot and a
-compact assistance acknowledgement button per kiosk; expanding it adds names,
+Kiosk 4. The button at the top collapses the sidebar to one status dot with compact
+Clear Call and assistance acknowledgement buttons per kiosk; expanding it adds names,
 messages, and Close, Open, and Reset controls.
 
 A green dot means the assigned kiosk is online and open to guests. A blue dot
@@ -293,6 +298,9 @@ a guest calls for help, that kiosk's dot flashes between its current status colo
 and yellow. Selecting ACK or Acknowledge tells the guest assistance is on the way.
 The button then reads Answered, stays gray and inactive, and the dot continues
 flashing until the call is cleared at the kiosk.
+Clear Call appears directly above ACK. Selecting it gives the guest the same on-the-way
+notice for 15 seconds while the POS light flashes orange, then clears the call and
+returns an otherwise healthy kiosk light to green.
 
 Selecting Close in a kiosk section asks whether to use Staff Closure or Business
 Closure. Staff Closure displays the normal station-closed screen and reports red.

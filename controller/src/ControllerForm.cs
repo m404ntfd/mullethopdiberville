@@ -1139,7 +1139,9 @@ internal sealed class ControllerForm : Form
                         ? "Business closed"
                         : "Open");
                 var assistance = item.SubItems.Add(kiosk.AssistanceRequested
-                    ? kiosk.AssistanceAcknowledged
+                    ? kiosk.AssistanceClearing
+                        ? _assistanceFlashOn ? "● CLEARING" : "○ CLEARING"
+                        : kiosk.AssistanceAcknowledged
                         ? "On the way"
                         : _assistanceFlashOn ? "● HELP" : "○ HELP"
                     : string.Empty);
@@ -1152,11 +1154,15 @@ internal sealed class ControllerForm : Form
                     subItem.ForeColor = item.ForeColor;
                     subItem.BackColor = item.BackColor;
                 }
-                assistance.ForeColor = kiosk.AssistanceRequested && !kiosk.AssistanceAcknowledged
+                assistance.ForeColor = kiosk.AssistanceClearing
                     ? _assistanceFlashOn
-                        ? Color.FromArgb(255, 193, 7)
-                        : Color.FromArgb(125, 103, 28)
-                    : item.ForeColor;
+                        ? Color.FromArgb(245, 130, 32)
+                        : Color.FromArgb(150, 78, 13)
+                    : kiosk.AssistanceRequested && !kiosk.AssistanceAcknowledged
+                        ? _assistanceFlashOn
+                            ? Color.FromArgb(255, 193, 7)
+                            : Color.FromArgb(125, 103, 28)
+                        : item.ForeColor;
                 _kioskList.Items.Add(item);
                 if (string.Equals(kiosk.StationId, selectedId, StringComparison.Ordinal))
                     item.Selected = true;
@@ -1731,6 +1737,7 @@ internal sealed class ControllerForm : Form
         CommandTypes.CheckUpdate => "Check for update",
         CommandTypes.InstallUpdate => "Install update",
         CommandTypes.AcknowledgeAssistance => "Tell guest assistance is on the way",
+        CommandTypes.ClearAssistance => "Tell guest help is coming, then clear call",
         _ => command.Type
     };
 

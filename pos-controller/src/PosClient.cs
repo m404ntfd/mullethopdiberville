@@ -12,6 +12,7 @@ internal static class PosCommandTypes
     public const string SetBusinessClosed = "set-business-closed";
     public const string ResetStart = "reset-start";
     public const string AcknowledgeAssistance = "acknowledge-assistance";
+    public const string ClearAssistance = "clear-assistance";
 }
 
 internal sealed class PosKioskStatus
@@ -26,6 +27,7 @@ internal sealed class PosKioskStatus
     public bool HasError { get; set; }
     public bool AssistanceRequested { get; set; }
     public bool AssistanceAcknowledged { get; set; }
+    public bool AssistanceClearing { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
     public DateTime LastSeenUtc { get; set; }
 }

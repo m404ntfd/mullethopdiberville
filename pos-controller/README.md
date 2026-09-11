@@ -12,7 +12,7 @@ keeps keyboard focus unless the user deliberately interacts with the sidebar.
 ## Sidebar behavior
 
 * Select **Collapse Controls** at the top to reduce the sidebar to K1–K4, one
-  status dot per kiosk, and a compact assistance acknowledgement button.
+  status dot per kiosk, and compact **Clear Call** and **ACK** buttons.
 * Select the arrow again to expand kiosk names, status messages, and the Close,
   Open, and Reset controls.
 * Clicking or touching LilyPad immediately returns keyboard focus to Firefox.
@@ -30,6 +30,10 @@ keeps keyboard focus unless the user deliberately interacts with the sidebar.
   that assistance is on the way. The button then reads **Answered**, stays gray
   and disabled, and the dot keeps flashing yellow until the call is cleared at
   the kiosk.
+* **Clear Call**, directly above ACK, also tells the guest that help is on the
+  way. For 15 seconds the kiosk displays that notice, the POS status dot flashes
+  orange, and both response buttons are locked. The call then clears automatically;
+  an otherwise healthy kiosk returns to a solid green status.
 * **Close** asks whether this is a **Staff Closure** or **Business Closure**.
   Staff Closure displays the normal closed screen and reports red. Business
   Closure starts the Business Closed video and reports blue.

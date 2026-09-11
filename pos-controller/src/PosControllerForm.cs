@@ -265,8 +265,40 @@ internal sealed class PosControllerForm : Form
 
         status.AssistanceRequested = true;
         card.ShowStatus(status);
-        if (card.VisualUpdateCount != unchangedCount + 1 || !card.AssistanceButtonEnabled)
-            throw new InvalidOperationException("An assistance status change did not enable acknowledgment.");
+        if (card.VisualUpdateCount != unchangedCount + 1 ||
+            !card.AssistanceButtonEnabled ||
+            !card.AssistanceClearButtonEnabled ||
+            !card.ClearCallIsAboveAcknowledgeForSmokeTest)
+        {
+            throw new InvalidOperationException(
+                "An assistance call did not enable Clear Call above Acknowledge.");
+        }
+
+        status.AssistanceAcknowledged = true;
+        status.AssistanceClearing = true;
+        card.ShowStatus(status);
+        if (card.AssistanceButtonEnabled || card.AssistanceClearButtonEnabled ||
+            card.StatusColorForSmokeTest != KioskControlCard.AssistanceClearingColorForSmokeTest)
+        {
+            throw new InvalidOperationException(
+                "An assistance call being cleared did not disable both buttons and show orange.");
+        }
+
+        status.AssistanceRequested = false;
+        status.AssistanceAcknowledged = false;
+        status.AssistanceClearing = false;
+        card.ShowStatus(status);
+        if (card.StatusColorForSmokeTest != KioskControlCard.OnlineColorForSmokeTest)
+            throw new InvalidOperationException(
+                "A cleared assistance call did not return the online kiosk light to green.");
+
+        if (!string.Equals(
+                PosCommandTypes.ClearAssistance,
+                "clear-assistance",
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The Clear Call command identifier changed.");
+        }
 
         Application.DoEvents();
     }
@@ -401,6 +433,8 @@ internal sealed class PosControllerForm : Form
                 await SendCommandAsync(slot, PosCommandTypes.ResetStart);
             _cards[index].AssistanceAcknowledgedRequested += async (_, _) =>
                 await SendCommandAsync(slot, PosCommandTypes.AcknowledgeAssistance);
+            _cards[index].AssistanceClearRequested += async (_, _) =>
+                await SendCommandAsync(slot, PosCommandTypes.ClearAssistance);
             kioskLayout.Controls.Add(_cards[index], 0, index);
         }
         root.Controls.Add(kioskLayout, 0, 2);
@@ -915,6 +949,8 @@ internal sealed class PosControllerForm : Form
                 _cards[slot].ShowPendingState(open: true, "Putting waiver station in service…");
             else if (commandType == PosCommandTypes.AcknowledgeAssistance)
                 _cards[slot].ShowAssistanceAcknowledgedPending();
+            else if (commandType == PosCommandTypes.ClearAssistance)
+                _cards[slot].ShowAssistanceClearingPending();
             else
                 _cards[slot].ShowPendingMessage("Resetting to the starting page…");
 
@@ -1276,6 +1312,7 @@ internal sealed class KioskControlCard : Panel
     private static readonly Color ErrorColor = Color.FromArgb(244, 34, 48);
     private static readonly Color BusinessClosedColor = Color.FromArgb(26, 135, 232);
     private static readonly Color AssistanceColor = Color.FromArgb(255, 213, 38);
+    private static readonly Color AssistanceClearingColor = Color.FromArgb(245, 130, 32);
     private static readonly Color UnlinkedColor = Color.FromArgb(82, 88, 96);
 
     private readonly int _kioskNumber;
@@ -1286,13 +1323,15 @@ internal sealed class KioskControlCard : Panel
     private readonly Button _open = new();
     private readonly Button _reset = new();
     private readonly Button _assistance = new();
+    private readonly Button _clearAssistance = new();
     private readonly TableLayoutPanel _body = new();
     private readonly Panel _details = new();
     private readonly System.Windows.Forms.Timer _assistanceFlashTimer = new() { Interval = 450 };
     private Color _baseStatusColor = UnlinkedColor;
     private bool _assistanceRequested;
     private bool _assistanceAcknowledged;
-    private bool _assistanceFlashYellow;
+    private bool _assistanceClearing;
+    private bool _assistanceFlashOn;
     private bool _buttonsEnabled;
     private string _visualStateKey = string.Empty;
     private int _visualUpdateCount;
@@ -1301,9 +1340,18 @@ internal sealed class KioskControlCard : Panel
     public event EventHandler? OpenRequested;
     public event EventHandler? ResetRequested;
     public event EventHandler? AssistanceAcknowledgedRequested;
+    public event EventHandler? AssistanceClearRequested;
     public bool IsLinked { get; set; }
     internal int VisualUpdateCount => _visualUpdateCount;
     internal bool AssistanceButtonEnabled => _assistance.Enabled;
+    internal bool AssistanceClearButtonEnabled => _clearAssistance.Enabled;
+    internal Color StatusColorForSmokeTest => _dot.StatusColor;
+    internal static Color OnlineColorForSmokeTest => OnlineColor;
+    internal static Color AssistanceClearingColorForSmokeTest => AssistanceClearingColor;
+    internal bool ClearCallIsAboveAcknowledgeForSmokeTest =>
+        _clearAssistance.Parent is TableLayoutPanel layout &&
+        ReferenceEquals(layout, _assistance.Parent) &&
+        layout.GetRow(_clearAssistance) < layout.GetRow(_assistance);
 
     public KioskControlCard(int kioskNumber)
     {
@@ -1332,20 +1380,31 @@ internal sealed class KioskControlCard : Panel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         indicator.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        indicator.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        indicator.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        indicator.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
         _dot.Dock = DockStyle.Fill;
-        _dot.Margin = new Padding(4, 0, 4, 0);
+        _dot.Margin = new Padding(7, 0, 7, 2);
+        ConfigureActionButton(
+            _clearAssistance,
+            "CLEAR CALL",
+            AssistanceClearingColor,
+            Color.White);
+        _clearAssistance.Font = new Font("Segoe UI", 7f, FontStyle.Bold);
+        _clearAssistance.Margin = new Padding(2, 1, 2, 1);
+        _clearAssistance.Click += (_, _) =>
+            AssistanceClearRequested?.Invoke(this, EventArgs.Empty);
         ConfigureActionButton(_assistance, "ACK", AssistanceColor, Color.FromArgb(16, 24, 32));
         _assistance.Font = new Font("Segoe UI", 7.5f, FontStyle.Bold);
         _assistance.Margin = new Padding(2);
         _assistance.Click += (_, _) => AssistanceAcknowledgedRequested?.Invoke(this, EventArgs.Empty);
         indicator.Controls.Add(_dot, 0, 0);
-        indicator.Controls.Add(_assistance, 0, 1);
+        indicator.Controls.Add(_clearAssistance, 0, 1);
+        indicator.Controls.Add(_assistance, 0, 2);
         _body.Controls.Add(indicator, 0, 0);
 
         _details.Dock = DockStyle.Fill;
@@ -1383,8 +1442,11 @@ internal sealed class KioskControlCard : Panel
 
         _assistanceFlashTimer.Tick += (_, _) =>
         {
-            _assistanceFlashYellow = !_assistanceFlashYellow;
-            _dot.StatusColor = _assistanceFlashYellow ? AssistanceColor : _baseStatusColor;
+            _assistanceFlashOn = !_assistanceFlashOn;
+            var assistanceColor = _assistanceClearing
+                ? AssistanceClearingColor
+                : AssistanceColor;
+            _dot.StatusColor = _assistanceFlashOn ? assistanceColor : _baseStatusColor;
         };
 
         Controls.Add(_body);
@@ -1398,7 +1460,7 @@ internal sealed class KioskControlCard : Panel
         _body.ColumnStyles[0].Width = expanded ? 84 : Math.Max(1, Width - Padding.Horizontal);
         _body.ColumnStyles[1].Width = expanded ? 100 : 0;
         _title.Text = expanded ? $"KIOSK {_kioskNumber}" : $"K{_kioskNumber}";
-        UpdateAssistanceButton();
+        UpdateAssistanceButtons();
     }
 
     public void ShowStatus(PosKioskStatus kiosk)
@@ -1415,6 +1477,7 @@ internal sealed class KioskControlCard : Panel
             kiosk.HasError,
             kiosk.AssistanceRequested,
             kiosk.AssistanceAcknowledged,
+            kiosk.AssistanceClearing,
             kiosk.StatusMessage);
         if (!BeginVisualUpdate(visualStateKey))
             return;
@@ -1427,14 +1490,21 @@ internal sealed class KioskControlCard : Panel
             : businessClosed
                 ? BusinessClosedColor
                 : ErrorColor);
-        SetAssistanceState(kiosk.AssistanceRequested, kiosk.AssistanceAcknowledged);
+        SetAssistanceState(
+            kiosk.AssistanceRequested,
+            kiosk.AssistanceAcknowledged,
+            kiosk.AssistanceClearing);
         var message = kiosk.IsOnline
-            ? (string.IsNullOrWhiteSpace(kiosk.StatusMessage)
-                ? (open ? "Online and open to guests" : "Waiver station unavailable")
-                : kiosk.StatusMessage)
+            ? kiosk.AssistanceClearing
+                ? "Help is on the way • clearing call"
+                : (string.IsNullOrWhiteSpace(kiosk.StatusMessage)
+                    ? (open ? "Online and open to guests" : "Waiver station unavailable")
+                    : kiosk.StatusMessage)
             : "Waiver kiosk is offline";
         _status.Text = $"{kiosk.StationName}\n{message}";
-        _status.ForeColor = open
+        _status.ForeColor = kiosk.AssistanceClearing
+            ? Color.FromArgb(156, 87, 0)
+            : open
             ? Color.FromArgb(44, 116, 29)
             : businessClosed
                 ? Color.FromArgb(10, 91, 160)
@@ -1449,7 +1519,7 @@ internal sealed class KioskControlCard : Panel
         if (!BeginVisualUpdate("unlinked"))
             return;
         SetBaseStatusColor(UnlinkedColor);
-        SetAssistanceState(false, false);
+        SetAssistanceState(false, false, false);
         _status.Text = "Not linked\nOpen Settings to assign a kiosk";
         _status.ForeColor = Color.FromArgb(83, 97, 109);
         _dot.AccessibleDescription = $"Kiosk {_kioskNumber}: not linked";
@@ -1462,7 +1532,7 @@ internal sealed class KioskControlCard : Panel
         if (!BeginVisualUpdate("missing"))
             return;
         SetBaseStatusColor(ErrorColor);
-        SetAssistanceState(false, false);
+        SetAssistanceState(false, false, false);
         _status.Text = "Linked kiosk not found by controller";
         _status.ForeColor = Color.FromArgb(187, 34, 46);
         _dot.AccessibleDescription = $"Kiosk {_kioskNumber}: not found";
@@ -1474,7 +1544,7 @@ internal sealed class KioskControlCard : Panel
         if (!BeginVisualUpdate("controller-unavailable"))
             return;
         SetBaseStatusColor(ErrorColor);
-        SetAssistanceState(false, false);
+        SetAssistanceState(false, false, false);
         _status.Text = "Kiosk status unavailable";
         _status.ForeColor = Color.FromArgb(187, 34, 46);
     }
@@ -1513,8 +1583,16 @@ internal sealed class KioskControlCard : Panel
     {
         if (!BeginVisualUpdate("assistance-acknowledged-pending"))
             return;
-        SetAssistanceState(requested: true, acknowledged: true);
+        SetAssistanceState(requested: true, acknowledged: true, clearing: false);
         ApplyPendingMessage("The guest was told assistance is on the way.");
+    }
+
+    public void ShowAssistanceClearingPending()
+    {
+        if (!BeginVisualUpdate("assistance-clearing-pending"))
+            return;
+        SetAssistanceState(requested: true, acknowledged: true, clearing: true);
+        ApplyPendingMessage("Help is on the way • call clears in 15 seconds.");
     }
 
     public void ShowCommandError(string message)
@@ -1540,7 +1618,7 @@ internal sealed class KioskControlCard : Panel
     private void SetBaseStatusColor(Color color)
     {
         _baseStatusColor = color;
-        if (!_assistanceRequested || !_assistanceFlashYellow)
+        if (!_assistanceRequested || !_assistanceFlashOn)
             _dot.StatusColor = color;
     }
 
@@ -1550,35 +1628,59 @@ internal sealed class KioskControlCard : Panel
         _close.Enabled = enabled;
         _open.Enabled = enabled;
         _reset.Enabled = enabled;
-        UpdateAssistanceButton();
+        UpdateAssistanceButtons();
     }
 
-    private void SetAssistanceState(bool requested, bool acknowledged)
+    private void SetAssistanceState(bool requested, bool acknowledged, bool clearing)
     {
         _assistanceRequested = requested;
-        _assistanceAcknowledged = requested && acknowledged;
+        _assistanceClearing = requested && clearing;
+        _assistanceAcknowledged = requested && (acknowledged || _assistanceClearing);
         _assistanceFlashTimer.Stop();
-        _assistanceFlashYellow = false;
+        _assistanceFlashOn = false;
         _dot.StatusColor = _baseStatusColor;
         if (_assistanceRequested)
         {
-            _assistanceFlashYellow = true;
-            _dot.StatusColor = AssistanceColor;
+            _assistanceFlashOn = true;
+            _dot.StatusColor = _assistanceClearing
+                ? AssistanceClearingColor
+                : AssistanceColor;
             _assistanceFlashTimer.Start();
         }
-        UpdateAssistanceButton();
+        UpdateAssistanceButtons();
     }
 
-    private void UpdateAssistanceButton()
+    private void UpdateAssistanceButtons()
     {
         if (!_assistanceRequested)
         {
+            _clearAssistance.Text = "CLEAR CALL";
+            _clearAssistance.BackColor = Color.FromArgb(120, 126, 132);
+            _clearAssistance.ForeColor = Color.White;
+            _clearAssistance.Enabled = false;
             _assistance.Text = "NO CALL";
             _assistance.BackColor = Color.FromArgb(120, 126, 132);
             _assistance.ForeColor = Color.White;
             _assistance.Enabled = false;
             return;
         }
+        if (_assistanceClearing)
+        {
+            _clearAssistance.Text = "CLEARING";
+            _clearAssistance.BackColor = AssistanceClearingColor;
+            _clearAssistance.ForeColor = Color.White;
+            _clearAssistance.Enabled = false;
+            _assistance.Text = "ON WAY";
+            _assistance.BackColor = Color.FromArgb(120, 126, 132);
+            _assistance.ForeColor = Color.White;
+            _assistance.Enabled = false;
+            return;
+        }
+
+        _clearAssistance.Text = "CLEAR CALL";
+        _clearAssistance.BackColor = AssistanceClearingColor;
+        _clearAssistance.ForeColor = Color.White;
+        _clearAssistance.Enabled = _buttonsEnabled;
         if (_assistanceAcknowledged)
         {
             _assistance.Text = "ANSWERED";
