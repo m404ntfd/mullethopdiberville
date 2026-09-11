@@ -13,6 +13,8 @@ internal sealed class FirefoxHost : IDisposable
     public const string HomePage = "https://mullet.lilypadpos.app/public/Login.php";
     public const string DefaultReceiptPrinterName = "POS-X Thermal Printer";
 
+    private const string SystemPrintShortcut = "^p";
+    private const int MaximumSystemPrintDialogAttempts = 6;
     private const int GwlStyle = -16;
     private const long WsCaption = 0x00C00000L;
     private const long WsThickFrame = 0x00040000L;
@@ -32,6 +34,7 @@ internal sealed class FirefoxHost : IDisposable
     private bool _useCustomWristbandPrinterDialog;
     private readonly System.Windows.Forms.Timer _windowTimer = new() { Interval = 500 };
     private readonly System.Windows.Forms.Timer _browserInputTimer = new() { Interval = 30 };
+    private readonly System.Windows.Forms.Timer _systemPrintDialogTimer = new() { Interval = 450 };
     private Process? _process;
     private Process? _windowProcess;
     private LilyPadCompatibilityBridge? _compatibilityBridge;
@@ -57,6 +60,8 @@ internal sealed class FirefoxHost : IDisposable
     private string? _activeWristbandDownloadUrl;
     private Task<LilyPadPdfDownloadResult>? _activeWristbandDownload;
     private bool _wristbandPromptRaised;
+    private string? _pendingSystemPrintDocumentKey;
+    private int _systemPrintDialogAttempts;
     private string? _nextLaunchUrl;
     private bool _disposed;
 
@@ -78,6 +83,7 @@ internal sealed class FirefoxHost : IDisposable
         _host.Resize += (_, _) => ResizeEmbeddedWindow();
         _windowTimer.Tick += (_, _) => FindAndAttachWindow();
         _browserInputTimer.Tick += (_, _) => ObserveBrowserPointerActivity();
+        _systemPrintDialogTimer.Tick += (_, _) => TryOpenSystemWristbandPrintDialog();
     }
 
     public void Start()
@@ -143,6 +149,9 @@ internal sealed class FirefoxHost : IDisposable
             _layoutRepairAttempted = false;
             _activeWristbandDocumentKey = null;
             _wristbandPromptRaised = false;
+            _pendingSystemPrintDocumentKey = null;
+            _systemPrintDialogAttempts = 0;
+            _systemPrintDialogTimer.Stop();
             _lastLayoutPulseUtc = DateTime.MinValue;
             _firefoxWindow = IntPtr.Zero;
             _process = Process.Start(startInfo)
@@ -238,6 +247,9 @@ internal sealed class FirefoxHost : IDisposable
     public void SetUseCustomWristbandPrinterDialog(bool enabled)
     {
         _useCustomWristbandPrinterDialog = enabled;
+        _systemPrintDialogTimer.Stop();
+        _pendingSystemPrintDocumentKey = null;
+        _systemPrintDialogAttempts = 0;
         _activeWristbandDocumentKey = null;
         _activeWristbandDownloadUrl = null;
         _activeWristbandDownload = null;
@@ -556,6 +568,9 @@ internal sealed class FirefoxHost : IDisposable
         var wristbandUrl = NormalizeLilyPadUrl(health.Url);
         if (!IsWristbandPrintUrl(wristbandUrl))
         {
+            _systemPrintDialogTimer.Stop();
+            _pendingSystemPrintDocumentKey = null;
+            _systemPrintDialogAttempts = 0;
             _activeWristbandDocumentKey = null;
             _activeWristbandDownloadUrl = null;
             _activeWristbandDownload = null;
@@ -583,14 +598,82 @@ internal sealed class FirefoxHost : IDisposable
         {
             PosLog.Write(
                 "A LilyPad wristband print page opened while the POS system-print fallback was active. " +
-                "Firefox's native print dialog was requested and the custom WB-1 through WB-7 " +
-                "selector was not shown. POS-X Thermal Printer remains the receipt default.");
+                "The POS queued Firefox's native Print command and did not show the custom " +
+                "WB-1 through WB-7 selector. POS-X Thermal Printer remains the receipt default.");
+            QueueSystemWristbandPrintDialog(documentKey);
             return;
         }
         PosLog.Write("A LilyPad wristband print page requested a wristband printer selection.");
         WristbandPrintRequested?.Invoke(
             this,
             new WristbandPrintRequestedEventArgs(wristbandUrl!));
+    }
+
+    private void QueueSystemWristbandPrintDialog(string documentKey)
+    {
+        _pendingSystemPrintDocumentKey = documentKey;
+        _systemPrintDialogAttempts = 0;
+        _systemPrintDialogTimer.Stop();
+        _systemPrintDialogTimer.Start();
+    }
+
+    private void TryOpenSystemWristbandPrintDialog()
+    {
+        _systemPrintDialogTimer.Stop();
+        var documentKey = _pendingSystemPrintDocumentKey;
+        if (_disposed || _useCustomWristbandPrinterDialog ||
+            string.IsNullOrWhiteSpace(documentKey) ||
+            !string.Equals(
+                documentKey,
+                _activeWristbandDocumentKey,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            _pendingSystemPrintDocumentKey = null;
+            _systemPrintDialogAttempts = 0;
+            return;
+        }
+
+        _systemPrintDialogAttempts++;
+        try
+        {
+            if (!FocusEmbeddedWindow("system wristband print dialog"))
+            {
+                RetrySystemWristbandPrintDialog(
+                    "Firefox did not yet have keyboard focus");
+                return;
+            }
+
+            SendKeys.SendWait(SystemPrintShortcut);
+            _pendingSystemPrintDocumentKey = null;
+            _systemPrintDialogAttempts = 0;
+            PosLog.Write(
+                "Opened Firefox's native print dialog with Ctrl+P for the current LilyPad " +
+                "wristband preview. POS-X Thermal Printer remains the receipt default.");
+        }
+        catch (Exception ex)
+        {
+            RetrySystemWristbandPrintDialog(
+                "Windows could not send Firefox the Ctrl+P command: " + ex.Message);
+        }
+    }
+
+    private void RetrySystemWristbandPrintDialog(string reason)
+    {
+        if (_systemPrintDialogAttempts < MaximumSystemPrintDialogAttempts)
+        {
+            PosLog.Write(
+                $"Firefox native wristband print-dialog attempt " +
+                $"{_systemPrintDialogAttempts} will retry: {reason}.");
+            _systemPrintDialogTimer.Start();
+            return;
+        }
+
+        PosLog.Write(
+            $"Firefox native wristband print dialog could not be opened after " +
+            $"{MaximumSystemPrintDialogAttempts} attempts: {reason}. " +
+            "Staff can press Ctrl+P while the wristband preview is open.");
+        _pendingSystemPrintDocumentKey = null;
+        _systemPrintDialogAttempts = 0;
     }
 
     private void EvaluatePageHealth(LilyPadPageHealth health)
@@ -972,6 +1055,10 @@ internal sealed class FirefoxHost : IDisposable
                    StringComparison.Ordinal);
     }
 
+    internal static bool SystemPrintShortcutPassesSmokeTest() =>
+        string.Equals(SystemPrintShortcut, "^p", StringComparison.Ordinal) &&
+        MaximumSystemPrintDialogAttempts >= 3;
+
     private static void ClearFirefoxSessionState(string profilePath)
     {
         try
@@ -1087,6 +1174,7 @@ internal sealed class FirefoxHost : IDisposable
         _disposed = true;
         _windowTimer.Stop();
         _browserInputTimer.Stop();
+        _systemPrintDialogTimer.Stop();
 
         try { StopFirefoxProcesses(); }
         catch (Exception ex)
@@ -1100,6 +1188,7 @@ internal sealed class FirefoxHost : IDisposable
                 _process.Dispose();
             _windowTimer.Dispose();
             _browserInputTimer.Dispose();
+            _systemPrintDialogTimer.Dispose();
         }
     }
 
@@ -1113,6 +1202,9 @@ internal sealed class FirefoxHost : IDisposable
         _activeWristbandDownloadUrl = null;
         _activeWristbandDownload = null;
         _wristbandPromptRaised = false;
+        _systemPrintDialogTimer.Stop();
+        _pendingSystemPrintDocumentKey = null;
+        _systemPrintDialogAttempts = 0;
         _compatibilityBridge?.Dispose();
         _compatibilityBridge = null;
         var processes = new[] { _windowProcess, _process }

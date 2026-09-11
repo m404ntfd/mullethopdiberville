@@ -94,11 +94,13 @@ return to its LilyPad destination. **Return / Cancel Print** closes only the WB 
 selector and sends no job. The application does not change the Windows default printer,
 so **POS-X Thermal Printer** remains the normal receipt and cash-drawer destination.
 
-Mullet Hop POS 1.7.26 guarantees that when **Use the Mullet Hop wristband printer
+Mullet Hop POS 1.7.27 guarantees that when **Use the Mullet Hop wristband printer
 selector** is turned off, the custom
 WB-1 through WB-7 window is bypassed and Firefox opens its native print dialog exactly
-once for each newly loaded LilyPad wristband document. If LilyPad does not request
-printing itself, the POS bridge issues the prompt after the document finishes loading.
+once for each newly loaded LilyPad wristband document. After the POS detects and focuses
+the completed wristband preview, it sends Firefox the native Ctrl+P Print command and
+retries briefly if the embedded browser is not ready for keyboard focus. This avoids
+Firefox silently ignoring a page-script print request while its PDF preview initializes.
 The dedicated Firefox profile continues to select **POS-X Thermal Printer** as its
 default receipt printer and does not save a wristband-printer choice as the receipt
 default.

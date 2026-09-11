@@ -49,19 +49,7 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
 
           if (/wristband/i.test(location.pathname) &&
               /(pdf|php)$/i.test(location.pathname)) {
-            const originalPrintKey = "__mulletHopOriginalWristbandPrint";
             const applyPrintModeKey = "__mulletHopApplyWristbandPrintMode";
-            const showSystemPrintKey = "__mulletHopShowSystemWristbandPrintDialog";
-            const systemPrintRequestedKey = "__mulletHopSystemWristbandPrintRequested";
-            if (typeof window[originalPrintKey] !== "function" &&
-                typeof window.print === "function") {
-              Object.defineProperty(window, originalPrintKey, {
-                configurable: false,
-                enumerable: false,
-                writable: false,
-                value: window.print.bind(window)
-              });
-            }
 
             const replaceWindowPrint = replacement => {
               try {
@@ -90,43 +78,13 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
                 return "custom";
               }
 
-              if (typeof window[systemPrintRequestedKey] !== "boolean") {
-                window[systemPrintRequestedKey] = false;
-              }
-              const showSystemPrintDialog = () => {
-                if (window[systemPrintRequestedKey]) {
-                  return "already-requested";
-                }
-                const originalPrint = window[originalPrintKey];
-                if (typeof originalPrint !== "function") {
-                  return "native-print-unavailable";
-                }
-
-                window[systemPrintRequestedKey] = true;
+              const delegateSystemPrintToPosHost = () => {
                 document.documentElement?.setAttribute(
-                  "data-mullet-hop-system-print-requested",
+                  "data-mullet-hop-system-print-awaiting-host",
                   "1");
-                window.setTimeout(() => originalPrint(), 0);
-                return "scheduled";
+                return "delegated-to-pos-host";
               };
-              Object.defineProperty(window, showSystemPrintKey, {
-                configurable: true,
-                enumerable: false,
-                writable: false,
-                value: showSystemPrintDialog
-              });
-              replaceWindowPrint(showSystemPrintDialog);
-
-              const ensureSystemPrintDialog = () =>
-                window.setTimeout(showSystemPrintDialog, 350);
-              if (document.readyState === "loading") {
-                document.addEventListener(
-                  "DOMContentLoaded",
-                  ensureSystemPrintDialog,
-                  { once: true });
-              } else {
-                ensureSystemPrintDialog();
-              }
+              replaceWindowPrint(delegateSystemPrintToPosHost);
               return "system";
             };
             Object.defineProperty(window, applyPrintModeKey, {
@@ -361,16 +319,10 @@ internal sealed class LilyPadCompatibilityBridge : IDisposable
     internal static bool SystemPrintFallbackPassesSmokeTest()
     {
         return CompatibilityFunction.Contains(
-                   "__mulletHopOriginalWristbandPrint",
+                   "data-mullet-hop-system-print-awaiting-host",
                    StringComparison.Ordinal) &&
                CompatibilityFunction.Contains(
-                   "__mulletHopShowSystemWristbandPrintDialog",
-                   StringComparison.Ordinal) &&
-               CompatibilityFunction.Contains(
-                   "window.setTimeout(() => originalPrint(), 0)",
-                   StringComparison.Ordinal) &&
-               CompatibilityFunction.Contains(
-                   "window.setTimeout(showSystemPrintDialog, 350)",
+                   "delegated-to-pos-host",
                    StringComparison.Ordinal) &&
                SetWristbandPrintModeFunction.Contains(
                    "__mulletHopApplyWristbandPrintMode",
