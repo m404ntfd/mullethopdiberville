@@ -413,6 +413,18 @@ internal static class BusinessHoursSmokeTest
                ScreensaverVideoCatalog.SelectConfigured(
                    videoSettings, new DateTime(2024, 1, 1, 12, 30, 0)).Id ==
                    scheduledVideo.Id &&
+               ScreensaverVideoCatalog.SelectConfigured(
+                   new KioskSettings(), new DateTime(2026, 10, 23, 9, 59, 59)).Id ==
+                   KioskScreensaverVideo.DefaultId &&
+               ScreensaverVideoCatalog.SelectConfigured(
+                   new KioskSettings(), new DateTime(2026, 10, 23, 10, 0, 0)).Id ==
+                   KioskScreensaverVideo.HalloweenId &&
+               ScreensaverVideoCatalog.SelectConfigured(
+                   new KioskSettings(), new DateTime(2026, 10, 31, 23, 59, 59)).Id ==
+                   KioskScreensaverVideo.HalloweenId &&
+               ScreensaverVideoCatalog.SelectConfigured(
+                   new KioskSettings(), new DateTime(2026, 11, 1, 0, 0, 0)).Id ==
+                   KioskScreensaverVideo.DefaultId &&
                new KioskSettings().BusinessClosedLeadMinutes == 30;
     }
 }
@@ -4512,7 +4524,7 @@ internal sealed class KioskSettings
     public List<KioskAdvertisement> Advertisements { get; set; } = [];
     public string MainScreensaverVideoId { get; set; } = KioskScreensaverVideo.DefaultId;
     public List<KioskScreensaverVideo> ScreensaverVideos { get; set; } =
-        [KioskScreensaverVideo.CreateDefault()];
+        [KioskScreensaverVideo.CreateDefault(), KioskScreensaverVideo.CreateHalloween()];
 
     public string StaffPinSalt { get; set; } = string.Empty;
     public string StaffPinHash { get; set; } = string.Empty;

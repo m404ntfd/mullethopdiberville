@@ -101,9 +101,11 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.21, Systems Controller version 1.15.13, and Mullet Hop POS
-version 1.7.28 are the matching package versions. Kiosk 2.11.21 adds a managed
-screensaver-video catalog with an MH Daily default and scheduled MP4 overrides.
+Waiver Kiosk version 2.11.22, Systems Controller version 1.15.13, and Mullet Hop POS
+version 1.7.28 are the matching package versions. Kiosk 2.11.22 adds the built-in
+MH Halloween video and schedules it from October 23, 2026 at 10:00 AM through
+October 31, 2026 at 11:59 PM. Kiosk 2.11.21 added a managed screensaver-video
+catalog with an MH Daily default and scheduled MP4 overrides.
 The prior versions add the POS Clear Call
 command, the kiosk's 15-second help-is-on-the-way notice and automatic call clearing,
 and the temporary orange clearing indicator. POS 1.7.18 forces a portrait Windows
@@ -412,6 +414,9 @@ Remote Control, and Misc pages.
 * View the currently active screensaver video, add and edit MP4 choices, select
   the main video, and schedule date-and-time ranges that temporarily override it.
   Existing kiosks begin with MH Daily using the original packaged screensaver.
+  MH Halloween is included with the application and automatically overrides
+  MH Daily from October 23, 2026 at 10:00 AM through October 31, 2026 at
+  11:59 PM, after which the kiosk returns to MH Daily.
   Imported MP4 files are copied into the kiosk's managed application files so
   the source USB drive or download is no longer required. The managed folder is
   %LOCALAPPDATA%\MulletHopWaiverKiosk\Data\Application Files\Screensaver Videos,

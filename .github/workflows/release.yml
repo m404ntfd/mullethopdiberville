@@ -100,6 +100,18 @@ jobs:
 
           Write-Host "Screensaver video included: $($screensaver.Length) bytes."
 
+          $halloweenPath = "publish/MulletHopHalloweenScreensaver.mp4"
+          if (-not (Test-Path -LiteralPath $halloweenPath -PathType Leaf)) {
+            throw "The published kiosk is missing $halloweenPath."
+          }
+
+          $halloween = Get-Item -LiteralPath $halloweenPath
+          if ($halloween.Length -lt 1MB) {
+            throw "The published Halloween screensaver video is unexpectedly small."
+          }
+
+          Write-Host "Halloween screensaver video included: $($halloween.Length) bytes."
+
           $businessClosedPath = "publish/MulletHopBusinessClosed.mp4"
           if (-not (Test-Path -LiteralPath $businessClosedPath -PathType Leaf)) {
             throw "The published kiosk is missing $businessClosedPath."

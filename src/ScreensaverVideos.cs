@@ -4,6 +4,8 @@ internal sealed class KioskScreensaverVideo
 {
     public const string DefaultId = "mh-daily";
     public const string DefaultName = "MH Daily";
+    public const string HalloweenId = "mh-halloween";
+    public const string HalloweenName = "MH Halloween";
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Screensaver Video";
@@ -20,6 +22,17 @@ internal sealed class KioskScreensaverVideo
         VideoFileName = ScreensaverVideoFiles.DefaultPackagedFileName,
         Enabled = true,
         ScheduledOverride = false
+    };
+
+    public static KioskScreensaverVideo CreateHalloween() => new()
+    {
+        Id = HalloweenId,
+        Name = HalloweenName,
+        VideoFileName = ScreensaverVideoFiles.HalloweenPackagedFileName,
+        Enabled = true,
+        ScheduledOverride = true,
+        StartDateTime = new DateTime(2026, 10, 23, 10, 0, 0),
+        EndDateTime = new DateTime(2026, 10, 31, 23, 59, 59)
     };
 
     public bool IsScheduledActive(DateTime now) =>
@@ -58,7 +71,8 @@ internal sealed class KioskScreensaverVideo
         }
         else
         {
-            if (!Guid.TryParseExact(Id, "N", out _))
+            if (!string.Equals(Id, HalloweenId, StringComparison.Ordinal) &&
+                !Guid.TryParseExact(Id, "N", out _))
                 Id = Guid.NewGuid().ToString("N");
             Name = string.IsNullOrWhiteSpace(Name) ? "Screensaver Video" : Name.Trim();
         }
@@ -84,18 +98,29 @@ internal static class ScreensaverVideoCatalog
             settings.ScreensaverVideos.Insert(0, defaultVideo);
         }
 
+        var halloweenVideo = settings.ScreensaverVideos.FirstOrDefault(video =>
+            string.Equals(video.Id, KioskScreensaverVideo.HalloweenId, StringComparison.Ordinal));
+        if (halloweenVideo is null)
+        {
+            halloweenVideo = KioskScreensaverVideo.CreateHalloween();
+            settings.ScreensaverVideos.Add(halloweenVideo);
+        }
+
         defaultVideo.Normalize(isDefault: true);
         var usedIds = new HashSet<string>(StringComparer.Ordinal)
         {
-            KioskScreensaverVideo.DefaultId
+            KioskScreensaverVideo.DefaultId,
+            KioskScreensaverVideo.HalloweenId
         };
         foreach (var video in settings.ScreensaverVideos.Where(video =>
-                     !ReferenceEquals(video, defaultVideo)))
+                     !ReferenceEquals(video, defaultVideo) &&
+                     !ReferenceEquals(video, halloweenVideo)))
         {
             video.Normalize();
             while (!usedIds.Add(video.Id))
                 video.Id = Guid.NewGuid().ToString("N");
         }
+        halloweenVideo.Normalize();
 
         if (string.IsNullOrWhiteSpace(settings.MainScreensaverVideoId) ||
             settings.ScreensaverVideos.All(video =>
@@ -160,6 +185,7 @@ internal static class ScreensaverVideoCatalog
 internal static class ScreensaverVideoFiles
 {
     public const string DefaultPackagedFileName = "MulletHopScreensaver.mp4";
+    public const string HalloweenPackagedFileName = "MulletHopHalloweenScreensaver.mp4";
     public const string CustomVideoVirtualHost = "mullethop-screensaver-videos.local";
     private const long MaximumVideoBytes = 1_500_000_000;
 
@@ -186,8 +212,8 @@ internal static class ScreensaverVideoFiles
         if (string.IsNullOrWhiteSpace(fileName))
             return null;
         var safeName = Path.GetFileName(fileName);
-        if (string.Equals(safeName, DefaultPackagedFileName, StringComparison.OrdinalIgnoreCase))
-            return Path.Combine(AppContext.BaseDirectory, DefaultPackagedFileName);
+        if (IsPackaged(safeName))
+            return Path.Combine(AppContext.BaseDirectory, safeName);
 
         var root = Path.GetFullPath(KioskSettings.ScreensaverVideosDirectory) +
                    Path.DirectorySeparatorChar;
@@ -206,20 +232,21 @@ internal static class ScreensaverVideoFiles
     {
         var safeName = Path.GetFileName(fileName);
         var escaped = Uri.EscapeDataString(safeName);
-        return string.Equals(safeName, DefaultPackagedFileName, StringComparison.OrdinalIgnoreCase)
+        return IsPackaged(safeName)
             ? $"https://mullethop-kiosk.local/{escaped}"
             : $"https://{CustomVideoVirtualHost}/{escaped}";
     }
+
+    private static bool IsPackaged(string? fileName) =>
+        string.Equals(fileName, DefaultPackagedFileName, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(fileName, HalloweenPackagedFileName, StringComparison.OrdinalIgnoreCase);
 
     public static void DeleteIfManaged(string? fileName)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(fileName) ||
-                string.Equals(
-                    Path.GetFileName(fileName),
-                    DefaultPackagedFileName,
-                    StringComparison.OrdinalIgnoreCase))
+                IsPackaged(Path.GetFileName(fileName)))
             {
                 return;
             }
@@ -548,10 +575,12 @@ internal sealed class ScreensaverVideoManagerControl : UserControl
         var selected = SelectedVideo;
         if (selected is null)
             return;
-        if (string.Equals(selected.Id, KioskScreensaverVideo.DefaultId, StringComparison.Ordinal))
+        if (string.Equals(selected.Id, KioskScreensaverVideo.DefaultId, StringComparison.Ordinal) ||
+            string.Equals(selected.Id, KioskScreensaverVideo.HalloweenId, StringComparison.Ordinal))
         {
             MessageBox.Show(this,
-                "MH Daily is the built-in fallback and cannot be deleted. Its MP4 file can be changed with Edit.",
+                selected.Name + " is included with the kiosk and cannot be deleted. " +
+                "You can edit its schedule or disable it instead.",
                 "Screensaver Videos", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }

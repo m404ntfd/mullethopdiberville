@@ -35,6 +35,41 @@ if ($actualSha256 -ne $expectedSha256) {
 $video = Get-Item -LiteralPath $outputPath
 Write-Host "Screensaver video assembled and verified: $($video.Length) bytes."
 
+$halloweenPartsDirectory = Join-Path $repositoryRoot "assets/halloween-screensaver-parts"
+$halloweenOutputPath = Join-Path $repositoryRoot "assets/MulletHopHalloweenScreensaver.mp4"
+$halloweenExpectedSha256 = "e4a5623591dde425bf7f27b2429e9de40b36d6d32e83c6c55aa0bf56cf964cbc"
+
+$halloweenParts = @(Get-ChildItem -LiteralPath $halloweenPartsDirectory -File -Filter "part-*.bin" |
+    Sort-Object Name)
+if ($halloweenParts.Count -eq 0) {
+    throw "No Halloween screensaver video parts were found in $halloweenPartsDirectory."
+}
+
+$halloweenOutput = [System.IO.File]::Create($halloweenOutputPath)
+try {
+    foreach ($part in $halloweenParts) {
+        $input = [System.IO.File]::OpenRead($part.FullName)
+        try {
+            $input.CopyTo($halloweenOutput)
+        }
+        finally {
+            $input.Dispose()
+        }
+    }
+}
+finally {
+    $halloweenOutput.Dispose()
+}
+
+$halloweenActualSha256 =
+    (Get-FileHash -LiteralPath $halloweenOutputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($halloweenActualSha256 -ne $halloweenExpectedSha256) {
+    throw "The assembled Halloween screensaver video did not match the uploaded MP4."
+}
+
+$halloweenVideo = Get-Item -LiteralPath $halloweenOutputPath
+Write-Host "Halloween screensaver video assembled and verified: $($halloweenVideo.Length) bytes."
+
 $businessClosedPartsDirectory = Join-Path $repositoryRoot "assets/business-closed-parts"
 $businessClosedOutputPath = Join-Path $repositoryRoot "assets/MulletHopBusinessClosed.mp4"
 $businessClosedExpectedSha256 = "b8d7cd5142a000027e5e0bff2d3024d3cf614b8064bcf8c7bb0d719b7c42ef1b"
