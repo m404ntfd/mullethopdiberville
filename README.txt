@@ -101,9 +101,11 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.22, Systems Controller version 1.15.13, and Mullet Hop POS
-version 1.7.28 are the matching package versions. Kiosk 2.11.22 adds the built-in
-MH Halloween video and schedules it from October 23, 2026 at 10:00 AM through
+Waiver Kiosk version 2.11.23, Systems Controller version 1.15.13, and Mullet Hop POS
+version 1.7.28 are the matching package versions. Kiosk 2.11.23 checks for updates
+every hour and automatically installs a pending update only after the screensaver has
+remained active without guest input for an additional 60 seconds. Kiosk 2.11.22 adds
+the built-in MH Halloween video and schedules it from October 23, 2026 at 10:00 AM through
 October 31, 2026 at 11:59 PM. Kiosk 2.11.21 added a managed screensaver-video
 catalog with an MH Daily default and scheduled MP4 overrides.
 The prior versions add the POS Clear Call
@@ -516,8 +518,9 @@ WHAT THE KIOSK DOES
 * Provides a password-protected staff settings menu for exiting, testing the waiver
   connection, temporarily previewing a different browser date and time, and
   managing scheduled advertisements.
-* Checks for a signed Velopack release on GitHub at startup and installs a newer
-  version before guests begin using the kiosk.
+* Checks for a signed Velopack release on GitHub at startup and every hour. A newer
+  version found during operation is installed only after the screensaver has remained
+  active without guest input for an additional 60 seconds.
 * Adds a floating Mullet Hop instruction card to the starting waiver page. The
   card stays visible while guests scroll and briefly explains when to choose
   "Just Me" or "Me and My Kids!"

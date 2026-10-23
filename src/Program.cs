@@ -425,6 +425,16 @@ internal static class BusinessHoursSmokeTest
                ScreensaverVideoCatalog.SelectConfigured(
                    new KioskSettings(), new DateTime(2026, 11, 1, 0, 0, 0)).Id ==
                    KioskScreensaverVideo.DefaultId &&
+               KioskForm.CanInstallAutomaticUpdate(
+                   true, true, false, false, false, false,
+                   new DateTime(2024, 1, 1, 12, 0, 0),
+                   new DateTime(2024, 1, 1, 11, 59, 0),
+                   new DateTime(2024, 1, 1, 12, 1, 0)) &&
+               !KioskForm.CanInstallAutomaticUpdate(
+                   true, true, false, false, false, false,
+                   new DateTime(2024, 1, 1, 12, 0, 0),
+                   new DateTime(2024, 1, 1, 12, 0, 30),
+                   new DateTime(2024, 1, 1, 12, 1, 0)) &&
                new KioskSettings().BusinessClosedLeadMinutes == 30;
     }
 }
@@ -432,6 +442,7 @@ internal static class BusinessHoursSmokeTest
 internal sealed partial class KioskForm : Form
 {
     internal const int AssistanceClearNoticeSeconds = 15;
+    internal const int AutomaticUpdateIdleGraceSeconds = 60;
 
     private static readonly HttpClient ConnectionCheckClient = new()
     {
@@ -461,6 +472,7 @@ internal sealed partial class KioskForm : Form
     private readonly System.Windows.Forms.Timer _retryTimer = new() { Interval = 60000 };
     private readonly System.Windows.Forms.Timer _businessHoursTimer = new() { Interval = 1000 };
     private readonly System.Windows.Forms.Timer _assistanceClearTimer = new() { Interval = 250 };
+    private readonly System.Windows.Forms.Timer _automaticUpdateTimer = new() { Interval = 60000 };
 
     private DateTime _lastActivityUtc = DateTime.UtcNow;
     private bool _allowExit;
@@ -478,6 +490,11 @@ internal sealed partial class KioskForm : Form
     private bool _idleResetPerformed;
     private bool _connectionCheckInProgress;
     private bool _businessHoursCheckInProgress;
+    private bool _automaticUpdateCheckInProgress;
+    private bool _automaticUpdatePending;
+    private bool _automaticUpdateInstallInProgress;
+    private DateTime _lastAutomaticUpdateCheckUtc = DateTime.UtcNow;
+    private DateTime? _screensaverStartedUtc;
     private string? _pendingSwitchEmail;
     private string? _pendingSwitchChoice;
     private string? _lastWaiverEmail;
@@ -568,6 +585,8 @@ internal sealed partial class KioskForm : Form
             await ApplyBusinessHoursStateAsync();
             RefreshActiveScreensaverVideoIfChanged();
         };
+        _automaticUpdateTimer.Tick += async (_, _) =>
+            await AutomaticUpdateTimerTickAsync();
         NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
         InitializeRemoteManagement();
 
@@ -768,7 +787,9 @@ internal sealed partial class KioskForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _businessHoursTimer.Stop();
+        _automaticUpdateTimer.Stop();
         _assistanceClearTimer.Stop();
+        _automaticUpdateTimer.Dispose();
         _assistanceClearTimer.Dispose();
         StopRemoteManagement();
         NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
@@ -803,8 +824,10 @@ internal sealed partial class KioskForm : Form
 
             _browserReady = true;
             _lastActivityUtc = DateTime.UtcNow;
+            _lastAutomaticUpdateCheckUtc = DateTime.UtcNow;
             _idleTimer.Start();
             _businessHoursTimer.Start();
+            _automaticUpdateTimer.Start();
             StartRemoteManagement();
             ShowCurrentOperatingPage();
             _webView.Focus();
@@ -1112,6 +1135,102 @@ internal sealed partial class KioskForm : Form
     {
         _lastActivityUtc = DateTime.UtcNow;
         _idleResetPerformed = false;
+    }
+
+    internal static bool CanInstallAutomaticUpdate(
+        bool updatePending,
+        bool screensaverActive,
+        bool promptOpen,
+        bool resetting,
+        bool completionActive,
+        bool assistanceRequested,
+        DateTime? screensaverStartedUtc,
+        DateTime lastActivityUtc,
+        DateTime nowUtc)
+    {
+        if (!updatePending || !screensaverActive || promptOpen || resetting ||
+            completionActive || assistanceRequested || !screensaverStartedUtc.HasValue)
+            return false;
+
+        var quietSinceUtc = screensaverStartedUtc.Value > lastActivityUtc
+            ? screensaverStartedUtc.Value
+            : lastActivityUtc;
+        return nowUtc - quietSinceUtc >=
+            TimeSpan.FromSeconds(AutomaticUpdateIdleGraceSeconds);
+    }
+
+    private async Task AutomaticUpdateTimerTickAsync()
+    {
+        if (_automaticUpdateInstallInProgress || _automaticUpdateCheckInProgress)
+            return;
+
+        var nowUtc = DateTime.UtcNow;
+        if (!_automaticUpdateCheckInProgress &&
+            nowUtc - _lastAutomaticUpdateCheckUtc >= TimeSpan.FromHours(1))
+        {
+            _automaticUpdateCheckInProgress = true;
+            _lastAutomaticUpdateCheckUtc = nowUtc;
+            try
+            {
+                var result = await KioskUpdater.CheckForUpdateAsync();
+                _automaticUpdatePending =
+                    result.Status == KioskUpdateStatus.Available;
+                KioskLog.Write("Hourly automatic update check: " + result.Message);
+            }
+            catch (Exception ex)
+            {
+                _automaticUpdatePending = false;
+                KioskLog.Write("Hourly automatic update check error: " +
+                    ex.GetType().Name + " - " + ex.Message);
+            }
+            finally
+            {
+                _automaticUpdateCheckInProgress = false;
+            }
+        }
+
+        if (!CanInstallAutomaticUpdate(
+                _automaticUpdatePending,
+                _showingScreensaver,
+                _promptOpen,
+                _isResetting,
+                _completionTimer.Enabled,
+                _settings.AssistanceRequested,
+                _screensaverStartedUtc,
+                _lastActivityUtc,
+                DateTime.UtcNow))
+            return;
+
+        await InstallPendingAutomaticUpdateAsync();
+    }
+
+    private async Task InstallPendingAutomaticUpdateAsync()
+    {
+        if (_automaticUpdateInstallInProgress)
+            return;
+
+        _automaticUpdateInstallInProgress = true;
+        _automaticUpdateTimer.Stop();
+        var wasPreOpening = _preOpeningScreensaverActive;
+        var openingTime = _preOpeningScreensaverOpeningTime;
+
+        SetBrowserInputEnabled(false);
+        _webView.CoreWebView2.NavigateToString(BuildAutomaticUpdateHtml());
+        KioskLog.Write("The kiosk remained idle on the screensaver; automatic update installation started.");
+
+        var result = await KioskUpdater.CheckDownloadAndApplyAsync();
+        KioskLog.Write("Idle automatic update result: " + result.Message);
+        if (result.Status == KioskUpdateStatus.Applying)
+            return;
+
+        _automaticUpdatePending = false;
+        _automaticUpdateInstallInProgress = false;
+        _lastAutomaticUpdateCheckUtc = DateTime.UtcNow;
+        SetBrowserInputEnabled(true);
+        _showingScreensaver = false;
+        _screensaverStartedUtc = null;
+        ShowScreensaver(wasPreOpening, openingTime);
+        _automaticUpdateTimer.Start();
     }
 
     private async void RetryTimer_Tick(object? sender, EventArgs e) =>
@@ -1759,6 +1878,7 @@ internal sealed partial class KioskForm : Form
 
         SetBrowserInputEnabled(true);
         _showingScreensaver = true;
+        _screensaverStartedUtc = DateTime.UtcNow;
         _showingThankYouPage = false;
         _showingClosedPage = false;
         _showingBusinessClosedPage = false;
@@ -1789,6 +1909,7 @@ internal sealed partial class KioskForm : Form
 
         _preOpeningScreensaverActive = false;
         _preOpeningScreensaverOpeningTime = null;
+        _screensaverStartedUtc = null;
         _activeScreensaverVideoKey = string.Empty;
         MarkActivity();
         KioskLog.Write("Screensaver dismissed by guest activity; loading a fresh starting page.");
@@ -1899,6 +2020,57 @@ internal sealed partial class KioskForm : Form
             </html>
             """;
     }
+
+    private static string BuildAutomaticUpdateHtml() =>
+        """
+        <!doctype html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Updating Mullet Hop Waiver Kiosk</title>
+          <style>
+            * { box-sizing: border-box; }
+            html, body {
+              width: 100%;
+              height: 100%;
+              margin: 0;
+              overflow: hidden;
+              background: #07151d;
+              color: #fff;
+              cursor: none;
+              user-select: none;
+            }
+            body {
+              display: grid;
+              place-items: center;
+              font-family: 'Segoe UI', Arial, sans-serif;
+              text-align: center;
+            }
+            main { padding: 48px; }
+            .spinner {
+              width: 78px;
+              height: 78px;
+              margin: 0 auto 30px;
+              border: 9px solid rgba(255,255,255,.2);
+              border-top-color: #76c442;
+              border-radius: 50%;
+              animation: spin 1s linear infinite;
+            }
+            h1 { margin: 0 0 16px; font-size: clamp(36px, 5vw, 68px); }
+            p { margin: 0; color: #d9edf5; font-size: clamp(20px, 2vw, 30px); }
+            @keyframes spin { to { transform: rotate(360deg); } }
+          </style>
+        </head>
+        <body>
+          <main>
+            <div class="spinner" aria-hidden="true"></div>
+            <h1>Updating Waiver Station</h1>
+            <p>Please wait. The kiosk will restart automatically.</p>
+          </main>
+        </body>
+        </html>
+        """;
 
     private string BuildBusinessClosedHtml(
         DateTime? nextOpening,
