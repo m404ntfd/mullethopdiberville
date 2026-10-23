@@ -101,8 +101,10 @@ the controller can find it again after DHCP changes the IP. Assistance,
 open/close/reset, and kiosk-update commands retry through this saved connection.
 The controller also checks for its own updates automatically whenever it opens.
 
-Waiver Kiosk version 2.11.20, Systems Controller version 1.15.13, and Mullet Hop POS
-version 1.7.28 are the matching package releases. These versions add the POS Clear Call
+Waiver Kiosk version 2.11.21, Systems Controller version 1.15.13, and Mullet Hop POS
+version 1.7.28 are the matching package versions. Kiosk 2.11.21 adds a managed
+screensaver-video catalog with an MH Daily default and scheduled MP4 overrides.
+The prior versions add the POS Clear Call
 command, the kiosk's 15-second help-is-on-the-way notice and automatic call clearing,
 and the temporary orange clearing indicator. POS 1.7.18 forces a portrait Windows
 device surface for wristbands, rotates LilyPad's wide artwork before rasterization, and
@@ -386,8 +388,8 @@ Ctrl + Alt + M
 Enter the staff password, then select "Open Staff Settings." The menu provides:
 
 Settings use a left-side navigation rail with Connection & Updates, Date & Time,
-Appearance, Waiver Station, Business Hours, Advertisements, Remote Control, and
-Misc pages.
+Appearance, Waiver Station, Business Hours, Screensaver Videos, Advertisements,
+Remote Control, and Misc pages.
 
 * Exit Kiosk.
 * Check whether the computer can reach the live waiver website.
@@ -407,6 +409,13 @@ Misc pages.
 * Preview the Staff Closure screen or the next-business-day closed video. Press
   Esc to leave the closed-video preview and return to Staff Settings.
 * Add, edit, enable, disable, or delete scheduled JPG advertisements.
+* View the currently active screensaver video, add and edit MP4 choices, select
+  the main video, and schedule date-and-time ranges that temporarily override it.
+  Existing kiosks begin with MH Daily using the original packaged screensaver.
+  Imported MP4 files are copied into the kiosk's managed application files so
+  the source USB drive or download is no longer required. The managed folder is
+  %LOCALAPPDATA%\MulletHopWaiverKiosk\Data\Application Files\Screensaver Videos,
+  which keeps staff-added videos in the application across software updates.
 * View kiosk-manager advertisement sync status and progress, see the last
   successful sync time, or start a manual sync.
 * Preview the complete thank-you page with all ads active for the current or
@@ -526,9 +535,12 @@ WHAT THE KIOSK DOES
   thank-you screen, and both closed pages. Orange trampoline energy is balanced
   with the park's blue and lime padding colors while the center remains pale so
   form text and controls stay easy to read.
-* Plays the packaged Mullet Hop video as a full-screen, looping screensaver after
-  the staff-selected period without screen or keyboard activity. The first touch
-  or keypress clears the prior session and loads a fresh waiver starting page.
+* Plays the active Mullet Hop screensaver choice as a full-screen, looping video
+  after the staff-selected period without screen or keyboard activity. MH Daily
+  uses the original packaged video by default. Staff can maintain additional MP4
+  options and schedule date-and-time ranges that temporarily override the main
+  choice; an active screensaver switches when a schedule begins or ends. The first
+  touch or keypress clears the prior session and loads a fresh waiver starting page.
   The start prompt has a separate footer so it never covers content in the video.
   The release build reassembles and verifies the exact uploaded MP4 from the
   source parts before placing it in the installed kiosk.

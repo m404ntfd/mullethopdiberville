@@ -364,6 +364,17 @@ internal static class BusinessHoursSmokeTest
         tuesday.LastJumpTimeSold = TimeSpan.FromHours(21);
         tuesday.CloseTime = TimeSpan.FromHours(22);
 
+        var videoSettings = new KioskSettings();
+        var scheduledVideo = new KioskScreensaverVideo
+        {
+            Name = "Scheduled Test",
+            VideoFileName = "scheduled-test.mp4",
+            ScheduledOverride = true,
+            StartDateTime = new DateTime(2024, 1, 1, 12, 0, 0),
+            EndDateTime = new DateTime(2024, 1, 1, 13, 0, 0)
+        };
+        videoSettings.ScreensaverVideos.Add(scheduledVideo);
+
         var businessDate = new DateTime(2024, 1, 1);
         return BusinessHoursCalculator.Evaluate(
                    settings, businessDate.AddHours(23).AddMinutes(29)).Mode ==
@@ -396,6 +407,12 @@ internal static class BusinessHoursSmokeTest
                    RemoteCommandTypes.ClearAssistance,
                    "clear-assistance",
                    StringComparison.Ordinal) &&
+               ScreensaverVideoCatalog.SelectConfigured(
+                   videoSettings, new DateTime(2024, 1, 1, 11, 59, 0)).Name ==
+                   KioskScreensaverVideo.DefaultName &&
+               ScreensaverVideoCatalog.SelectConfigured(
+                   videoSettings, new DateTime(2024, 1, 1, 12, 30, 0)).Id ==
+                   scheduledVideo.Id &&
                new KioskSettings().BusinessClosedLeadMinutes == 30;
     }
 }
@@ -416,7 +433,6 @@ internal sealed partial class KioskForm : Form
     private const uint VkM = 0x4D;
     private const string AdvertisementVirtualHost = "mullethop-ads.local";
     private const string ScreensaverVirtualHost = "mullethop-kiosk.local";
-    private const string ScreensaverFileName = "MulletHopScreensaver.mp4";
     private const string BusinessClosedVideoFileName = "MulletHopBusinessClosed.mp4";
     private const string KioskBackgroundFileName = "MulletHopKioskBackground.jpg";
     private const string LogoUrl =
@@ -462,6 +478,7 @@ internal sealed partial class KioskForm : Form
     private bool _businessClosedVideoPlaying;
     private long? _dismissedPreOpeningTicks;
     private DateTime? _preOpeningScreensaverOpeningTime;
+    private string _activeScreensaverVideoKey = string.Empty;
     private bool _lastDarkTheme;
 
     public KioskForm(KioskSettings settings)
@@ -537,6 +554,7 @@ internal sealed partial class KioskForm : Form
         {
             await ApplyKioskThemeIfChangedAsync();
             await ApplyBusinessHoursStateAsync();
+            RefreshActiveScreensaverVideoIfChanged();
         };
         NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
         InitializeRemoteManagement();
@@ -892,6 +910,11 @@ internal sealed partial class KioskForm : Form
         core.SetVirtualHostNameToFolderMapping(
             ScreensaverVirtualHost,
             AppContext.BaseDirectory,
+            CoreWebView2HostResourceAccessKind.DenyCors);
+        Directory.CreateDirectory(KioskSettings.ScreensaverVideosDirectory);
+        core.SetVirtualHostNameToFolderMapping(
+            ScreensaverVideoFiles.CustomVideoVirtualHost,
+            KioskSettings.ScreensaverVideosDirectory,
             CoreWebView2HostResourceAccessKind.DenyCors);
 
         core.NavigationStarting += Core_NavigationStarting;
@@ -1708,10 +1731,13 @@ internal sealed partial class KioskForm : Form
             _showingBlackout || _showingScreensaver)
             return;
 
-        var videoPath = Path.Combine(AppContext.BaseDirectory, ScreensaverFileName);
-        if (!File.Exists(videoPath))
+        var selectedVideo = ScreensaverVideoCatalog.SelectPlayable(
+            _settings, GetEffectiveNow());
+        var videoPath = ScreensaverVideoFiles.GetPath(selectedVideo.VideoFileName);
+        if (videoPath is null || !File.Exists(videoPath))
         {
-            KioskLog.Write("Screensaver video is missing: " + videoPath);
+            KioskLog.Write("Screensaver video is missing: " +
+                           (videoPath ?? selectedVideo.VideoFileName));
             if (!preOpening)
             {
                 MarkActivity();
@@ -1731,12 +1757,14 @@ internal sealed partial class KioskForm : Form
         _retryTimer.Stop();
         HideBanner();
         UpdateAssistancePanelState();
-        _webView.CoreWebView2.NavigateToString(BuildScreensaverHtml());
+        _activeScreensaverVideoKey = VideoStateKey(selectedVideo);
+        _webView.CoreWebView2.NavigateToString(BuildScreensaverHtml(
+            ScreensaverVideoFiles.GetBrowserUrl(selectedVideo.VideoFileName)));
         KioskLog.Write(preOpening
             ? "The pre-opening screensaver started for the scheduled opening at " +
-                openingTime?.ToString("O") + "."
+                openingTime?.ToString("O") + " using " + selectedVideo.Name + "."
             : "Screensaver started after " + _settings.ScreensaverTimeoutMinutes +
-                " minute(s) without guest activity.");
+                " minute(s) without guest activity using " + selectedVideo.Name + ".");
     }
 
     private async Task WakeFromScreensaverAsync()
@@ -1749,14 +1777,43 @@ internal sealed partial class KioskForm : Form
 
         _preOpeningScreensaverActive = false;
         _preOpeningScreensaverOpeningTime = null;
+        _activeScreensaverVideoKey = string.Empty;
         MarkActivity();
         KioskLog.Write("Screensaver dismissed by guest activity; loading a fresh starting page.");
         await ResetForNextGuestAsync("screensaver wake", showStatus: false);
     }
 
-    private static string BuildScreensaverHtml()
+    private void RefreshActiveScreensaverVideoIfChanged()
     {
-        var videoUrl = $"https://{ScreensaverVirtualHost}/{ScreensaverFileName}";
+        if (!_showingScreensaver || !_browserReady || _webView.CoreWebView2 is null)
+            return;
+
+        var selectedVideo = ScreensaverVideoCatalog.SelectPlayable(
+            _settings, GetEffectiveNow());
+        var key = VideoStateKey(selectedVideo);
+        if (string.Equals(key, _activeScreensaverVideoKey, StringComparison.Ordinal))
+            return;
+
+        var videoPath = ScreensaverVideoFiles.GetPath(selectedVideo.VideoFileName);
+        if (videoPath is null || !File.Exists(videoPath))
+        {
+            KioskLog.Write("Scheduled screensaver video is missing: " +
+                           (videoPath ?? selectedVideo.VideoFileName));
+            return;
+        }
+
+        _activeScreensaverVideoKey = key;
+        _webView.CoreWebView2.NavigateToString(BuildScreensaverHtml(
+            ScreensaverVideoFiles.GetBrowserUrl(selectedVideo.VideoFileName)));
+        KioskLog.Write("The active screensaver changed to " + selectedVideo.Name +
+                       " because its schedule changed.");
+    }
+
+    private static string VideoStateKey(KioskScreensaverVideo video) =>
+        video.Id + "\u001f" + video.VideoFileName;
+
+    private static string BuildScreensaverHtml(string videoUrl)
+    {
         return $$"""
             <!doctype html>
             <html lang="en">
@@ -4453,6 +4510,9 @@ internal sealed class KioskSettings
     public string[] CompletionUrlKeywords { get; set; } =
         ["success", "complete", "completed", "confirmation", "finished", "done", "submitted", "thankyou", "thank-you"];
     public List<KioskAdvertisement> Advertisements { get; set; } = [];
+    public string MainScreensaverVideoId { get; set; } = KioskScreensaverVideo.DefaultId;
+    public List<KioskScreensaverVideo> ScreensaverVideos { get; set; } =
+        [KioskScreensaverVideo.CreateDefault()];
 
     public string StaffPinSalt { get; set; } = string.Empty;
     public string StaffPinHash { get; set; } = string.Empty;
@@ -4463,6 +4523,8 @@ internal sealed class KioskSettings
 
     public static string SettingsPath => Path.Combine(DataDirectory, "settings.json");
     public static string AdvertisementsDirectory => Path.Combine(DataDirectory, "Advertisements");
+    public static string ScreensaverVideosDirectory =>
+        Path.Combine(DataDirectory, "Application Files", "Screensaver Videos");
 
     public static KioskSettings? LoadOrCreate()
     {
@@ -4544,6 +4606,7 @@ internal sealed class KioskSettings
         AllowedPathPrefixes ??= ["/public/onlinewaiver/"];
         CompletionUrlKeywords ??= ["success", "complete", "done", "submitted"];
         Advertisements ??= [];
+        ScreensaverVideoCatalog.Normalize(this);
         BusinessHours ??= KioskBusinessDayHours.CreateDefaults();
         if (!Enum.IsDefined(ThemeMode)) ThemeMode = KioskThemeMode.Light;
         ScheduledDarkDays ??= [];
@@ -4862,6 +4925,11 @@ internal sealed class StaffSettingsDialog : Form
             BackColor = Color.White,
             Padding = new Padding(8)
         };
+        var screensaverVideosTab = new TabPage("Screensaver Videos")
+        {
+            BackColor = Color.White,
+            Padding = new Padding(8)
+        };
         var remoteControlTab = new TabPage("Remote Control")
         {
             BackColor = Color.White,
@@ -4874,7 +4942,7 @@ internal sealed class StaffSettingsDialog : Form
         };
         _settingsTabs.TabPages.AddRange([
             connectionTab, dateTimeTab, appearanceTab, stationTab, businessHoursTab,
-            advertisementsTab, remoteControlTab, miscTab]);
+            screensaverVideosTab, advertisementsTab, remoteControlTab, miscTab]);
         _settingsTabs.SelectedIndex = Math.Clamp(
             _lastSelectedTabIndex, 0, _settingsTabs.TabPages.Count - 1);
         _settingsTabs.SelectedIndexChanged += (_, _) =>
@@ -5610,6 +5678,14 @@ internal sealed class StaffSettingsDialog : Form
             Dock = DockStyle.Fill
         };
         advertisementsTab.Controls.Add(advertisementManager);
+
+        var screensaverVideoManager = new ScreensaverVideoManagerControl(
+            _settings,
+            activePreview.HasValue ? SelectedDateTime : null)
+        {
+            Dock = DockStyle.Fill
+        };
+        screensaverVideosTab.Controls.Add(screensaverVideoManager);
 
         var remoteManagement = new RemoteManagementSettingsControl(_settings)
         {
